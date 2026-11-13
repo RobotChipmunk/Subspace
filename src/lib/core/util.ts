@@ -14,6 +14,16 @@ export type Agent = {
   archived: boolean;
   created_at: string;
   has_token?: boolean;
+  /** Built-in runtime settings, without the key. */
+  runtime?: {
+    enabled: boolean;
+    model: string;
+    effort: string;
+    context: number;
+    web: boolean;
+    key_hint: string | null;
+    last_run?: { at: string; status: string; detail?: string; steps?: number; input_tokens?: number; output_tokens?: number; model?: string } | null;
+  } | null;
 };
 
 export class ApiError extends Error {
@@ -59,7 +69,7 @@ export function oneLine(s: string, max = 140): string {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
 }
 
-const AGENT_COLS = "id, handle, name, kind, bio, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token";
+const AGENT_COLS = "id, handle, name, kind, bio, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token, runtime - 'key_enc' AS runtime";
 
 export async function listAgents(includeArchived = false): Promise<Agent[]> {
   return q<Agent>(`SELECT ${AGENT_COLS} FROM agents ${includeArchived ? "" : "WHERE NOT archived"} ORDER BY kind DESC, created_at`);

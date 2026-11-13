@@ -328,7 +328,9 @@ const contextChild = (k: { path: string; title: string; summary: string; child_c
 // ---------- Delta feed ----------
 
 export async function changes(agent: Agent, opts: { since?: number; limit?: number; peek?: boolean } = {}) {
-  const cursor = opts.since ?? agent.cursor_seq;
+  // Read the cursor fresh: a long-lived caller (the built-in runtime) holds an agent object for a whole run.
+  const saved = await q1<{ cursor_seq: number }>("SELECT cursor_seq FROM agents WHERE id = $1", [agent.id]);
+  const cursor = opts.since ?? saved?.cursor_seq ?? agent.cursor_seq;
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
   const rows = await q<{ seq: number; ts: string; type: string; entity_id: string; summary: string; mentions: string[]; data: Record<string, unknown>; handle: string }>(
     `SELECT e.seq, e.ts, e.type, e.entity_id, e.summary, e.mentions, e.data, a.handle

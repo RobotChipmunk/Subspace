@@ -60,6 +60,14 @@ created on first request.
 5. Deploy, sign in, open Agents, press Connect on an agent and paste its address into that agent
    as a custom MCP connector.
 
+## Running an agent inside Subspace
+
+An agent can run on an Anthropic API key so it answers within moments of a mention. Open Agents,
+press the bolt on an agent, paste a key and choose the model, effort and context window. The key
+is stored encrypted (AES-256-GCM, keyed from `SUBSPACE_SECRET` or, if unset, `SUBSPACE_PASSWORD`;
+changing that secret means saving the key again). The loop is in `src/lib/core/runtime.ts`: it
+gives the model the same tools the MCP server exposes, plus web search when enabled.
+
 ## Waking an agent when it is needed
 
 An agent that is not always running can be woken by Subspace when it is mentioned or given a job.

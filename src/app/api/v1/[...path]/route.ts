@@ -3,6 +3,7 @@ import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { archiveNode, breadcrumb, children, createNode, getNode, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
 import { saveMedia } from "@/lib/core/media";
+import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, getThread, listFeed } from "@/lib/core/posts";
 import { createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
@@ -13,6 +14,8 @@ import { ApiError, listAgents, setSetting, timezone, type Agent } from "@/lib/co
  * core functions as the MCP server, so people and agents always see the same system.
  */
 export const dynamic = "force-dynamic";
+// A mention can start a built-in agent run that finishes after the response is sent.
+export const maxDuration = 300;
 
 type Ctx = { actor: Agent; url: URL; body: any; req: Request };
 type Handler = (c: Ctx, ...args: string[]) => Promise<unknown>;
@@ -66,6 +69,8 @@ const routes: [string, RegExp, Handler][] = [
 
   ["POST", /^agents$/, ({ actor, body }) => ownerOnly(actor, () => createAgent(actor, body))],
   ["PATCH", /^agents\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => updateAgent(actor, id, body))],
+  ["PATCH", /^agents\/([^/]+)\/runtime$/, ({ actor, body }, id) => ownerOnly(actor, () => configureRuntime(id, body))],
+  ["GET", /^runtime\/options$/, async () => ({ models: MODELS, efforts: EFFORTS, contexts: CONTEXTS, env_key: !!process.env.ANTHROPIC_API_KEY })],
   ["POST", /^agents\/([^/]+)\/token$/, ({ actor }, id) => ownerOnly(actor, async () => ({ token: await issueToken(id) }))],
 
   ["POST", /^media$/, async ({ actor, req }) => {

@@ -58,8 +58,14 @@ async function fire(handle: string, reason: string) {
   }
 }
 
-/** Called for every logged event. Wakes mentioned agents and the assignee of a new job. */
+/**
+ * Called for every logged event. Wakes mentioned agents and the assignee of a new job: agents that
+ * run inside Subspace start working at once; others are called on their wake hook if they have one.
+ */
 export function wakeFor(e: { actor: string; type: string; summary: string; mentions?: string[]; data?: Record<string, unknown> }) {
+  const mayTarget = (e.mentions?.length ?? 0) > 0 || e.type === "job.created";
+  if (!mayTarget) return;
+  const startedAt = Date.now();
   const run = async () => {
     const targets = new Set(e.mentions ?? []);
     if (e.type === "job.created" && typeof e.data?.assigned_to === "string") {
@@ -68,9 +74,12 @@ export function wakeFor(e: { actor: string; type: string; summary: string; menti
     }
     const self = await q1<{ handle: string }>("SELECT handle FROM agents WHERE id = $1", [e.actor]);
     if (self) targets.delete(self.handle);
-    await Promise.all([...targets].filter(wakeConfigured).map((h) => fire(h, `${e.type} — ${e.summary}`.slice(0, 300))));
+    if (!targets.size) return;
+    const reason = `${e.type} — ${e.summary}`.slice(0, 300);
+    const { builtInHandles, runBuiltIn } = await import("./runtime");
+    const builtIn = await builtInHandles([...targets]);
+    await Promise.all([...targets].map((h) => (builtIn.includes(h) ? runBuiltIn(h, reason, startedAt) : wakeConfigured(h) ? fire(h, reason) : null)));
   };
-  if (!Object.keys(process.env).some((k) => k.startsWith("SUBSPACE_WAKE_"))) return;
   // Finish after the response is sent when running inside a request; otherwise run detached.
   import("next/server")
     .then(({ after }) => after(run))
