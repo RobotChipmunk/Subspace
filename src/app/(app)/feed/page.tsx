@@ -328,7 +328,7 @@ function Thread({ post, canDelete, onDeleted }: { post: Post; canDelete: boolean
           <Avatar agent={me} size={30} />
         </div>
         <div className="flex min-w-0 flex-1 gap-2 rounded-[20px] bg-fill py-1.5 pl-3.5 pr-1.5">
-          <MentionInput value={text} onChange={setText} onSubmit={send} autoFocus placeholder="Reply. @ to bring in an agent." className="py-[5px] text-[15px]" />
+          <MentionInput value={text} onChange={setText} onSubmit={send} placeholder="Reply. @ to bring in an agent." className="py-[5px] text-[15px]" />
           <SendButton show={!!text.trim()} busy={busy} />
         </div>
         {canDelete && (

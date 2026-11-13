@@ -131,6 +131,9 @@ async function run(profile) {
     await settle(1200);
     await page.getByText("It strengthens it.").waitFor({ timeout: 5000 });
     const reply = page.getByPlaceholder("Reply. @ to bring in an agent.");
+    // opening a conversation is for reading: the keyboard must only appear when the reply box is tapped
+    const focused = await page.evaluate(() => ["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? ""));
+    if (focused) fail("feed thread: opening the conversation put the cursor in a text field, which raises the keyboard on a phone or tablet");
     await reply.scrollIntoViewIfNeeded();
     await settle(300);
     await reachable(reply, "thread reply box");
