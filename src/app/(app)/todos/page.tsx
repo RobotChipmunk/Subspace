@@ -163,10 +163,13 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
                       <path d="M2.5 6.2l2.4 2.4 4.6-5" />
                     </svg>
                   </button>
-                  <div onClick={() => !dragging.current && onOpen(r.id)} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-[9px]">
-                    <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>{r.title}</span>
-                    {r.ai_unseen && <span title="An agent made changes" className="h-2 w-2 flex-none rounded-full bg-accent shadow-[0_0_0_4px_var(--accent-soft)]" />}
-                    {r.has_notes && <AlignLeft size={15} className="flex-none text-ink3" />}
+                  <div onClick={() => !dragging.current && onOpen(r.id)} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 py-[9px]">
+                    <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>
+                      {r.title}
+                      {/* an agent changed this task since you last opened it: the dot sits right after the words */}
+                      {r.ai_unseen && <span title="An agent made changes" aria-label="An agent made changes" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
+                    </span>
+                    {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
                   </div>
                 </Reorder.Item>
               ))}

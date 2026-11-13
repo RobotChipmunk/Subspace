@@ -187,7 +187,8 @@ async function run(profile) {
       await f.scrollIntoViewIfNeeded();
       const label = (await f.innerText()).split("\n")[0].trim();
       await press(f);
-      await settle(450);
+      // the list cross-fades to the new folder; wait for the heading to change rather than a fixed time
+      await page.locator("h1", { hasText: label }).first().waitFor({ timeout: 4000 }).catch(() => {});
       const h = (await page.locator("h1").first().innerText()).trim();
       if (h !== label) fail(`todos: tapping "${label}" showed "${h}"`);
     }
@@ -478,7 +479,8 @@ async function run(profile) {
 
 (async () => {
   require("fs").mkdirSync(OUT, { recursive: true });
-  for (const p of PROFILES) {
+  // PROFILE=phone-dark runs one screen size on its own
+  for (const p of PROFILES.filter((x) => !process.env.PROFILE || x.name === process.env.PROFILE)) {
     const before = failures.length;
     await run(p).catch((e) => failures.push(`[${p.name}] run aborted: ${String(e.message).split("\n")[0]}`));
     console.log(`${p.name}: ${failures.length - before} problem(s)`);
