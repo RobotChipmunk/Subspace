@@ -77,7 +77,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read",
-    description: "Full content of up to 20 things by id: a post with its whole thread, a todo with notes, a context node with body (id or /context/path), or a tracker brief (id or slug).",
+    description: "Full content of up to 20 things by id: a post with its whole thread, a todo with notes, a context node or page with its body (id or /context/path; blocks come back as their JSON), or a tracker brief (id or slug).",
     inputSchema: obj({ ids: { type: "array", items: { type: "string" }, description: "Ids or paths." }, after: str("For long threads: more_replies_after from the previous read.") }, ["ids"]),
     readOnly: true,
     run: (_a, { ids, after }) => read(Array.isArray(ids) ? ids : [ids], { after }),
@@ -121,7 +121,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "reply",
-    description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail to your own posts. Up to 2000 characters.",
+    description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail to your own posts. Up to 2000 characters. For a longer or structured answer, make a page with page_write and pass its id as page: the reply then carries a card that opens it.",
     inputSchema: obj({ post_id: str("Any post id in the thread."), body: str("Your reply."), page: str("Optional. Id of a page you made that holds the full answer; shown as a card under the reply.") }, ["post_id", "body"]),
     run: async (a, { post_id, body, page }) => {
       const p = await createReply(a, post_id, body, page);
@@ -140,8 +140,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_add",
-    description: "Add a task to the owner's list. Title starts with a verb and fits on one line.",
-    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes.") }, ["title"]),
+    description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions).",
+    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks.") }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
       return { id: t.id, scope: t.scope, date: t.date };
@@ -149,14 +149,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_update",
-    description: "Change a task: complete it, rename it, move it, or edit its notes. Your note edits are marked as yours for the owner to review.",
+    description: "Change a task: complete it, rename it, move it, or edit its notes. A todo's notes are a page: when asked to find, compare or research something for a task, write the answer here with notes_append as markdown with blocks (cards, map, table, callout, sources and so on). Your text is marked as yours for the owner to review.",
     inputSchema: obj(
       {
         id: str("Todo id."),
         title: str("New title."),
         done: { type: "boolean" },
         view: str("Move to: today, week, weekend, next_week, backlog or YYYY-MM-DD."),
-        notes_append: str("Markdown to add at the end of the notes."),
+        notes_append: str("Markdown to add at the end of the notes. May contain blocks: fenced code blocks whose language is the block type and whose body is JSON."),
         notes_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement markdown.") }, required: ["find", "replace"] },
       },
       ["id"],
@@ -169,7 +169,7 @@ export const TOOLS: Tool[] = [
   {
     name: "context_write",
     description:
-      "Create or update a node in shared long-term memory. Without id it creates a node under parent. With id it updates: set title/summary/body, make a small edit with body_append or body_replace, or move it with parent. Search before creating.",
+      "Create or update a note or folder in shared long-term memory (for a finished document with blocks, use page_write instead). Without id it creates a node under parent. With id it updates: set title/summary/body, make a small edit with body_append or body_replace, or move it with parent. Search before creating.",
     inputSchema: obj({
       id: str("Node id or /context/path to update. Omit to create."),
       parent: str('Parent node id or path. Use "" or "/" for the top level.'),
