@@ -99,10 +99,11 @@ export async function fetchMeta(url: string): Promise<LinkMeta> {
       if (/<\/head>/i.test(html)) break;
     }
     reader.cancel().catch(() => {});
-    const image = metaTag(html, "og:image") || metaTag(html, "twitter:image");
+    // many shops give the picture as http:// or //host/path; the same file is served over https
+    const image = metaTag(html, "og:image:secure_url") || metaTag(html, "og:image") || metaTag(html, "twitter:image");
     let abs: string | undefined;
     try {
-      abs = image ? new URL(image, at).toString() : undefined;
+      abs = image ? new URL(image, at).toString().replace(/^http:\/\//, "https://") : undefined;
     } catch {}
     return {
       title: metaTag(html, "og:title") || decode(html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "") || undefined,
