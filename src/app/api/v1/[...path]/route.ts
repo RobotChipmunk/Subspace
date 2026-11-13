@@ -4,7 +4,7 @@ import { archiveNode, breadcrumb, children, createNode, getNode, updateNode } fr
 import { search } from "@/lib/core/discover";
 import { saveMedia } from "@/lib/core/media";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
-import { clearFeed, createPost, createReply, deletePost, getThread, listFeed } from "@/lib/core/posts";
+import { createPost, createReply, deletePost, getThread, listFeed } from "@/lib/core/posts";
 import { createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
 import { ApiError, listAgents, setSetting, timezone, type Agent } from "@/lib/core/util";
@@ -33,7 +33,6 @@ const routes: [string, RegExp, Handler][] = [
   ["GET", /^feed$/, async ({ url }) => ({
     posts: await listFeed({ channel: url.searchParams.get("channel") ?? undefined, before: url.searchParams.get("before") ?? undefined, tracker: url.searchParams.get("tracker") ?? undefined, limit: 20 }),
   })],
-  ["DELETE", /^feed$/, ({ actor, url }) => clearFeed(actor, url.searchParams.get("channel") === "agents" ? "agents" : "feed")],
   ["POST", /^posts$/, ({ actor, body }) => createPost(actor, body)],
   ["GET", /^posts\/([^/]+)$/, (_c, id) => getThread(id)],
   ["DELETE", /^posts\/([^/]+)$/, async ({ actor }, id) => (await deletePost(actor, id), { ok: true })],
