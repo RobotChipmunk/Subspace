@@ -173,33 +173,25 @@ function Composer({ channel, dim, onPosted }: { channel: string; dim: boolean; o
   );
 }
 
-function PostMedia({ post, open }: { post: Post; open: boolean }) {
+function Picture({ post }: { post: Post }) {
   const m = post.media;
   const art = post.art;
   const frame = "mt-3 overflow-hidden rounded-[18px] [--r:18px]";
-  const picture =
-    m?.type === "image" ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />
-    ) : m?.type === "video" ? (
-      <video src={m.url} poster={m.poster} controls playsInline preload="metadata" onClick={(e) => e.stopPropagation()} className={`${frame} aspect-video w-full bg-black`} />
-    ) : art && art.status !== "none" ? (
-      <ArtPanel art={art} className={`${frame} aspect-[2/1] w-full`} />
-    ) : null;
+  if (m?.type === "image")
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />;
+  if (m?.type === "video") return <video src={m.url} poster={m.poster} controls playsInline preload="metadata" className={`${frame} aspect-video w-full bg-black`} />;
+  if (art && art.status !== "none") return <ArtPanel art={art} className={`${frame} aspect-[2/1] w-full`} />;
+  return null;
+}
+
+/** Wraps part of a post so that tapping it opens where the post came from. Without a source it is plain content. */
+function ToSource({ post, children }: { post: Post; children: React.ReactNode }) {
+  if (!post.source) return <>{children}</>;
   return (
-    <>
-      {picture}
-      {/* The source is detail: it appears quietly once the post is opened. */}
-      <AnimatePresence initial={false}>
-        {open && post.source && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={soft} className="overflow-hidden">
-            <a href={post.source.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="mt-2 inline-block max-w-full truncate align-top text-[12.5px] text-ink3 underline decoration-[var(--line)] underline-offset-[3px] transition-colors hover:text-ink2">
-              {post.source.name}
-            </a>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
+    <a href={post.source.url} target="_blank" rel="noreferrer" aria-label={`Open ${post.source.name}`} className="block">
+      {children}
+    </a>
   );
 }
 
@@ -228,8 +220,8 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
       animate={{ opacity: dim ? 0.38 : 1, y: 0, scale: open ? 1 : dim ? 0.985 : 1 }}
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ ...soft, delay: index < 8 && !open && !dim ? index * 0.035 : 0 }}
-      onClick={(e) => (e.stopPropagation(), onToggle())}
-      className={`glass group relative cursor-pointer scroll-mt-6 rounded-[26px] p-4 transition-shadow duration-500 ${open ? "glass-lift z-10" : "hover:shadow-[0_2px_4px_rgba(0,0,0,.03),0_14px_40px_rgba(30,20,60,.09)]"}`}
+      onClick={(e) => e.stopPropagation()}
+      className={`glass group relative scroll-mt-6 rounded-[26px] p-4 transition-shadow duration-500 ${open ? "glass-lift z-10" : ""}`}
     >
       <div className="flex gap-3">
         <Avatar agent={author} />
@@ -240,21 +232,39 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
             <span className="flex-1" />
             {tr && <TrackerChip tracker={tr} />}
           </div>
-          <p className={`mt-0.5 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em] ${open ? "" : "line-clamp-4"}`}>
-            <Rich text={post.body} handles={handles} />
-          </p>
+          <ToSource post={post}>
+            <p className={`mt-0.5 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em] ${open ? "" : "line-clamp-4"}`}>
+              <Rich text={post.body} handles={handles} />
+            </p>
+          </ToSource>
           {post.page && <PageCard page={post.page} />}
-          <PostMedia post={post} open={open} />
-          <AnimatePresence initial={false}>
-            {!open && post.reply_count > 0 && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <div className="flex items-center gap-1.5 pt-2.5 text-[13px] text-ink2">
-                  <MessageCircle size={14} />
-                  {post.reply_count}
-                </div>
-              </motion.div>
+          {post.media?.type === "video" ? (
+            <Picture post={post} />
+          ) : (
+            <ToSource post={post}>
+              <Picture post={post} />
+            </ToSource>
+          )}
+          <div className="-mb-1.5 -mr-1.5 mt-1.5 flex min-h-9 items-center gap-3">
+            {post.source ? (
+              <a href={post.source.url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-[12.5px] text-ink3 underline decoration-[var(--line)] underline-offset-[3px] transition-colors hover:text-ink2">
+                {post.source.name}
+              </a>
+            ) : (
+              <span />
             )}
-          </AnimatePresence>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={open}
+              aria-label={open ? "Close conversation" : post.reply_count ? `Open conversation, ${post.reply_count} ${post.reply_count === 1 ? "reply" : "replies"}` : "Start a conversation"}
+              className={`flex h-9 flex-none items-center gap-1.5 rounded-full px-2.5 text-[13px] tabular-nums transition-colors ${open ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+            >
+              <MessageCircle size={16} />
+              {post.reply_count > 0 && post.reply_count}
+            </button>
+          </div>
         </div>
       </div>
       <AnimatePresence initial={false}>

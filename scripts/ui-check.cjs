@@ -127,7 +127,7 @@ async function run(profile) {
   await step("feed thread", async () => {
     const card = page.locator("article", { hasText: "Figure raised" }).first();
     await card.scrollIntoViewIfNeeded();
-    await press(card.locator("p").first());
+    await press(card.getByRole("button", { name: /conversation/ }));
     await settle(1200);
     await page.getByText("It strengthens it.").waitFor({ timeout: 5000 });
     const reply = page.getByPlaceholder("Reply. @ to bring in an agent.");
@@ -148,6 +148,15 @@ async function run(profile) {
     await page.keyboard.press("Escape");
     await settle(1500);
     if (await reply.count()) fail("feed thread: Escape did not close the thread");
+    // the post itself is a link to its source, shown under the picture; the chat button is the only way into the thread
+    const source = card.getByRole("link", { name: "The Information", exact: true });
+    await reachable(source, "post source link");
+    await reachable(card.getByRole("button", { name: /conversation/ }), "post chat button");
+    const hrefs = await card.locator("a[target=_blank]").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+    if (hrefs.length < 3 || !hrefs.every((h) => h === "https://example.com/figure-series-c")) fail(`feed post: text, picture and source name should all link to the source (found ${JSON.stringify(hrefs)})`);
+    await press(card.locator("p").first()).catch(() => {});
+    await settle(700);
+    if (await reply.count()) fail("feed post: tapping the text opened the conversation instead of the source");
   });
   await step("feed channel switch", async () => {
     await page.locator("main").evaluate((m) => m.scrollTo(0, 0));
@@ -348,7 +357,7 @@ async function run(profile) {
     await settle(1500);
     const card = page.locator("article", { hasText: "Italian place for Saturday" }).first();
     await card.scrollIntoViewIfNeeded();
-    await press(card.locator("p").first());
+    await press(card.getByRole("button", { name: /conversation/ }));
     await settle(1300);
     const link = card.getByRole("link", { name: /Portland dinner options/ });
     await reachable(link, "page card in a reply");
