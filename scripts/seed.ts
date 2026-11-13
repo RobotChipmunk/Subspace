@@ -3,6 +3,7 @@ import { createAgent } from "../src/lib/core/agents";
 import { openJobs, submitJob } from "../src/lib/core/art";
 import { createNode } from "../src/lib/core/context";
 import { createPost, createReply } from "../src/lib/core/posts";
+import { setModule } from "../src/lib/core/rail";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
 import { createTracker } from "../src/lib/core/trackers";
 import { agentById, ownerAgent } from "../src/lib/core/util";
@@ -123,6 +124,30 @@ async function main() {
   const find = await createTodo(owner, { title: "Find a restaurant in Portland", view: "today" });
   await updateTodo(owner, find.id, { notes: "@claude please look for this for us. Italian, with fish and plenty of dishes without cheese." });
   await updateTodo(claude, find.id, { notes_append: ["## Options", block("cards", { layout: "list", items: places.slice(0, 3).map(card) })].join("\n\n") });
+  // ---- The rail: timely things to know ----
+  const inAWeek = new Date(Date.now() + 6 * 86400_000).toISOString().slice(0, 10);
+  await setModule(atlas, {
+    key: "portland-hotel",
+    label: "Today · check-in 3 pm",
+    title: "Residence Inn, Pearl District",
+    subtitle: "1150 NW 9th Ave, Portland",
+    blocks: [
+      { type: "facts", items: [{ label: "Check-in", value: "Fri 13 Nov, from 3:00 pm" }, { label: "Check-out", value: "Sun 15 Nov, by 11:00 am" }, { label: "Confirmation", value: "84127763" }, { label: "Room", value: "One-bedroom suite, king" }] },
+      { type: "callout", tone: "info", text: "Parking is valet only, $55 a night. The garage on NW 10th is $18." },
+    ],
+    actions: [{ label: "Directions", url: "https://maps.apple.com/?q=1150+NW+9th+Ave+Portland" }, { label: "Call", url: "tel:+15032201339" }],
+    page: dinner.id,
+    show_until: inAWeek,
+    priority: 5,
+  });
+  await setModule(atlas, {
+    key: "roof-inspection",
+    label: "Monday 9 am",
+    title: "Roofer comes to inspect",
+    blocks: [{ type: "timeline", items: [{ when: "9:00 am", title: "Arrives", text: "Needs side-gate access" }, { when: "10:00 am", title: "Written quote by email" }] }],
+    show_until: inAWeek,
+  });
+
   console.log("Seeded.");
   process.exit(0);
 }

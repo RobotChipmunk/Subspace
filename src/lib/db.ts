@@ -217,6 +217,27 @@ const MIGRATIONS: string[] = [
    ALTER TABLE context_nodes ADD COLUMN cover text;
    CREATE INDEX context_pages ON context_nodes (created_at DESC) WHERE kind = 'page' AND NOT archived;
    ALTER TABLE posts ADD COLUMN page_id text`,
+  // The rail: small, time-bound modules agents show beside everything else ("your hotel today").
+  `CREATE TABLE rail_modules (
+     id text PRIMARY KEY,
+     key text NOT NULL,
+     author text NOT NULL,
+     title text NOT NULL,
+     subtitle text NOT NULL DEFAULT '',
+     label text NOT NULL DEFAULT '',
+     image text,
+     blocks jsonb NOT NULL DEFAULT '[]',
+     actions jsonb NOT NULL DEFAULT '[]',
+     page_id text,
+     priority int NOT NULL DEFAULT 0,
+     show_from timestamptz NOT NULL DEFAULT now(),
+     show_until timestamptz NOT NULL,
+     dismissed_at timestamptz,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now()
+   );
+   CREATE UNIQUE INDEX rail_modules_key ON rail_modules (author, key);
+   CREATE INDEX rail_modules_active ON rail_modules (show_until) WHERE dismissed_at IS NULL`,
 ];
 
 async function migrate() {

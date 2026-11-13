@@ -99,9 +99,60 @@ async function run(profile) {
   await page.keyboard.press("Enter");
   await page.waitForURL("**/feed");
   await settle(1500);
+  if (process.env.DATABASE_URL) {
+    // an earlier screen size dismissed a rail module; bring it back so every size sees the same thing
+    const { Client } = require("pg");
+    const db = new Client({ connectionString: process.env.DATABASE_URL });
+    await db.connect();
+    await db.query("UPDATE rail_modules SET dismissed_at = NULL");
+    await db.end();
+    await page.reload();
+    await settle(1500);
+  }
 
   // Navigation is reachable everywhere.
   for (const label of ["Feed", "Todos", "Context", "Following", "Agents"]) await reachable(page.getByRole("link", { name: label, exact: true }), `nav ${label}`);
+
+  // ---------- The rail ----------
+  const wide = profile.viewport.width >= 1100;
+  await step("rail", async () => {
+    const toggle = page.getByRole("button", { name: /^Now/ });
+    await reachable(toggle, "rail button");
+    const hotel = page.locator('[data-rail-module="portland-hotel"]');
+    if (wide) {
+      await hotel.waitFor({ timeout: 6000 });
+      // docked: the content must make room for it rather than sit underneath
+      const overlap = await page.evaluate(() => {
+        const rail = document.querySelector('aside[aria-label="Now"]').getBoundingClientRect();
+        return [...document.querySelectorAll("main article, main form, main h1")].some((el) => el.getBoundingClientRect().right > rail.left + 1);
+      });
+      if (overlap) fail("rail: page content runs underneath the docked rail");
+    } else {
+      if (await hotel.count()) fail("rail: modules are showing before the rail is opened on a narrow screen");
+      await press(toggle);
+      await hotel.waitFor({ timeout: 6000 });
+      await settle(700);
+    }
+    await reachable(hotel.getByText("Residence Inn, Pearl District"), "rail module title");
+    await reachable(hotel.getByText("84127763"), "rail module detail");
+    await reachable(hotel.getByRole("link", { name: /Directions/ }), "rail module action");
+    await reachable(hotel.getByRole("link", { name: "Open page" }), "rail module page link");
+    const count = await page.locator("[data-rail-module]").count();
+    if (count !== 2) fail(`rail: ${count} modules shown, expected 2`);
+    await noSidewaysScroll("rail");
+    await shot("rail");
+    // dismissing one removes it; hiding the rail gives the space back
+    await press(page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
+    await settle(900);
+    if ((await page.locator("[data-rail-module]").count()) !== 1) fail("rail: dismissing a module did not remove it");
+    await press(page.getByRole("button", { name: "Hide the rail" }));
+    await settle(900);
+    if (await hotel.count()) fail("rail: hiding the rail left its modules on screen");
+    if (wide) {
+      await press(toggle);
+      await hotel.waitFor({ timeout: 4000 });
+    }
+  });
 
   // ---------- Feed ----------
   await step("feed layout", async () => {

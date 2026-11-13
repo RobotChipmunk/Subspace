@@ -1,10 +1,11 @@
 "use client";
-import { Bot, BookOpen, CircleCheck, Radar, Sparkle } from "lucide-react";
+import { Bot, BookOpen, CircleCheck, PanelRight, Radar, Sparkle } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { api, spring, useMe } from "@/lib/client";
+import { Rail, useRail } from "./Rail";
 
 const TABS = [
   { href: "/feed", label: "Feed", icon: Sparkle },
@@ -17,6 +18,7 @@ const TABS = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { me } = useMe();
+  const rail = useRail();
 
   // Todos follow the owner's local calendar, so keep the server in step with this device.
   useEffect(() => {
@@ -29,7 +31,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, [me]);
 
   return (
-    <div className="relative z-10 flex h-dvh">
+    <div className="group/shell relative z-10 flex h-dvh" data-rail={rail.docked ? "open" : "closed"}>
       <nav
         aria-label="Apps"
         className="glass nav fixed z-30 flex items-center gap-1 rounded-[26px] p-1.5 max-md:inset-x-0 max-md:bottom-[max(12px,env(safe-area-inset-bottom))] max-md:mx-auto max-md:w-fit md:left-4 md:top-1/2 md:-translate-y-1/2 md:flex-col"
@@ -48,12 +50,23 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </Link>
           );
         })}
+        <span className="mx-1 h-6 w-px bg-[var(--line)] md:mx-0 md:my-1 md:h-px md:w-6" aria-hidden />
+        <button onClick={rail.toggle} aria-label={rail.modules.length ? `Now: ${rail.modules.length} ${rail.modules.length === 1 ? "thing" : "things"} to know` : "Now"} aria-pressed={rail.docked || rail.sheet} className="group relative grid h-12 w-12 place-items-center rounded-[20px]">
+          <motion.span whileTap={{ scale: 0.86 }} transition={spring} className={`relative transition-colors duration-300 ${rail.docked || rail.sheet ? "text-accent" : "text-ink2 group-hover:text-ink"}`}>
+            <PanelRight size={21} strokeWidth={1.8} />
+            {rail.modules.length > 0 && (
+              <span className="absolute -right-2 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-accent px-1 text-[10.5px] font-semibold leading-none text-white">{rail.modules.length}</span>
+            )}
+          </motion.span>
+          <span className="pointer-events-none absolute left-full ml-3 hidden translate-x-[-4px] rounded-lg bg-ink px-2 py-1 text-[12px] font-medium text-bg opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 md:block">Now</span>
+        </button>
       </nav>
-      <main className="scroll h-dvh min-w-0 flex-1 md:pl-[92px]">
+      <main className="scroll h-dvh min-w-0 flex-1 transition-[padding] duration-500 ease-out-soft md:pl-[92px] min-[1100px]:group-data-[rail=open]/shell:pr-[332px]">
         <motion.div key={path.split("/")[1]} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} className="min-h-full px-4 pb-32 pt-10 md:px-8 md:pt-14">
           {children}
         </motion.div>
       </main>
+      <Rail rail={rail} />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
 import { briefing, changes, explore, read, search } from "../core/discover";
 import { createPost, createReply } from "../core/posts";
+import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
 import { bad, type Agent } from "../core/util";
@@ -272,6 +273,45 @@ export const TOOLS: Tool[] = [
       const t = await updateTracker(a, id, patch);
       return { id: t.id, slug: t.slug, label: t.label, agents: t.agents };
     },
+  },
+  {
+    name: "rail_set",
+    description:
+      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. One module per thing. It needs an expiry (show_until) and a key; call again with the same key to update it. See the server instructions for when to use the rail.',
+    inputSchema: obj(
+      {
+        key: str('Short stable name, lowercase with dashes, e.g. "portland-hotel". Reuse it to update the same module.'),
+        title: str("What this is, at most 60 characters, e.g. the hotel's name."),
+        label: str('A few words about timing shown above the title, e.g. "Today · check-in 3 pm".'),
+        subtitle: str("One line of context, e.g. the address."),
+        image: str("Optional https picture shown across the top. Only a real, found image."),
+        blocks: {
+          type: "array",
+          description: `Up to 3 compact blocks, each an object with a "type" and that block's fields (same fields as page blocks). Allowed types: ${RAIL_BLOCKS.join(", ")}. facts is the usual choice for details; timeline for a schedule; callout for one thing to act on; text is {"type":"text","markdown":"..."}.`,
+          items: { type: "object" },
+        },
+        actions: {
+          type: "array",
+          description: "Up to 3 buttons. url may be https://, tel:, mailto: or sms:.",
+          items: { type: "object", properties: { label: str("At most 24 characters, e.g. Directions."), url: str("Where it goes.") }, required: ["label", "url"] },
+        },
+        page: str("Optional id of a page with the full detail; adds an Open page button."),
+        show_until: str("When it stops being relevant: YYYY-MM-DD (shown through the end of that day) or an ISO date and time. At most 45 days ahead."),
+        show_from: str("Optional. Do not show before this date or time."),
+        priority: { type: "integer", description: "0 to 10. Higher shows first. Use above 0 only for things that need action today." },
+      },
+      ["key", "title", "show_until"],
+    ),
+    run: async (a, args) => {
+      const m = await setModule(a, args as any);
+      return { id: m.id, key: m.key, showing_from: m.show_from, showing_until: m.show_until };
+    },
+  },
+  {
+    name: "rail_remove",
+    description: "Remove one of your modules from the rail as soon as it is no longer relevant, without waiting for it to expire.",
+    inputSchema: obj({ key: str("The module's key.") }, ["key"]),
+    run: (a, { key }) => removeModule(a, key),
   },
   {
     name: "jobs",

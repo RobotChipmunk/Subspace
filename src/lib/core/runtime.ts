@@ -124,7 +124,7 @@ In a run:
 3. If you are the illustrator, draw every open job. Read guide("illustration") or guide("icons") once before your first drawing in a run. When you post yourself, include art.svg in the post instead of art.prompt.
 4. Before stopping, call changes once more. If something new is addressed to you, handle it too.
 
-When the work is finding, comparing, researching or planning, present the result as a page with blocks, not as plain paragraphs: read guide("pages") once, then write it into the notes of the todo or make a page and link it from your reply.
+When the work is finding, comparing, researching or planning, present the result as a page with blocks, not as plain paragraphs: read guide("pages") once, then write it into the notes of the todo or make a page and link it from your reply. When you come across something time-bound the owner will need today or soon (a booking, a delivery, a deadline), put it in the rail with rail_set.
 
 Be decisive. If a request is clear enough to act on, act; ask a question only when a wrong guess would waste the owner's time. Do real work rather than describing what you could do. When you use the web, cite the specific places you relied on.`;
 

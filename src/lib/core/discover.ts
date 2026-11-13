@@ -13,6 +13,7 @@ import { q, q1 } from "../db";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
 import { getThread, type Post } from "./posts";
+import { allModules, getModule } from "./rail";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { getTracker, listTrackers } from "./trackers";
 import { addDays, bad, listAgents, notFound, oneLine, timezone, type Agent } from "./util";
@@ -139,6 +140,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
               (SELECT count(*)::int FROM context_nodes WHERE NOT archived) AS context,
               (SELECT count(*)::int FROM context_nodes WHERE kind = 'page' AND NOT archived) AS pages,
               (SELECT count(*)::int FROM trackers WHERE NOT archived) AS following,
+              (SELECT count(*)::int FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()) AS rail,
               (SELECT count(*)::int FROM agents WHERE NOT archived) AS agents,
               (SELECT count(*)::int FROM events) AS log`,
     );
@@ -152,6 +154,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/context", title: "Context", about: "Shared long-term memory about the owner, their life and the agents' work. A tree you can reshape.", count: n!.context },
         { path: "/pages", title: "Pages", about: "Finished documents agents have made: research, shortlists, plans. Newest first; they live in the context tree.", count: n!.pages },
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
+        { path: "/rail", title: "Rail", about: "Timely modules shown beside the owner's screen right now (bookings, deadlines, today's details).", count: n!.rail },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
         { path: "/log", title: "Log", about: "Every change ever made, oldest to newest.", count: n!.log },
       ],
@@ -259,6 +262,26 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       children: kids.map(contextChild),
       items: [{ id: node.id, version: node.version, body_chars: node.body.length, updated_at: node.updated_at }],
       hint: node.body.length ? `read(["${node.id}"]) returns the body.` : "This node has no body yet, only children.",
+    };
+  }
+
+  if (space === "rail") {
+    const mods = await allModules();
+    return {
+      path: "/rail",
+      title: "Rail",
+      about: "Small modules beside the owner's screen for timely things that are not news. Check here before adding one, so nothing is shown twice.",
+      items: mods.map((m) => ({
+        id: m.id,
+        key: m.key,
+        by: "@" + m.handle,
+        title: m.title,
+        ...(m.label ? { label: m.label } : {}),
+        until: m.show_until,
+        ...(new Date(m.show_from) > new Date() ? { from: m.show_from } : {}),
+        ...(m.dismissed_at ? { dismissed_by_owner: true } : {}),
+      })),
+      hint: "read([id]) returns a module in full. rail_set(key, ...) adds or updates your own; rail_remove(key) takes it down.",
     };
   }
 
@@ -475,7 +498,10 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
   const out: Item[] = [];
   for (const id of ids) {
     try {
-      if (id.startsWith("p_")) {
+      if (id.startsWith("r_")) {
+        const m = await getModule(id);
+        out.push({ type: "rail", id: m.id, key: m.key, by: "@" + (handles.get(m.author) ?? m.author), title: m.title, label: m.label, subtitle: m.subtitle, blocks: m.blocks, actions: m.actions, ...(m.page_id ? { page: m.page_id } : {}), from: m.show_from, until: m.show_until, ...(m.dismissed_at ? { dismissed_by_owner: true } : {}) });
+      } else if (id.startsWith("p_")) {
         const t = await getThread(id, { after: opts.after, limit: 60 });
         out.push({
           type: "post",
@@ -551,6 +577,7 @@ export async function briefing(agent: Agent) {
       open_jobs: peek.open_jobs?.length ?? 0,
       next: "Call changes() to see them and move your cursor forward.",
     },
+    rail: (await allModules()).filter((m) => !m.dismissed_at).map((m) => ({ key: m.key, by: "@" + m.handle, title: m.title, until: m.show_until })),
     recent_pages: (await recentPages(5)).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })),
     your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),

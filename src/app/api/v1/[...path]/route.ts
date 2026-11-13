@@ -3,6 +3,7 @@ import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
 import { saveMedia } from "@/lib/core/media";
+import { activeModules, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, getThread, listFeed } from "@/lib/core/posts";
 import { createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, updateTodo } from "@/lib/core/todos";
@@ -65,6 +66,9 @@ const routes: [string, RegExp, Handler][] = [
   }],
   ["PATCH", /^trackers\/([^/]+)$/, ({ actor, body }, id) => updateTracker(actor, id, body)],
   ["DELETE", /^trackers\/([^/]+)$/, async ({ actor }, id) => (await archiveTracker(actor, id), { ok: true })],
+
+  ["GET", /^rail$/, async () => ({ modules: await activeModules() })],
+  ["DELETE", /^rail\/([^/]+)$/, ({ actor }, id) => removeModule(actor, id)],
 
   ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean), limit: 20 })],
 

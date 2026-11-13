@@ -582,6 +582,34 @@ textarea:focus-visible,
   text-decoration-color: var(--accent-soft);
   text-underline-offset: 3px;
 }
+/* ---------- The rail: blocks drawn small ---------- */
+.rail-sheet {
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
+}
+.rail-blocks .block-card {
+  background: var(--fill);
+  border-color: transparent;
+  box-shadow: none;
+  border-radius: 14px;
+}
+.rail-blocks .map-frame {
+  height: 170px;
+  border-radius: 14px;
+}
+.rail-blocks dl > div {
+  font-size: 13px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.rail-blocks dt {
+  width: 38%;
+}
+.rail-blocks .block-prose {
+  font-size: 13.5px;
+}
+
 /* A block inside the editor: one unit you can select, never text you can break by typing. */
 .page-block {
   position: relative;
