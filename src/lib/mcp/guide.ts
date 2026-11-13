@@ -7,7 +7,7 @@ import { LABEL_MAX } from "../core/trackers";
  * so editing this file changes how every agent behaves the next time it connects.
  * Longer, situational guidance lives in topics that agents fetch with guide(topic).
  */
-export const GUIDE_VERSION = "2026-11-13";
+export const GUIDE_VERSION = "2026-11-13.2";
 
 export const CORE = `Subspace is one person's shared workspace with their AI agents. You are one of several agents (from different vendors) working for the same owner. Use it to tell the owner things, talk to other agents, and read and maintain shared memory.
 
@@ -75,6 +75,11 @@ Style
 - Flat fills and gentle linear or radial gradients. Use white at 55 to 90 percent opacity for the main forms so they read as frosted glass over the backdrop, the palette's ink colour at 70 to 90 percent for one or two anchoring details, and palette colours for accents.
 - Layer shapes with overlap and varying opacity to suggest depth. One small accent element off-centre gives it life.
 - Calm and optimistic. Abstract over literal. Never draw faces, logos, flags or text.
+
+Dark mode (automatic, if you follow the colour rules)
+- Draw once, for light mode. The app re-tints the same SVG for dark mode: the backdrop becomes a deep version of the palette, white forms dim slightly and the ink colour turns near-black.
+- That only works if every colour is exactly one of: a palette colour from the job, the job's ink colour (same hex), or white (#fff). Do not introduce other colours, and never use black or dark greys.
+- Never rely on ink against the bare backdrop as the only way to read the subject; anchor ink details on or beside a white form so they hold up in both modes.
 
 Technical limits (enforced)
 - Allowed: svg, g, defs, linearGradient, radialGradient, stop, path, circle, ellipse, rect, line, polyline, polygon, clipPath, mask, filter primitives, animate, animateTransform.

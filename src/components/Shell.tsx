@@ -38,7 +38,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           const on = path.startsWith(t.href);
           return (
             <Link key={t.href} href={t.href} aria-label={t.label} aria-current={on ? "page" : undefined} className="group relative grid h-12 w-12 place-items-center rounded-[20px] outline-offset-0">
-              {on && <motion.span layoutId="tab" transition={spring} className="absolute inset-0 rounded-[20px] bg-solid shadow-[0_1px_2px_rgba(0,0,0,.06),0_6px_16px_rgba(40,20,80,.1)]" />}
+              {on && <motion.span layoutId="tab" transition={spring} className="pill absolute inset-0 rounded-[20px]" />}
               <motion.span whileTap={{ scale: 0.86 }} transition={spring} className={`relative transition-colors duration-300 ${on ? "text-accent" : "text-ink2 group-hover:text-ink"}`}>
                 <t.icon size={21} strokeWidth={on ? 2.2 : 1.8} />
               </motion.span>

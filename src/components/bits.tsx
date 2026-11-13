@@ -1,6 +1,6 @@
 "use client";
 import { PALETTES } from "@/lib/palettes";
-import { hash } from "@/lib/client";
+import { hash, useDark } from "@/lib/client";
 import type { Agent } from "@/lib/core/util";
 import type { Art } from "@/lib/core/art";
 import type { CSSProperties, ReactNode } from "react";
@@ -55,25 +55,53 @@ export function TrackerTile({ tracker, size = 40 }: { tracker: { id: string; tit
 export function TrackerChip({ tracker }: { tracker: { id: string; label: string; icon_svg: string | null } }) {
   const p = PALETTES[hash(tracker.id) % PALETTES.length];
   return (
-    <span className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium" style={{ background: `color-mix(in srgb, ${p.colors[0]} 38%, transparent)`, color: `color-mix(in srgb, ${p.ink} 78%, var(--ink))` }}>
+    <span className="chip inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium" style={{ "--c": p.colors[0], "--k": p.ink } as CSSProperties}>
       {tracker.icon_svg && <Glyph svg={tracker.icon_svg} size={13} />}
       {tracker.label}
     </span>
   );
 }
 
+/** Mixes a hex colour toward black (f < 0) or white (f > 0). */
+function shade(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(f < 0 ? v * (1 + f) : v + (255 - v) * f));
+  return "#" + ch.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+/** The night version of a pastel: same hue, richer and much deeper. */
+function deep(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255].map((v) => v / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return `hsl(${Math.round(h * 60 + 360) % 360} 52% 30%)`;
+}
+
+/**
+ * Illustrations are drawn once, for light mode, using only the palette, its ink and white. In dark
+ * mode the app re-tints them: the backdrop deepens (CSS), white glass dims a little and ink goes
+ * near-black so details still read against it.
+ */
+function forDark(svg: string, ink: string): string {
+  return svg.replace(new RegExp(ink, "gi"), shade(ink, -0.62)).replace(/(#fff(?:fff)?\b|\bwhite\b)/gi, "#f3f1fa");
+}
+
 /** The feed's visual language: a living pastel backdrop with a code-drawn illustration floating on it. */
 export function ArtPanel({ art, className = "", children }: { art: Art; className?: string; children?: ReactNode }) {
   const p = PALETTES.find((x) => x.name === art.palette) ?? PALETTES[art.seed % PALETTES.length];
+  const dark = useDark();
+  const svg = art.svg && dark ? forDark(art.svg, p.ink) : art.svg;
   return (
-    <div className={`art ${className}`} style={{ background: p.colors[3] }}>
-      <div className="art-mesh" style={{ ...mesh(art.seed, p.colors), animationDelay: `-${art.seed % 20}s` }} />
-      {art.svg ? (
+    <div className={`art ${className}`} style={{ "--art-base": p.colors[3] } as CSSProperties}>
+      <div className="art-mesh" style={{ ...mesh(art.seed, dark ? p.colors.map(deep) : p.colors), animationDelay: `-${art.seed % 20}s` }} />
+      {svg ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img alt="" src={`data:image/svg+xml,${encodeURIComponent(art.svg)}`} className="absolute inset-0 h-full w-full object-contain p-[4%] drop-shadow-[0_10px_24px_rgba(60,40,90,.16)] transition-transform duration-700 ease-out-soft group-hover:scale-[1.035]" />
+        <img alt="" src={`data:image/svg+xml,${encodeURIComponent(svg)}`} className="absolute inset-0 h-full w-full object-contain p-[4%] drop-shadow-[0_10px_24px_rgba(60,40,90,.16)] transition-transform duration-700 ease-out-soft group-hover:scale-[1.035]" />
       ) : art.status === "pending" ? (
         <div className="absolute inset-0 grid place-items-center">
-          <div className="art-pending h-16 w-16 rounded-full bg-white/60 shadow-[0_8px_30px_rgba(255,255,255,.6)]" />
+          <div className="art-pending h-16 w-16 rounded-full bg-white/60 shadow-[0_8px_30px_rgba(255,255,255,.6)] dark:bg-white/25 dark:shadow-[0_8px_30px_rgba(255,255,255,.18)]" />
         </div>
       ) : null}
       {children}

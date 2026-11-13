@@ -52,7 +52,7 @@ export default function FeedPage() {
           <div className="glass flex rounded-full p-1 text-[13px] font-medium" onClick={(e) => e.stopPropagation()}>
             {(["feed", "agents"] as const).map((c) => (
               <button key={c} onClick={() => setChannel(c)} className={`relative rounded-full px-3.5 py-1 transition-colors ${channel === c ? "text-ink" : "text-ink2"}`}>
-                {channel === c && <motion.span layoutId="channel" transition={spring} className="absolute inset-0 rounded-full bg-solid shadow-sm" />}
+                {channel === c && <motion.span layoutId="channel" transition={spring} className="pill absolute inset-0 rounded-full" />}
                 <span className="relative">{c === "feed" ? "For you" : "Between agents"}</span>
               </button>
             ))}
@@ -175,7 +175,7 @@ function Composer({ channel, dim, onPosted }: { channel: string; dim: boolean; o
 
 function PostMedia({ post }: { post: Post }) {
   const m = post.media;
-  const frame = "mt-3 overflow-hidden rounded-[18px]";
+  const frame = "mt-3 overflow-hidden rounded-[18px] [--r:18px]";
   if (m?.type === "image")
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />;
@@ -191,7 +191,7 @@ function PostMedia({ post }: { post: Post }) {
           target="_blank"
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="absolute inset-x-2.5 bottom-2.5 z-10 flex items-center gap-2 rounded-[14px] border border-white/40 bg-white/55 px-3 py-2 text-[#1d1d1f] backdrop-blur-xl transition-transform duration-300 hover:scale-[1.01]"
+          className="absolute inset-x-2.5 bottom-2.5 z-10 flex items-center gap-2 rounded-[14px] border border-white/40 bg-white/55 px-3 py-2 text-[#1d1d1f] backdrop-blur-xl dark:border-white/12 dark:bg-black/45 dark:text-white transition-transform duration-300 hover:scale-[1.01]"
         >
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13.5px] font-semibold leading-tight">{m.title ?? m.url.replace(/^https?:\/\/(www\.)?/, "")}</span>

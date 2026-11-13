@@ -1,4 +1,5 @@
 "use client";
+import { useSyncExternalStore } from "react";
 import useSWR from "swr";
 import type { Agent } from "./core/util";
 import type { Tracker } from "./core/trackers";
@@ -50,3 +51,13 @@ export function ago(iso: string | null | undefined): string {
 
 export const spring = { type: "spring", stiffness: 420, damping: 36, mass: 0.9 } as const;
 export const soft = { type: "spring", stiffness: 260, damping: 30 } as const;
+
+const darkQuery = () => window.matchMedia("(prefers-color-scheme: dark)");
+/** True when the device is in dark mode; updates live when it changes. */
+export function useDark(): boolean {
+  return useSyncExternalStore(
+    (cb) => (darkQuery().addEventListener("change", cb), () => darkQuery().removeEventListener("change", cb)),
+    () => darkQuery().matches,
+    () => false,
+  );
+}
