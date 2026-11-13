@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
-    "test:mcp": "tsx scripts/mcp-smoke.ts"
+    "test:mcp": "tsx scripts/mcp-smoke.ts",
+    "test:ui": "node scripts/ui-check.cjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.5",

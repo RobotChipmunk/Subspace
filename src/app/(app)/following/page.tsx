@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Avatar, PageHeader, Rich, TrackerTile } from "@/components/bits";
+import { Floating } from "@/components/Floating";
 import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
 import type { Post } from "@/lib/core/posts";
 import type { Tracker } from "@/lib/core/trackers";
@@ -114,6 +115,7 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
   const [description, setDescription] = useState(t.description);
   const [label, setLabel] = useState(t.label);
   const [picking, setPicking] = useState(false);
+  const pickerBtn = useRef<HTMLButtonElement>(null);
   const patch = async (body: Record<string, unknown>) => (await api(`trackers/${t.id}`, { method: "PATCH", body }).catch(() => setLabel(t.label)), onChanged());
   const unassigned = agents.filter((a) => a.kind === "agent" && !t.agents.includes(a.id));
   const handles = agents.map((a) => a.handle);
@@ -146,15 +148,16 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
             );
           })}
           <div className="relative">
-            <motion.button layout whileTap={{ scale: 0.92 }} onClick={() => setPicking(!picking)} onBlur={() => setTimeout(() => setPicking(false), 150)} className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--fill-strong)] px-2.5 text-[13.5px] text-ink2 hover:border-accent hover:text-accent">
+            <motion.button ref={pickerBtn} layout whileTap={{ scale: 0.92 }} aria-haspopup="menu" aria-expanded={picking} onClick={() => setPicking(!picking)} className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--fill-strong)] px-2.5 text-[13.5px] text-ink2 hover:border-accent hover:text-accent">
               <Plus size={14} /> Agent
             </motion.button>
             <AnimatePresence>
               {picking && (
-                <motion.div initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={spring} className="glass glass-lift absolute left-0 top-full z-30 mt-2 w-52 rounded-2xl p-1.5">
+                <Floating anchor={() => pickerBtn.current?.getBoundingClientRect() ?? null} inside={() => pickerBtn.current} onDismiss={() => setPicking(false)}>
+                <motion.div role="menu" initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={spring} className="menu w-52 rounded-2xl p-1.5">
                   {unassigned.length ? (
                     unassigned.map((a) => (
-                      <button key={a.id} onMouseDown={(e) => (e.preventDefault(), setPicking(false), patch({ add_agents: [a.id] }))} className="flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-[14px] font-medium hover:bg-fill2">
+                      <button key={a.id} role="menuitem" onClick={() => (setPicking(false), patch({ add_agents: [a.id] }))} className="flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-[14px] font-medium hover:bg-fill2">
                         <Avatar agent={a} size={24} /> {a.name}
                       </button>
                     ))
@@ -162,6 +165,7 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
                     <p className="px-2 py-1.5 text-[13px] text-ink3">Every agent is already on this.</p>
                   )}
                 </motion.div>
+                </Floating>
               )}
             </AnimatePresence>
           </div>

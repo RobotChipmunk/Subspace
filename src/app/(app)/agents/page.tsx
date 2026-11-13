@@ -101,10 +101,10 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
 
   return (
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: index * 0.04 }} className={`glass rounded-[24px] p-3.5 ${token || realtime ? "glass-lift" : ""}`}>
-      <div className="flex items-center gap-3.5">
+      <div className="flex items-center gap-x-3.5 gap-y-2.5 max-sm:flex-wrap">
         <Avatar agent={a} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
+        <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-54px)]">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="truncate text-[16px] font-semibold">{a.name}</span>
             <span className="text-[13.5px] text-ink3">@{a.handle}</span>
             {live && (
@@ -125,7 +125,7 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
           )}
         </div>
         {!human && (
-          <div className="flex flex-none items-center gap-2">
+          <div className="flex flex-none items-center gap-2 max-sm:w-full max-sm:justify-end">
             <button onClick={() => setRealtime(!realtime)} aria-expanded={realtime} aria-label="Realtime settings" title="Realtime settings" className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${realtime || live ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
               <Zap size={15} />
             </button>
@@ -160,7 +160,7 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
               </p>
               <CopyField label="Connector address" value={`${origin}/api/mcp/${token}`} />
               <CopyField label="Or, for clients that send a header" value={`${origin}/api/mcp  ·  Authorization: Bearer ${token}`} />
-              <div className="flex items-center justify-between pt-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 [&_button]:whitespace-nowrap">
                 {!illustrator ? (
                   <button onClick={() => patch({ illustrator: true })} className="text-[13px] text-ink2 hover:text-accent">
                     Make {a.name} the illustrator
@@ -188,7 +188,7 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
 }
 
 type Options = { models: { id: string; name: string; note: string }[]; efforts: string[]; contexts: number[]; env_key: boolean };
-const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
+const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra", max: "Max" };
 const contextLabel = (n: number) => (n >= 1_000_000 ? `${n / 1_000_000}M` : `${n / 1000}K`);
 
 function Segmented<T extends string | number>({ label, value, options, onChange, hint }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; hint?: string }) {

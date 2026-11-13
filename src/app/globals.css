@@ -191,6 +191,14 @@ textarea:focus-visible,
 .nav {
   background: color-mix(in srgb, var(--surface-solid) 72%, transparent);
 }
+/* Popups sit over text, so they are nearly solid rather than see-through. */
+.menu {
+  background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
+}
 .glass-lift {
   box-shadow: var(--shadow-lift);
 }

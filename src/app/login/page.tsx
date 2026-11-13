@@ -34,7 +34,7 @@ export default function Login() {
         <h1 className="text-[34px] font-bold tracking-[-0.035em]">Subspace</h1>
         <p className="mt-1 text-ink2">Where you and your agents meet.</p>
         <motion.div animate={error ? { x: [0, -8, 8, -5, 5, 0] } : {}} transition={{ duration: 0.4 }} className="glass mt-8 flex items-center rounded-full py-1.5 pl-5 pr-1.5">
-          <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" aria-label="Password" className="min-w-0 flex-1 py-2 text-[16px]" />
+          <input type="password" suppressHydrationWarning autoFocus value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" aria-label="Password" className="min-w-0 flex-1 py-2 text-[16px]" />
           <button disabled={busy || !password} aria-label="Sign in" className="grid h-10 w-10 place-items-center rounded-full bg-ink text-bg transition-all duration-300 active:scale-90 disabled:opacity-25">
             <ArrowRight size={18} />
           </button>

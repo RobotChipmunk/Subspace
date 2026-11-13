@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "tiptap-markdown";
 import { api, soft, useMe } from "@/lib/client";
 import type { Agent } from "@/lib/core/util";
+import { Floating } from "./Floating";
 import { MentionMenu, useMentionMatches } from "./MentionInput";
 
 /** Text written by an agent. Stored in the markdown as <ins data-agent="handle">…</ins> until reviewed. */
@@ -117,7 +118,7 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
   handlesRef.current = agents.map((a) => a.handle);
   const lastEmitted = useRef(value);
   const [edited, setEdited] = useState<string[]>([]);
-  const [mention, setMention] = useState<{ query: string; x: number; y: number } | null>(null);
+  const [mention, setMention] = useState<{ query: string; at: number } | null>(null);
   const [active, setActive] = useState(0);
   const matches = useMentionMatches(mention?.query ?? null);
   const live = useRef({ matches, active, pick: (_: Agent) => {} });
@@ -196,11 +197,9 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
       const before = empty ? $from.parent.textBetween(0, $from.parentOffset, undefined, "￼") : "";
       const m = before.match(/(^|\s)@([a-zA-Z0-9_-]*)$/);
       if (!m) return setMention((cur) => (cur ? null : cur));
-      const c = editor.view.coordsAtPos($from.pos - m[2].length - 1);
-      setMention({ query: m[2], x: c.left, y: c.bottom });
+      setMention({ query: m[2], at: $from.pos - m[2].length - 1 });
       setActive(0);
     },
-    onBlur: () => setTimeout(() => setMention(null), 120),
   });
 
   live.current = {
@@ -251,9 +250,17 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
       <EditorContent editor={editor} />
       <AnimatePresence>
         {mention && matches.length > 0 && (
-          <div className="fixed z-50" style={{ left: Math.min(mention.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 260), top: mention.y + 8 }}>
+          <Floating
+            anchor={() => {
+              if (!editor || editor.isDestroyed) return null;
+              const c = editor.view.coordsAtPos(Math.min(mention.at, editor.state.doc.content.size));
+              return { left: c.left, top: c.top, bottom: c.bottom };
+            }}
+            inside={() => editor?.view.dom ?? null}
+            onDismiss={() => setMention(null)}
+          >
             <MentionMenu matches={matches} active={active} onPick={(a) => live.current.pick(a)} onHover={setActive} />
-          </div>
+          </Floating>
         )}
       </AnimatePresence>
     </div>

@@ -37,8 +37,8 @@ function Inner() {
 
   return (
     <div className="mx-auto max-w-[820px]">
-      <header className="mb-6 flex items-center gap-4 px-1">
-        <nav className="flex min-w-0 flex-1 items-center gap-1 text-[30px] font-bold leading-tight tracking-[-0.03em]" aria-label="Breadcrumb">
+      <header className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3 px-1">
+        <nav className="flex min-w-0 flex-1 items-center gap-1 max-sm:basis-full text-[30px] font-bold leading-tight tracking-[-0.03em]" aria-label="Breadcrumb">
           <button onClick={() => go(null)} className={`transition-colors ${data?.node ? "text-ink3 hover:text-ink" : ""}`}>
             Context
           </button>
@@ -51,7 +51,7 @@ function Inner() {
             </span>
           ))}
         </nav>
-        <label className="glass flex h-10 w-[220px] flex-none items-center gap-2 rounded-full px-3.5 transition-[width] duration-500 ease-out-soft focus-within:w-[300px] max-md:w-[150px] max-md:focus-within:w-[190px]">
+        <label className="glass flex h-10 w-[220px] flex-none items-center gap-2 rounded-full px-3.5 transition-[width] duration-500 ease-out-soft focus-within:w-[300px] max-sm:w-full max-sm:focus-within:w-full">
           <Search size={16} className="flex-none text-ink3" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} placeholder="Search" aria-label="Search context" className="min-w-0 flex-1 text-[15px]" />
           {query && (

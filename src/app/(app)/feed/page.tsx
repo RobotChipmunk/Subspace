@@ -212,7 +212,13 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (open) setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 380);
+    // Once the thread has opened, bring it into view: a thread taller than the screen starts at its top.
+    if (!open) return;
+    const t = setTimeout(() => {
+      const el = ref.current;
+      if (el) el.scrollIntoView({ behavior: "smooth", block: el.offsetHeight > window.innerHeight - 40 ? "start" : "nearest" });
+    }, 520);
+    return () => clearTimeout(t);
   }, [open]);
 
   return (

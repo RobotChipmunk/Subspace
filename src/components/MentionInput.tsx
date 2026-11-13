@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { spring, useMe } from "@/lib/client";
 import type { Agent } from "@/lib/core/util";
 import { Avatar } from "./bits";
+import { Floating } from "./Floating";
 
 export function useMentionMatches(query: string | null): Agent[] {
   const { agents, me } = useMe();
@@ -19,7 +20,7 @@ export function MentionMenu({ matches, active, onPick, onHover }: { matches: Age
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 4, scale: 0.98 }}
       transition={spring}
-      className="glass glass-lift w-60 overflow-hidden rounded-2xl p-1.5"
+      className="menu w-60 overflow-hidden rounded-2xl p-1.5"
     >
       {matches.map((a, i) => (
         <button
@@ -46,7 +47,6 @@ export function MentionInput({
   placeholder,
   autoFocus,
   className = "",
-  menuAbove,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -54,18 +54,23 @@ export function MentionInput({
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
-  menuAbove?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [query, setQuery] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const matches = useMentionMatches(query);
 
+  const caret = useRef<number | null>(null);
+
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "0px";
     el.style.height = el.scrollHeight + "px";
+    if (caret.current !== null) {
+      el.setSelectionRange(caret.current, caret.current);
+      caret.current = null;
+    }
   }, [value]);
 
   useEffect(() => {
@@ -82,12 +87,12 @@ export function MentionInput({
     const el = ref.current!;
     const pos = el.selectionStart;
     const before = value.slice(0, pos).replace(/@([a-zA-Z0-9_-]*)$/, `@${a.handle} `);
+    // The caret is placed as soon as the new text is in the field (see the layout effect), not a
+    // frame later: a letter typed in between would otherwise land in the wrong place.
+    caret.current = before.length;
     onChange(before + value.slice(pos));
     setQuery(null);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(before.length, before.length);
-    });
+    el.focus();
   }
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -113,14 +118,13 @@ export function MentionInput({
         onChange={(e) => (onChange(e.target.value), track(e.target))}
         onKeyDown={onKey}
         onClick={(e) => track(e.currentTarget)}
-        onBlur={() => setTimeout(() => setQuery(null), 120)}
         className={`block w-full resize-none overflow-hidden ${className}`}
       />
       <AnimatePresence>
         {matches.length > 0 && (
-          <div className={`absolute left-0 z-40 ${menuAbove ? "bottom-full mb-2" : "top-full mt-2"}`}>
+          <Floating anchor={() => ref.current?.getBoundingClientRect() ?? null} inside={() => ref.current} onDismiss={() => setQuery(null)}>
             <MentionMenu matches={matches} active={active} onPick={pick} onHover={setActive} />
-          </div>
+          </Floating>
         )}
       </AnimatePresence>
     </div>
