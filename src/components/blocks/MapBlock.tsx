@@ -2,13 +2,11 @@
 import "leaflet/dist/leaflet.css";
 import { ArrowUpRight } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { useDark } from "@/lib/client";
 import type { Blocks } from "@/lib/blocks";
 
 /** A calm map with numbered pins, and the same places listed underneath so nothing depends on the map alone. */
 export default function MapBlock({ d }: { d: Blocks["map"] }) {
   const el = useRef<HTMLDivElement>(null);
-  const dark = useDark();
   const key = JSON.stringify(d.markers.map((m) => [m.lat, m.lng, m.title]));
 
   useEffect(() => {
@@ -19,10 +17,11 @@ export default function MapBlock({ d }: { d: Blocks["map"] }) {
       const touch = window.matchMedia("(pointer: coarse)").matches;
       // On touch screens a one-finger drag scrolls the page, so the map only pans with the buttons.
       map = L.map(el.current, { scrollWheelZoom: false, dragging: !touch, attributionControl: true, zoomControl: true });
-      L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-        subdomains: "abcd",
+      // OpenStreetMap's own tiles: no key or account. The calm, monochrome look (and the dark
+      // version) is applied with CSS, see .map-frame in globals.css.
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(map);
       const pts = d.markers.map((m, i) => {
         const icon = L.divIcon({ className: "", html: `<span class="map-pin">${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
@@ -39,7 +38,7 @@ export default function MapBlock({ d }: { d: Blocks["map"] }) {
       gone = true;
       map?.remove();
     };
-  }, [key, dark]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>

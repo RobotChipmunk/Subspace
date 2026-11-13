@@ -515,6 +515,15 @@ textarea:focus-visible,
   background: color-mix(in srgb, var(--surface-solid) 55%, var(--bg));
   font-family: var(--font-sans);
 }
+/* The street map is toned down so it sits quietly behind the pins, and inverted for dark mode. */
+.map-frame .leaflet-tile-pane {
+  filter: grayscale(0.85) contrast(0.92) brightness(1.04);
+}
+@media (prefers-color-scheme: dark) {
+  .map-frame .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) grayscale(0.7) brightness(0.92) contrast(0.88);
+  }
+}
 .map-frame .leaflet-control-attribution {
   background: color-mix(in srgb, var(--surface-solid) 70%, transparent);
   color: var(--ink-3);
