@@ -10,7 +10,7 @@ import { EditorContent, useEditor, type Editor as TEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit";
 import { AnimatePresence, motion } from "motion/react";
 import { Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "tiptap-markdown";
 import { api, soft, useMe } from "@/lib/client";
 import type { Agent } from "@/lib/core/util";
@@ -122,9 +122,11 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
   const matches = useMentionMatches(mention?.query ?? null);
   const live = useRef({ matches, active, pick: (_: Agent) => {} });
 
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions: [
+  // The editor library re-applies its options to the live view whenever these change identity.
+  // Recreating them on each render did that on every keystroke, which interrupts the on-screen
+  // keyboard on iOS mid-word. They are built once.
+  const extensions = useMemo(
+    () => [
       StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
       TaskList,
       TaskItem.configure({ nested: true }),
@@ -134,8 +136,11 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
       AgentEdit,
       MentionHighlight.configure({ handles: () => handlesRef.current }),
     ],
-    content: splitMixedLists(value),
-    editorProps: {
+    [], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const initialContent = useRef(splitMixedLists(value)).current;
+  const editorProps = useMemo<NonNullable<Parameters<typeof useEditor>[0]>["editorProps"]>(
+    () => ({
       handlePaste(view, event) {
         const files = [...(event.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
         if (!files.length) return false;
@@ -166,19 +171,31 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
         if (e.key === "Escape") return setMention(null), true;
         return false;
       },
-    },
-    onCreate: ({ editor }) => setEdited(agentsInDoc(editor)),
+    }),
+    [],
+  );
+  const noteEdited = (e: TEditor) => {
+    const next = agentsInDoc(e);
+    setEdited((prev) => (prev.join() === next.join() ? prev : next));
+  };
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions,
+    content: initialContent,
+    editorProps,
+    onCreate: ({ editor }) => noteEdited(editor),
     onUpdate: ({ editor }) => {
       const md = getMd(editor);
       lastEmitted.current = md;
       onChange(md);
-      setEdited(agentsInDoc(editor));
+      noteEdited(editor);
     },
     onSelectionUpdate: ({ editor }) => {
       const { $from, empty } = editor.state.selection;
       const before = empty ? $from.parent.textBetween(0, $from.parentOffset, undefined, "￼") : "";
       const m = before.match(/(^|\s)@([a-zA-Z0-9_-]*)$/);
-      if (!m) return setMention(null);
+      if (!m) return setMention((cur) => (cur ? null : cur));
       const c = editor.view.coordsAtPos($from.pos - m[2].length - 1);
       setMention({ query: m[2], x: c.left, y: c.bottom });
       setActive(0);
@@ -199,10 +216,10 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
 
   // Pick up edits made elsewhere (an agent writing into the notes) without fighting the person typing.
   useEffect(() => {
-    if (!editor || value === lastEmitted.current || editor.isFocused) return;
+    if (!editor || value === lastEmitted.current || editor.isFocused || editor.view.composing) return;
     lastEmitted.current = value;
     editor.commands.setContent(splitMixedLists(value), { emitUpdate: false });
-    setEdited(agentsInDoc(editor));
+    noteEdited(editor);
   }, [value, editor]);
 
   function review() {
