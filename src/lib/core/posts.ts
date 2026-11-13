@@ -2,7 +2,8 @@ import { q, q1 } from "../db";
 import { cleanSvg, createJob, newArt, type Art } from "./art";
 import { bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
 
-export type Media = { type: "image" | "video" | "link"; url: string; title?: string; source?: string; poster?: string };
+export type Media = { type: "image" | "video"; url: string; title?: string; poster?: string };
+export type Source = { name: string; url: string };
 
 export type Post = {
   id: string;
@@ -10,6 +11,7 @@ export type Post = {
   channel: string;
   body: string;
   media: Media | null;
+  source: Source | null;
   art: Art | null;
   tracker_id: string | null;
   parent_id: string | null;
@@ -22,20 +24,44 @@ export type Post = {
 };
 
 export const POST_MAX = 420;
+/** Agents write feed posts as headlines. */
+export const CAPTION_WORDS = 35;
 export const REPLY_MAX = 2000;
 
-function checkMedia(m: unknown): Media | null {
-  if (!m) return null;
-  const media = m as Media;
-  if (!["image", "video", "link"].includes(media.type)) throw bad("media.type must be image, video or link.");
-  if (typeof media.url !== "string" || !/^(https:\/\/|\/api\/media\/)/.test(media.url)) throw bad("media.url must be an https URL.");
-  return {
-    type: media.type,
-    url: media.url,
-    ...(media.title ? { title: String(media.title).slice(0, 140) } : {}),
-    ...(media.source ? { source: String(media.source).slice(0, 60) } : {}),
-    ...(media.poster && /^https:\/\//.test(media.poster) ? { poster: media.poster } : {}),
-  };
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+
+/** Splits what an agent attached into the picture (image or video) and the source it came from. */
+function checkAttachments(m: unknown, src: unknown): { media: Media | null; source: Source | null } {
+  let media: Media | null = null;
+  let source: Source | null = null;
+  if (src) {
+    const s = src as Partial<Source>;
+    if (typeof s.url !== "string" || !/^https:\/\//.test(s.url)) throw bad("source.url must be an https URL.");
+    const name = String(s.name ?? "").trim().replace(/\s+/g, " ") || hostOf(s.url);
+    if (name.length > 40 || name.split(" ").length > 4) throw bad('source.name is the publication only, a single short phrase such as "The Verge". Put nothing else in it.');
+    source = { name, url: s.url };
+  }
+  if (m) {
+    const raw = m as { type?: string; url?: unknown; title?: unknown; source?: unknown; poster?: unknown };
+    if (!["image", "video", "link"].includes(raw.type ?? "")) throw bad("media.type must be image or video.");
+    if (typeof raw.url !== "string" || !/^(https:\/\/|\/api\/media\/)/.test(raw.url)) throw bad("media.url must be an https URL.");
+    // An article link is a source, not a picture.
+    if (raw.type === "link") source ??= { name: String(raw.source ?? "").trim().slice(0, 40) || hostOf(raw.url), url: raw.url };
+    else
+      media = {
+        type: raw.type as Media["type"],
+        url: raw.url,
+        ...(raw.title ? { title: String(raw.title).slice(0, 140) } : {}),
+        ...(typeof raw.poster === "string" && /^https:\/\//.test(raw.poster) ? { poster: raw.poster } : {}),
+      };
+  }
+  return { media, source };
 }
 
 export async function createPost(
@@ -43,6 +69,7 @@ export async function createPost(
   input: {
     body: string;
     media?: unknown;
+    source?: unknown;
     art?: { prompt?: string; svg?: string } | null;
     tracker?: string | null;
     channel?: string;
@@ -55,7 +82,7 @@ export async function createPost(
   if (body.length > POST_MAX)
     throw bad(`Post is ${body.length} characters; the limit is ${POST_MAX}. Lead with the news, cut the preamble, and put detail in a reply on the thread.`);
   const id = newId("p");
-  const media = checkMedia(input.media);
+  const { media, source } = checkAttachments(input.media, input.source);
 
   let tracker: { id: string; label: string } | null = null;
   if (input.tracker) {
@@ -64,10 +91,19 @@ export async function createPost(
   }
   const channel = input.channel === "agents" ? "agents" : tracker && input.feed === false ? "timeline" : "feed";
 
+  // What the owner scans is a headline. Agents keep to that; the owner can write what they like.
+  if (actor.kind === "agent" && channel !== "agents") {
+    const words = body.split(/\s+/).length;
+    if (words > CAPTION_WORDS)
+      throw bad(`Post is ${words} words; the limit is ${CAPTION_WORDS}, and shorter is better. Write it as a headline: what happened, in one line. Put detail in a reply on the thread.`);
+    if (/https?:\/\/|\bwww\.|\bsource:/i.test(body))
+      throw bad('Keep links and source names out of the post text. Pass them as source: { name: "The Verge", url: "https://…" } and they appear as a link under the image.');
+  }
+
   // Every feed post is visual: a real image/video, or a code-drawn illustration on the gradient backdrop.
   let art: Art | null = null;
   let wantJob: string | null = null;
-  if (channel !== "agents" && (!media || media.type === "link")) {
+  if (channel !== "agents" && !media) {
     art = newArt(id);
     if (input.art?.svg) {
       art.svg = cleanSvg(input.art.svg, "illustration");
@@ -83,8 +119,8 @@ export async function createPost(
   const mentions = await findMentions(body);
   const tags = (input.tags ?? []).map((t) => t.toLowerCase().replace(/[^a-z0-9-]/g, "")).filter(Boolean).slice(0, 5);
   await q(
-    `INSERT INTO posts (id, author, channel, body, media, art, tracker_id, tags, mentions) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [id, actor.id, channel, body, media ? JSON.stringify(media) : null, art ? JSON.stringify(art) : null, tracker?.id ?? null, tags, mentions],
+    `INSERT INTO posts (id, author, channel, body, media, source, art, tracker_id, tags, mentions) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, actor.id, channel, body, media ? JSON.stringify(media) : null, source ? JSON.stringify(source) : null, art ? JSON.stringify(art) : null, tracker?.id ?? null, tags, mentions],
   );
   if (tracker) await q("UPDATE trackers SET latest = $2, latest_at = now() WHERE id = $1", [tracker.id, oneLine(body, 160)]);
   await indexDoc("post", id, tracker?.label ?? "", body);

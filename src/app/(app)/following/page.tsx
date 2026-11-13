@@ -192,9 +192,9 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
               <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
                 <Rich text={u.body} handles={handles} />
               </p>
-              {u.media?.type === "link" && (
-                <a href={u.media.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-block max-w-full truncate text-[13.5px] text-accent">
-                  {u.media.title ?? u.media.url}
+              {u.source && (
+                <a href={u.source.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-block max-w-full truncate text-[13px] text-ink2 underline decoration-[var(--line)] underline-offset-[3px] transition-colors hover:text-accent">
+                  {u.source.name}
                 </a>
               )}
             </div>

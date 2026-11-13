@@ -113,7 +113,7 @@ async function timeTree(base: { path: string; title: string; about?: string }, s
   };
 }
 
-const POST_SELECT = "p.id, p.body, p.created_at, p.reply_count, p.media, a.handle AS by, t.label AS tracker";
+const POST_SELECT = "p.id, p.body, p.created_at, p.reply_count, p.source, a.handle AS by, t.label AS tracker";
 const POST_FROM = "posts p JOIN agents a ON a.id = p.author LEFT JOIN trackers t ON t.id = p.tracker_id";
 const postItem = (r: Record<string, unknown>): Item => ({
   id: r.id,
@@ -122,7 +122,7 @@ const postItem = (r: Record<string, unknown>): Item => ({
   line: oneLine(String(r.body), 160),
   ...(r.tracker ? { tracker: r.tracker } : {}),
   ...(Number(r.reply_count) ? { replies: r.reply_count } : {}),
-  ...(r.media ? { link: (r.media as { url: string }).url } : {}),
+  ...(r.source ? { source: (r.source as { name: string }).name } : {}),
 });
 const postSource = (where: string, params: unknown[] = []): TimeSource => ({ from: POST_FROM, where, params, ts: "p.created_at", order: "p.id", select: POST_SELECT, item: postItem });
 
@@ -437,6 +437,7 @@ const slimPost = (p: Post, handles: Map<string, string>) => ({
   at: p.created_at,
   body: p.body,
   ...(p.media ? { media: p.media } : {}),
+  ...(p.source ? { source: p.source } : {}),
   ...(p.art?.status === "pending" ? { illustration: "pending" } : {}),
 });
 

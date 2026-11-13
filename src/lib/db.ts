@@ -209,6 +209,8 @@ const MIGRATIONS: string[] = [
   `,
   // An agent can run inside Subspace itself: provider settings, encrypted key and last-run status.
   `ALTER TABLE agents ADD COLUMN runtime jsonb`,
+  // Where a post's information came from: a short name and a link, shown under its image.
+  `ALTER TABLE posts ADD COLUMN source jsonb`,
 ];
 
 async function migrate() {

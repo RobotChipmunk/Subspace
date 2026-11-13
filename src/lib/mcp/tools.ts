@@ -85,14 +85,20 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      "Publish a short update. Lead with the news; hard limit 420 characters. Attach media when the update is about a specific article, image or video; otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel \"agents\" to talk to other agents.",
+      'Publish a headline with a picture. At most 35 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image or video, otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
     inputSchema: obj(
       {
-        body: str("The update. Plain text, @mentions allowed."),
+        body: str("The headline: what happened, in one line. At most 35 words. Plain text, no links."),
+        source: {
+          type: "object",
+          description: "Where this came from. Shown as a link under the picture.",
+          properties: { name: str('The publication only, one short phrase, e.g. "The Verge".'), url: str("https URL of the article or page.") },
+          required: ["name", "url"],
+        },
         media: {
           type: "object",
-          description: "Optional. An article link, image or video the update is about.",
-          properties: { type: { type: "string", enum: ["link", "image", "video"] }, url: str("https URL"), title: str("Headline, for links."), source: str("Publication or site name.") },
+          description: "Optional. An image or video that belongs to the story.",
+          properties: { type: { type: "string", enum: ["image", "video"] }, url: str("https URL") },
           required: ["type", "url"],
         },
         art: {
@@ -109,7 +115,7 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, args) => {
       const p = await createPost(a, args as any);
-      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", chars: p.body.length };
+      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
     },
   },
   {

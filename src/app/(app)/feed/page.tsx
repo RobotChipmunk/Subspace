@@ -175,32 +175,33 @@ function Composer({ channel, dim, onPosted }: { channel: string; dim: boolean; o
 
 function PostMedia({ post }: { post: Post }) {
   const m = post.media;
-  const frame = "mt-3 overflow-hidden rounded-[18px] [--r:18px]";
-  if (m?.type === "image")
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />;
-  if (m?.type === "video")
-    return <video src={m.url} poster={m.poster} controls playsInline preload="metadata" onClick={(e) => e.stopPropagation()} className={`${frame} aspect-video w-full bg-black`} />;
   const art = post.art;
-  if (!art || (art.status === "none" && !m)) return null;
+  const frame = "mt-3 overflow-hidden rounded-[18px] [--r:18px]";
+  const picture =
+    m?.type === "image" ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />
+    ) : m?.type === "video" ? (
+      <video src={m.url} poster={m.poster} controls playsInline preload="metadata" onClick={(e) => e.stopPropagation()} className={`${frame} aspect-video w-full bg-black`} />
+    ) : art && art.status !== "none" ? (
+      <ArtPanel art={art} className={`${frame} aspect-[2/1] w-full`} />
+    ) : null;
   return (
-    <ArtPanel art={art} className={`${frame} aspect-[2/1] w-full ${m?.type === "link" ? "[&>img]:pb-[13%]" : ""}`}>
-      {m?.type === "link" && (
+    <>
+      {picture}
+      {post.source && (
         <a
-          href={m.url}
+          href={post.source.url}
           target="_blank"
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="absolute inset-x-2.5 bottom-2.5 z-10 flex items-center gap-2 rounded-[14px] border border-white/40 bg-white/55 px-3 py-2 text-[#1d1d1f] backdrop-blur-xl dark:border-white/12 dark:bg-black/45 dark:text-white transition-transform duration-300 hover:scale-[1.01]"
+          className="group/src mt-2 inline-flex max-w-full items-center gap-1 text-[13px] text-ink2 transition-colors hover:text-accent"
         >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13.5px] font-semibold leading-tight">{m.title ?? m.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
-            <span className="block truncate text-[12px] opacity-60">{m.source ?? new URL(m.url).hostname.replace(/^www\./, "")}</span>
-          </span>
-          <ArrowUpRight size={16} className="flex-none opacity-60" />
+          <span className="truncate underline decoration-[var(--line)] underline-offset-[3px] group-hover/src:decoration-current">{post.source.name}</span>
+          <ArrowUpRight size={13} className="flex-none opacity-60" />
         </a>
       )}
-    </ArtPanel>
+    </>
   );
 }
 
@@ -241,7 +242,7 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
             <span className="flex-1" />
             {tr && <TrackerChip tracker={tr} />}
           </div>
-          <p className={`mt-0.5 whitespace-pre-wrap break-words text-[15.5px] leading-[1.42] ${open ? "" : "line-clamp-4"}`}>
+          <p className={`mt-0.5 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em] ${open ? "" : "line-clamp-4"}`}>
             <Rich text={post.body} handles={handles} />
           </p>
           <PostMedia post={post} />

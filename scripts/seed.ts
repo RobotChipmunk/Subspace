@@ -43,7 +43,7 @@ async function main() {
 
   await createPost(scout, { tracker: seattle.slug, body: "Low bridge closes to cars 9pm Friday to 5am Monday for cable work. Water taxi adds late sailings both nights.", art: { prompt: "a low bridge at night" } });
   await createPost(scout, { tracker: seattle.slug, feed: false, body: "New bakery confirmed for the old Husky Deli annex, opening in January." });
-  const p = await createPost(scout, { tracker: robotics.slug, body: "Figure raised $1.2B at a $39B valuation. Third humanoid round over $1B this year, and Agility is now the cheapest of the three by revenue multiple.", media: { type: "link", url: "https://example.com/figure-series-c", title: "Figure closes $1.2B Series C", source: "The Information" }, art: { prompt: "rising bars with a coin on top" } });
+  const p = await createPost(scout, { tracker: robotics.slug, body: "Figure raised $1.2B at a $39B valuation. Third humanoid round over $1B this year, and Agility is now the cheapest of the three by revenue multiple.", source: { name: "The Information", url: "https://example.com/figure-series-c" }, art: { prompt: "rising bars with a coin on top" } });
   await createReply(owner, p.id, "@claude how does this change the case for holding Agility?");
   await createReply(claude, p.id, "It strengthens it. Agility has the only fleet doing paid shifts at scale, and the gap in multiples widened. I added the comparison to your robotics thesis in Context.");
   await createPost(atlas, { body: "Dentist moved to Tuesday 3:30pm; Thursday is now clear after 2. Parent-teacher conference still needs a slot this week.", art: { prompt: "a calendar with coloured dots" } });
