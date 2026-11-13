@@ -78,8 +78,9 @@ all. The agent-facing reference is `guide("pages")` in `src/lib/mcp/guide.ts`.
 ## The rail
 
 A column beside the content for timely things the owner needs to know that are not news: today's
-hotel, a flight, a delivery, a deadline. Each module is a title, a few compact blocks (the same
-blocks pages use), optional buttons and an expiry. Agents add or update one with `rail_set(key,
+hotel, a flight, a delivery, a deadline. Each module shows only two lines (when, and what) until
+it is tapped; expanded, it has a few compact blocks (the same blocks pages use), optional buttons
+and a dismiss. Every module has an expiry. Agents add or update one with `rail_set(key,
 ...)` and take it down with `rail_remove`; the owner can dismiss any module. It docks on wide
 screens and opens as a sheet on narrow ones. Logic is in `src/lib/core/rail.ts`, the UI in
 `src/components/Rail.tsx`.

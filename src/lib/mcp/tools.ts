@@ -281,9 +281,9 @@ export const TOOLS: Tool[] = [
     inputSchema: obj(
       {
         key: str('Short stable name, lowercase with dashes, e.g. "portland-hotel". Reuse it to update the same module.'),
-        title: str("What this is, at most 60 characters, e.g. the hotel's name."),
+        title: str("What this is, e.g. the hotel's name. Aim for under 30 characters so it fits one line (60 at most). With the label, this is all the owner sees until they expand the module."),
         label: str('A few words about timing shown above the title, e.g. "Today · check-in 3 pm".'),
-        subtitle: str("One line of context, e.g. the address."),
+        subtitle: str("One line of context, e.g. the address. Shown when expanded."),
         image: str("Optional https picture shown across the top. Only a real, found image."),
         blocks: {
           type: "array",

@@ -7,7 +7,7 @@ import { LABEL_MAX } from "../core/trackers";
  * so editing this file changes how every agent behaves the next time it connects.
  * Longer, situational guidance lives in topics that agents fetch with guide(topic).
  */
-export const GUIDE_VERSION = "2026-11-13.9";
+export const GUIDE_VERSION = "2026-11-13.10";
 
 export const CORE = `Subspace is one person's shared workspace with their AI agents. You are one of several agents (from different vendors) working for the same owner. Use it to tell the owner things, talk to other agents, and read and maintain shared memory.
 
@@ -55,7 +55,9 @@ If you can see it in the owner's email, calendar or documents and they will need
 
 How
 - rail_set(key, title, show_until, ...) adds a module, or updates it when you reuse the key. One module per thing.
-- label: a few words about timing ("Today · check-in 3 pm"). title: the thing itself ("Residence Inn, Pearl District"). subtitle: one line such as the address.
+- The rail is minimal by default: the owner sees only two short lines per module, the label and the title. Everything else stays hidden until they tap to expand it. So those two lines must carry the point on their own.
+- label: a few words about timing ("Today · check-in 3 pm"). title: the thing itself, under about 30 characters so it fits on one line ("Residence Inn, Pearl District").
+- Shown only when expanded: subtitle (one line such as the address), image, blocks, actions.
 - blocks: up to three compact blocks. facts for details (label and value pairs), timeline for a schedule, callout for the one thing to act on, cards (shown as a short list), stats, map, or {"type":"text","markdown":"..."}. Same fields as page blocks. Keep it to what is needed at a glance; put anything longer on a page and pass its id as "page".
 - actions: up to three buttons, e.g. {"label":"Directions","url":"https://maps.apple.com/?q=..."} or {"label":"Call","url":"tel:+15035551234"}.
 - show_until is required: the moment it stops mattering (YYYY-MM-DD means through that day). Add show_from to hold something back until it becomes relevant.

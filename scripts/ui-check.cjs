@@ -134,6 +134,12 @@ async function run(profile) {
       await settle(700);
     }
     await reachable(hotel.getByText("Residence Inn, Pearl District"), "rail module title");
+    // minimal by default: details stay hidden until the module is expanded
+    if (await hotel.getByText("84127763").count()) fail("rail: module details are showing before it is expanded");
+    if (await hotel.getByRole("link").count()) fail("rail: module buttons are showing before it is expanded");
+    await shot("rail-closed");
+    await press(hotel.getByRole("button", { expanded: false }));
+    await settle(700);
     await reachable(hotel.getByText("84127763"), "rail module detail");
     await reachable(hotel.getByRole("link", { name: /Directions/ }), "rail module action");
     await reachable(hotel.getByRole("link", { name: "Open page" }), "rail module page link");
@@ -142,6 +148,11 @@ async function run(profile) {
     await noSidewaysScroll("rail");
     await shot("rail");
     // dismissing one removes it; hiding the rail gives the space back
+    await press(page.locator('[data-rail-module="roof-inspection"]').getByRole("button", { expanded: false }));
+    await hotel
+      .getByText("84127763")
+      .waitFor({ state: "detached", timeout: 4000 })
+      .catch(() => fail("rail: opening one module left the other expanded"));
     await press(page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
     await settle(900);
     if ((await page.locator("[data-rail-module]").count()) !== 1) fail("rail: dismissing a module did not remove it");

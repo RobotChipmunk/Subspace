@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUpRight, PanelRightClose, X } from "lucide-react";
+import { ArrowUpRight, ChevronDown, PanelRightClose } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -60,77 +60,90 @@ export function useRail() {
 }
 export type RailState = ReturnType<typeof useRail>;
 
-function Module({ m, onDismiss }: { m: RailModule; onDismiss: () => void }) {
+/**
+ * One module. Closed, it is two quiet lines: when, and what. Everything else
+ * (picture, details, buttons) waits behind a tap.
+ */
+function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean; onToggle: () => void; onDismiss: () => void }) {
   const { agent } = useMe();
   const by = agent(m.author);
   const actions = [...m.actions, ...(m.page ? [{ label: "Open page", url: `/page/${m.page.id}` }] : [])];
   return (
-    <motion.article layout="position" initial={{ opacity: 0, y: 12, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} transition={soft} className="glass group/mod relative overflow-hidden rounded-[22px]" data-rail-module={m.key}>
-      {m.image && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={m.image} alt="" loading="lazy" className="h-[112px] w-full bg-fill object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
-      )}
-      <button onClick={onDismiss} aria-label={`Dismiss ${m.title}`} title="Dismiss" className="absolute right-2 top-2 z-[1] grid h-7 w-7 place-items-center rounded-full text-ink3 opacity-60 transition-all hover:bg-fill hover:text-ink hover:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/mod:opacity-100">
-        <X size={14} />
+    <motion.article layout="position" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={soft} className={`rail-module overflow-hidden rounded-[18px] ${open ? "is-open" : ""}`} data-rail-module={m.key}>
+      <button onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2.5 text-left">
+        <span className="min-w-0 flex-1">
+          {m.label && <span className="block truncate text-[11.5px] font-medium text-ink3">{m.label}</span>}
+          <span className={`block text-[14.5px] font-medium leading-snug ${open ? "" : "truncate"}`}>{m.title}</span>
+        </span>
+        <ChevronDown size={15} className={`shrink-0 text-ink3 transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
       </button>
-      <div className="p-3.5">
-        {m.label && <div className="mb-0.5 pr-7 text-[11.5px] font-semibold uppercase tracking-[0.05em] text-accent">{m.label}</div>}
-        <h3 className="pr-7 text-[15.5px] font-semibold leading-snug">{m.title}</h3>
-        {m.subtitle && <p className="text-[13px] leading-snug text-ink2">{m.subtitle}</p>}
-        {m.blocks.length > 0 && (
-          <div className="rail-blocks mt-3 flex flex-col gap-2.5">
-            {m.blocks.map((b, i) => (
-              <BlockView key={i} block={(b.type === "cards" ? { ...b, layout: "list" } : b) as AnyBlock} />
-            ))}
-          </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div key="more" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
+            <div className="px-3 pb-3">
+              {m.subtitle && <p className="text-[13px] leading-snug text-ink2">{m.subtitle}</p>}
+              {m.image && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={m.image} alt="" loading="lazy" className="mt-2.5 h-[104px] w-full rounded-[12px] bg-fill object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
+              )}
+              {m.blocks.length > 0 && (
+                <div className="rail-blocks mt-2.5 flex flex-col gap-2.5">
+                  {m.blocks.map((b, i) => (
+                    <BlockView key={i} block={(b.type === "cards" ? { ...b, layout: "list" } : b) as AnyBlock} />
+                  ))}
+                </div>
+              )}
+              {actions.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {actions.map((a, i) =>
+                    a.url.startsWith("/") ? (
+                      <Link key={i} href={a.url} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
+                        {a.label}
+                      </Link>
+                    ) : (
+                      <a key={i} href={a.url} {...(a.url.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
+                        {a.label}
+                        {a.url.startsWith("http") && <ArrowUpRight size={12} className="text-ink3" />}
+                      </a>
+                    ),
+                  )}
+                </div>
+              )}
+              <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-ink3">
+                {by && <Avatar agent={by} size={14} />}
+                <span className="min-w-0 flex-1 truncate">
+                  {by?.name} · {ago(m.updated_at)}
+                </span>
+                <button onClick={onDismiss} aria-label={`Dismiss ${m.title}`} className="-my-1 rounded-full px-2 py-1 transition-colors hover:bg-fill hover:text-ink">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </motion.div>
         )}
-        {actions.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {actions.map((a, i) =>
-              a.url.startsWith("/") ? (
-                <Link key={i} href={a.url} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
-                  {a.label}
-                </Link>
-              ) : (
-                <a key={i} href={a.url} {...(a.url.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
-                  {a.label}
-                  {a.url.startsWith("http") && <ArrowUpRight size={12} className="text-ink3" />}
-                </a>
-              ),
-            )}
-          </div>
-        )}
-        <div className="mt-2.5 flex items-center gap-1.5 text-[11.5px] text-ink3">
-          {by && <Avatar agent={by} size={14} />}
-          {by?.name} · {ago(m.updated_at)}
-        </div>
-      </div>
+      </AnimatePresence>
     </motion.article>
   );
 }
 
 function Modules({ rail }: { rail: RailState }) {
+  // one open at a time, so the rail never grows into a second page
+  const [openId, setOpenId] = useState<string | null>(null);
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-0.5">
       <AnimatePresence initial={false} mode="popLayout">
         {rail.modules.map((m) => (
-          <Module key={m.id} m={m} onDismiss={() => rail.dismiss(m.id)} />
+          <Module key={m.id} m={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} onDismiss={() => rail.dismiss(m.id)} />
         ))}
       </AnimatePresence>
-      {rail.modules.length === 0 && (
-        <p className="px-2 py-10 text-center text-[13.5px] leading-relaxed text-ink3">
-          Nothing timely right now.
-          <br />
-          Agents put things here when you need them: bookings, deliveries, deadlines.
-        </p>
-      )}
+      {rail.modules.length === 0 && <p className="px-3 py-8 text-[13.5px] text-ink3">Nothing timely right now.</p>}
     </div>
   );
 }
 
 const Header = ({ rail }: { rail: RailState }) => (
-  <div className="mb-3 flex items-center justify-between px-1">
-    <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink3">Now</h2>
+  <div className="mb-1.5 flex items-center justify-between pl-3">
+    <h2 className="text-[13px] font-semibold text-ink3">Now</h2>
     <button onClick={rail.close} aria-label="Hide the rail" title="Hide" className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink">
       <PanelRightClose size={16} />
     </button>
@@ -148,7 +161,7 @@ export function Rail({ rail }: { rail: RailState }) {
     <>
       <AnimatePresence initial={false}>
         {rail.docked && (
-          <motion.aside key="dock" aria-label="Now" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={soft} className="scroll fixed bottom-0 right-0 top-0 z-20 w-[340px] px-4 pb-6 pt-5">
+          <motion.aside key="dock" aria-label="Now" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={soft} className="scroll fixed bottom-0 right-0 top-0 z-20 w-[288px] px-3 pb-6 pt-5">
             <Header rail={rail} />
             <Modules rail={rail} />
           </motion.aside>
@@ -158,7 +171,7 @@ export function Rail({ rail }: { rail: RailState }) {
         {rail.sheet && (
           <motion.div key="sheet" className="fixed inset-0 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
             <div className="absolute inset-0 bg-black/25" onClick={rail.close} />
-            <motion.aside aria-label="Now" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={spring} className="rail-sheet scroll absolute inset-y-0 right-0 w-[min(360px,90vw)] px-4 pb-10 pt-5">
+            <motion.aside aria-label="Now" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={spring} className="rail-sheet scroll absolute inset-y-0 right-0 w-[min(340px,88vw)] px-3 pb-10 pt-5">
               <Header rail={rail} />
               <Modules rail={rail} />
             </motion.aside>
