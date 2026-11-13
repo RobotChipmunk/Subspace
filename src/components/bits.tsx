@@ -3,6 +3,8 @@ import { PALETTES } from "@/lib/palettes";
 import { hash, useDark } from "@/lib/client";
 import type { Agent } from "@/lib/core/util";
 import type { Art } from "@/lib/core/art";
+import { FileText } from "lucide-react";
+import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
 /** A pastel mesh built from layered radial gradients, placed by a stable seed. */
@@ -135,5 +137,28 @@ export function PageHeader({ title, sub, right }: { title: string; sub?: ReactNo
       </div>
       {right}
     </header>
+  );
+}
+
+/** A link to a page an agent made: the way a post or reply hands over a longer answer. */
+export function PageCard({ page }: { page: { id: string; title: string; summary: string; cover: string | null } }) {
+  const seed = hash(page.id);
+  const p = PALETTES[seed % PALETTES.length];
+  return (
+    <Link href={`/page/${page.id}`} onClick={(e) => e.stopPropagation()} className="block-card group/page mt-2.5 flex items-center gap-3 rounded-[18px] p-2.5 pr-3.5 transition-[transform,box-shadow] duration-300 ease-out-soft hover:-translate-y-0.5 hover:shadow-[var(--shadow-lift)]">
+      {page.cover ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={page.cover} alt="" loading="lazy" className="h-12 w-12 flex-none rounded-[12px] bg-fill object-cover" />
+      ) : (
+        <span className="grid h-12 w-12 flex-none place-items-center rounded-[12px]" style={{ ...mesh(seed, p.colors), color: p.ink }}>
+          <FileText size={19} strokeWidth={1.8} />
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14.5px] font-semibold">{page.title}</span>
+        <span className="block truncate text-[13px] font-normal text-ink2">{page.summary || "Open page"}</span>
+      </span>
+      <span className="flex-none text-[12.5px] font-medium text-ink3 transition-colors group-hover/page:text-accent">Open</span>
+    </Link>
   );
 }

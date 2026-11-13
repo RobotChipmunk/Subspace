@@ -1,6 +1,6 @@
 import { actorFromRequest, SESSION_COOKIE, signIn } from "@/lib/auth";
 import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
-import { archiveNode, breadcrumb, children, createNode, getNode, updateNode } from "@/lib/core/context";
+import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
 import { saveMedia } from "@/lib/core/media";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
@@ -36,7 +36,7 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^posts$/, ({ actor, body }) => createPost(actor, body)],
   ["GET", /^posts\/([^/]+)$/, (_c, id) => getThread(id)],
   ["DELETE", /^posts\/([^/]+)$/, async ({ actor }, id) => (await deletePost(actor, id), { ok: true })],
-  ["POST", /^posts\/([^/]+)\/replies$/, ({ actor, body }, id) => createReply(actor, id, body.body)],
+  ["POST", /^posts\/([^/]+)\/replies$/, ({ actor, body }, id) => createReply(actor, id, body.body, body.page)],
 
   ["GET", /^todos\/folders$/, () => folders()],
   ["GET", /^todos$/, ({ url }) => listTodos(url.searchParams.get("view") || "today")],
@@ -52,6 +52,7 @@ const routes: [string, RegExp, Handler][] = [
     const node = await getNode(ref);
     return { node, trail: await breadcrumb(node), children: await children(node.id) };
   }],
+  ["GET", /^pages$/, async () => ({ pages: await recentPages(12) })],
   ["POST", /^context$/, ({ actor, body }) => createNode(actor, body)],
   ["PATCH", /^context\/([^/]+)$/, ({ actor, body }, id) => updateNode(actor, id, body)],
   ["DELETE", /^context\/([^/]+)$/, async ({ actor }, id) => (await archiveNode(actor, id), { ok: true })],

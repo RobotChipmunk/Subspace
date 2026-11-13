@@ -296,6 +296,79 @@ async function run(profile) {
     await settle(500);
   });
 
+  // ---------- Pages ----------
+  await step("pages in context", async () => {
+    await page.goto(`${BASE}/context`);
+    await settle(1500);
+    const recent = page.locator("section", { hasText: "Recent pages" }).getByRole("button", { name: /Portland dinner options/ });
+    await reachable(recent, "recent pages card");
+    await shot("context-recent-pages");
+    await press(recent);
+    await page.locator(".page-block").first().waitFor({ timeout: 8000 });
+    await settle(2500);
+    for (const kind of ["callout", "cards", "map", "table", "columns", "sources"]) await reachable(page.locator(`.page-block[data-kind="${kind}"] > section, .page-block[data-kind="${kind}"] > div`).last(), `${kind} block`);
+    const carousel = page.locator('.page-block[data-kind="cards"] .carousel');
+    const c = await carousel.evaluate((el) => ({ cards: el.children.length, scrolls: el.scrollWidth > el.clientWidth }));
+    if (c.cards !== 4) fail(`page: carousel shows ${c.cards} cards, expected 4`);
+    if (!c.scrolls && profile.viewport.width < 1100) fail("page: carousel does not scroll sideways on a narrow screen");
+    const pins = await page.locator(".map-frame .map-pin").count();
+    if (pins !== 5) fail(`page: map shows ${pins} pins, expected 5`);
+    const rating = page.locator('.page-block[data-kind="cards"]').getByText("4.6").first();
+    await reachable(rating, "card rating");
+    await noSidewaysScroll("page");
+    await shot("page-shortlist");
+    // a block is one unit: its data can be edited or it can be removed
+    const callout = page.locator('.page-block[data-kind="callout"]');
+    await callout.scrollIntoViewIfNeeded();
+    await callout.hover();
+    await press(callout.getByRole("button", { name: "Edit" }));
+    await reachable(callout.getByLabel("callout data"), "block data editor");
+    await press(callout.getByRole("button", { name: "Cancel" }));
+    await settle(300);
+    if (!(await callout.getByText("Book Nostrana for Saturday").count())) fail("page: cancelling a block edit lost the block");
+  });
+  await step("research page", async () => {
+    await page.goto(`${BASE}/context`);
+    await settle(1200);
+    await press(page.locator("section", { hasText: "Recent pages" }).getByRole("button", { name: /Humanoid robotics/ }));
+    await page.locator('.page-block[data-kind="chart"]').first().waitFor({ timeout: 8000 });
+    await settle(1500);
+    for (const kind of ["stats", "chart", "timeline", "callout", "sources"]) await reachable(page.locator(`.page-block[data-kind="${kind}"] > section, .page-block[data-kind="${kind}"] > div`).first(), `${kind} block`);
+    const chart = await page.locator('.page-block[data-kind="chart"] svg').first().evaluate((el) => ({ drawn: el.getBoundingClientRect().width, natural: el.viewBox.baseVal.width, marks: el.querySelectorAll("path, polyline").length }));
+    if (Math.abs(chart.drawn - chart.natural) > 2) fail(`page: chart is scaled (${Math.round(chart.drawn)}px drawn for a ${chart.natural}px drawing), so its text is the wrong size`);
+    if (!chart.marks) fail("page: chart has no bars or lines");
+    if (!(await page.getByText("$2B").count())) fail("page: chart axis does not format units ($2B)");
+    const title = await page.getByLabel("Title").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+    if (!title) fail("page: the title is cut off");
+    await noSidewaysScroll("research page");
+    await shot("page-research");
+  });
+  await step("page link from the feed", async () => {
+    await page.goto(`${BASE}/feed`);
+    await settle(1500);
+    const card = page.locator("article", { hasText: "Italian place for Saturday" }).first();
+    await card.scrollIntoViewIfNeeded();
+    await press(card.locator("p").first());
+    await settle(1300);
+    const link = card.getByRole("link", { name: /Portland dinner options/ });
+    await reachable(link, "page card in a reply");
+    await shot("feed-page-card");
+    await press(link);
+    await page.waitForURL("**/context?node=*", { timeout: 8000 });
+    await page.locator(".page-block").first().waitFor({ timeout: 8000 });
+  });
+  await step("blocks in a todo", async () => {
+    await page.goto(`${BASE}/todos`);
+    await settle(1200);
+    await press(page.locator("li", { hasText: "Find a restaurant in Portland" }).getByText("Find a restaurant in Portland"));
+    await page.locator('.page-block[data-kind="cards"]').waitFor({ timeout: 8000 });
+    await settle(800);
+    await reachable(page.locator('.page-block[data-kind="cards"]').getByText("Nostrana").first(), "cards in todo notes");
+    await reachable(page.getByLabel("Add an image").locator(".."), "add image button");
+    await noSidewaysScroll("todo with blocks");
+    await shot("todo-blocks");
+  });
+
   // ---------- Following ----------
   await step("following expand and assign", async () => {
     await press(page.getByRole("link", { name: "Following", exact: true }));

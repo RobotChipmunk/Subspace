@@ -211,6 +211,12 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE agents ADD COLUMN runtime jsonb`,
   // Where a post's information came from: a short name and a link, shown under its image.
   `ALTER TABLE posts ADD COLUMN source jsonb`,
+  // Pages: context nodes that are finished documents (research, shortlists, plans) rather than
+  // memory notes, optionally with a cover image; and posts that point at a page.
+  `ALTER TABLE context_nodes ADD COLUMN kind text NOT NULL DEFAULT 'note';
+   ALTER TABLE context_nodes ADD COLUMN cover text;
+   CREATE INDEX context_pages ON context_nodes (created_at DESC) WHERE kind = 'page' AND NOT archived;
+   ALTER TABLE posts ADD COLUMN page_id text`,
 ];
 
 async function migrate() {

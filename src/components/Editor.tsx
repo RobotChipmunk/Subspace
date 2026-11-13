@@ -1,18 +1,20 @@
 "use client";
-import { Extension, Mark } from "@tiptap/core";
+import { Extension, Mark, Node as TiptapNode } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { EditorContent, useEditor, type Editor as TEditor } from "@tiptap/react";
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor as TEditor, type NodeViewProps } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { AnimatePresence, motion } from "motion/react";
-import { Sparkles } from "lucide-react";
+import { ImagePlus, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "tiptap-markdown";
 import { api, soft, useMe } from "@/lib/client";
+import { isBlockType, validateBlock, type AnyBlock } from "@/lib/blocks";
+import { BlockView } from "./blocks/BlockView";
 import type { Agent } from "@/lib/core/util";
 import { Floating } from "./Floating";
 import { MentionMenu, useMentionMatches } from "./MentionInput";
@@ -43,6 +45,121 @@ const AgentEdit = Mark.create({
           expelEnclosingWhitespace: true,
         },
         parse: {},
+      },
+    };
+  },
+});
+
+function PageBlockView({ node, updateAttributes, deleteNode }: NodeViewProps) {
+  const kind = node.attrs.kind as string;
+  const json = node.attrs.json as string;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const parsed = useMemo(() => {
+    try {
+      const data = JSON.parse(json);
+      const problem = validateBlock(kind, data);
+      return problem ? { problem } : { data };
+    } catch {
+      return { problem: "its data is not valid JSON" };
+    }
+  }, [kind, json]);
+
+  function save() {
+    try {
+      const problem = validateBlock(kind, JSON.parse(draft));
+      if (problem) return setError(problem);
+    } catch (e) {
+      return setError((e as Error).message);
+    }
+    updateAttributes({ json: draft.trim() });
+    setEditing(false);
+  }
+
+  const tool = "h-7 rounded-full px-2.5 text-[12px] font-medium menu";
+  return (
+    <NodeViewWrapper className="page-block" data-kind={kind} contentEditable={false}>
+      {!editing && (
+        <div className="page-block-tools">
+          <button type="button" className={tool} onClick={() => (setDraft(JSON.stringify(JSON.parse(parsed.data ? json : "{}"), null, 2)), setError(""), setEditing(true))}>
+            Edit
+          </button>
+          <button type="button" className={`${tool} hover:text-danger`} onClick={() => deleteNode()}>
+            Remove
+          </button>
+        </div>
+      )}
+      {editing ? (
+        <div className="block-card rounded-[18px] p-3">
+          <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-[0.05em] text-ink3">{kind} data</div>
+          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} rows={Math.min(18, draft.split("\n").length + 1)} aria-label={`${kind} data`} className="w-full resize-y rounded-[12px] bg-fill p-2.5 font-mono text-[12.5px] leading-relaxed" />
+          {error && <p className="mt-1 text-[12.5px] text-danger">{error}</p>}
+          <div className="mt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setEditing(false)} className="h-8 rounded-full px-3 text-[13px] text-ink2 hover:bg-fill">
+              Cancel
+            </button>
+            <button type="button" onClick={save} className="h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-bg">
+              Save
+            </button>
+          </div>
+        </div>
+      ) : parsed.data ? (
+        <BlockView block={{ type: kind, ...parsed.data } as AnyBlock} />
+      ) : (
+        <div className="rounded-[18px] bg-fill p-3.5 text-[13.5px] text-ink2">
+          This {kind} section could not be shown: {parsed.problem}.
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[12px] text-ink3">{json.slice(0, 1200)}</pre>
+        </div>
+      )}
+    </NodeViewWrapper>
+  );
+}
+
+/**
+ * A page block (cards, map, table…). In markdown it is a fenced code block whose language is the
+ * block type and whose body is JSON; in the editor it is a single unit drawn as a component.
+ */
+const PageBlock = TiptapNode.create({
+  name: "pageBlock",
+  group: "block",
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return { kind: { default: "cards" }, json: { default: "{}" } };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-page-block]", getAttrs: (el) => ({ kind: (el as HTMLElement).getAttribute("data-page-block"), json: (el as HTMLElement).getAttribute("data-json") }) }];
+  },
+  renderHTML({ node }) {
+    return ["div", { "data-page-block": node.attrs.kind, "data-json": node.attrs.json }];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(PageBlockView);
+  },
+  addStorage() {
+    return {
+      markdown: {
+        serialize(state: { write: (s: string) => void; text: (s: string, escape?: boolean) => void; ensureNewLine: () => void; closeBlock: (n: unknown) => void }, node: { attrs: { kind: string; json: string } }) {
+          state.write("```" + node.attrs.kind + "\n");
+          state.text(node.attrs.json, false);
+          state.ensureNewLine();
+          state.write("```");
+          state.closeBlock(node);
+        },
+        parse: {
+          // Turn fenced blocks of a known type into block elements before the editor reads the HTML.
+          updateDOM(element: HTMLElement) {
+            element.querySelectorAll("pre > code").forEach((code) => {
+              const lang = code.className.match(/language-([\w-]+)/)?.[1];
+              if (!lang || !isBlockType(lang)) return;
+              const div = element.ownerDocument.createElement("div");
+              div.setAttribute("data-page-block", lang);
+              div.setAttribute("data-json", (code.textContent ?? "").trim());
+              code.parentElement!.replaceWith(div);
+            });
+          },
+        },
       },
     };
   },
@@ -128,7 +245,8 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
   // keyboard on iOS mid-word. They are built once.
   const extensions = useMemo(
     () => [
-      StarterKit.configure({ link: { openOnClick: false, autolink: true } }),
+      StarterKit.configure({ link: { openOnClick: true, autolink: true } }),
+      PageBlock,
       TaskList,
       TaskItem.configure({ nested: true }),
       Image,
@@ -248,6 +366,22 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
         )}
       </AnimatePresence>
       <EditorContent editor={editor} />
+      <label className="absolute -top-9 right-0 z-[1] grid h-8 w-8 cursor-pointer place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink2" title="Add an image">
+        <ImagePlus size={16} />
+        <input
+          type="file"
+          accept="image/*"
+          aria-label="Add an image"
+          className="sr-only"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file || !editor) return;
+            const src = await upload(file);
+            editor.chain().focus().setImage({ src }).run();
+          }}
+        />
+      </label>
       <AnimatePresence>
         {mention && matches.length > 0 && (
           <Floating

@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { ArtPanel, Avatar, PageHeader, Rich, TrackerChip } from "@/components/bits";
+import { ArtPanel, Avatar, PageCard, PageHeader, Rich, TrackerChip } from "@/components/bits";
 import { MentionInput } from "@/components/MentionInput";
 import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
 import type { Post } from "@/lib/core/posts";
@@ -243,6 +243,7 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
           <p className={`mt-0.5 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em] ${open ? "" : "line-clamp-4"}`}>
             <Rich text={post.body} handles={handles} />
           </p>
+          {post.page && <PageCard page={post.page} />}
           <PostMedia post={post} open={open} />
           <AnimatePresence initial={false}>
             {!open && post.reply_count > 0 && (
@@ -307,6 +308,7 @@ function Thread({ post, canDelete, onDeleted }: { post: Post; canDelete: boolean
               <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.42]">
                 <Rich text={r.body} handles={handles} />
               </p>
+              {r.page && <PageCard page={r.page} />}
             </div>
           </motion.div>
         ))}

@@ -1,5 +1,5 @@
 "use client";
-import { ChevronRight, FileText, Plus, Search, Trash2, X } from "lucide-react";
+import { ChevronRight, FileText, LayoutTemplate, Plus, Search, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -36,7 +36,7 @@ function Inner() {
   }
 
   return (
-    <div className="mx-auto max-w-[820px]">
+    <div className="mx-auto max-w-[880px]">
       <header className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3 px-1">
         <nav className="flex min-w-0 flex-1 items-center gap-1 max-sm:basis-full text-[30px] font-bold leading-tight tracking-[-0.03em]" aria-label="Breadcrumb">
           <button onClick={() => go(null)} className={`transition-colors ${data?.node ? "text-ink3 hover:text-ink" : ""}`}>
@@ -80,6 +80,7 @@ function Inner() {
           <motion.div key={nodeId ?? "root"} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
             {data.node && data.node.id === nodeId && <NodeEditor node={data.node} onChanged={() => mutate()} onDeleted={() => go(data.node!.parent_id)} />}
             {!data.node && <p className="-mt-4 mb-6 px-1 text-[14px] text-ink2">What your agents know about you, your life and their work. They keep it current; you can change anything.</p>}
+            {!data.node && <RecentPages onOpen={go} />}
             <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
               {data.children.map((c, i) => (
                 <Card key={c.id} node={c} index={i} onOpen={() => go(c.id)} />
@@ -95,6 +96,41 @@ function Inner() {
   );
 }
 
+function RecentPages({ onOpen }: { onOpen: (id: string) => void }) {
+  const { data } = useSWR<{ pages: ContextLite[] }>("pages", fetcher, { refreshInterval: 30_000 });
+  if (!data?.pages.length) return null;
+  return (
+    <section className="mb-6">
+      <h2 className="mb-2 px-1 text-[12.5px] font-semibold uppercase tracking-[0.06em] text-ink3">Recent pages</h2>
+      <div data-scroll-x className="carousel -mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2 pt-1">
+        {data.pages.map((p) => {
+          const seed = hash(p.id);
+          const pal = PALETTES[seed % PALETTES.length];
+          return (
+            <button key={p.id} onClick={() => onOpen(p.id)} className="glass group w-[210px] flex-none snap-start overflow-hidden rounded-[20px] text-left transition-[transform,box-shadow] duration-300 ease-out-soft hover:-translate-y-0.5 hover:shadow-[var(--shadow-lift)]">
+              {p.cover ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={p.cover} alt="" loading="lazy" className="h-[92px] w-full bg-fill object-cover" />
+              ) : (
+                <div className="grid h-[92px] place-items-center" style={{ ...mesh(seed, pal.colors), color: pal.ink }}>
+                  <LayoutTemplate size={22} strokeWidth={1.6} />
+                </div>
+              )}
+              <div className="p-3">
+                <div className="truncate text-[14.5px] font-semibold">{p.title}</div>
+                <p className="line-clamp-2 h-[34px] text-[12.5px] leading-snug text-ink2">{p.summary}</p>
+                <div className="mt-1 truncate text-[11.5px] text-ink3">
+                  {p.path.split("/").slice(0, -1).join(" › ")} · {ago(p.created_at)}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Card({ node, index, onOpen }: { node: ContextLite; index: number; onOpen: () => void }) {
   const { agent } = useMe();
   const seed = hash(node.id);
@@ -103,10 +139,22 @@ function Card({ node, index, onOpen }: { node: ContextLite; index: number; onOpe
   return (
     <motion.button initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: Math.min(index, 10) * 0.035 }} whileTap={{ scale: 0.985 }} onClick={onOpen} className="glass group flex items-start gap-3.5 rounded-[22px] p-4 text-left transition-shadow duration-500 hover:shadow-[0_2px_4px_rgba(0,0,0,.03),0_14px_40px_rgba(30,20,60,.09)]">
       <div className="grid h-11 w-11 flex-none place-items-center rounded-[14px] transition-transform duration-500 ease-out-soft group-hover:rotate-[-6deg] group-hover:scale-105" style={{ ...mesh(seed, p.colors), color: p.ink, boxShadow: "inset 0 0 0 1px rgba(255,255,255,.4)" }}>
-        {node.child_count ? <span className="text-[15px] font-bold">{node.child_count}</span> : <FileText size={18} strokeWidth={1.8} />}
+        {node.cover ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={node.cover} alt="" loading="lazy" className="h-full w-full rounded-[14px] object-cover" />
+        ) : node.child_count ? (
+          <span className="text-[15px] font-bold">{node.child_count}</span>
+        ) : node.kind === "page" ? (
+          <LayoutTemplate size={18} strokeWidth={1.8} />
+        ) : (
+          <FileText size={18} strokeWidth={1.8} />
+        )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[16px] font-semibold">{node.title}</div>
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[16px] font-semibold">{node.title}</span>
+          {node.kind === "page" && <span className="flex-none rounded-full bg-accent-soft px-1.5 py-px text-[11px] font-medium text-accent">Page</span>}
+        </div>
         <p className="line-clamp-2 text-[13.5px] leading-snug text-ink2">{node.summary || (node.body_chars ? "No summary yet." : "Empty.")}</p>
         <div className="mt-1.5 flex items-center gap-1.5 text-[12px] text-ink3">
           {by && <Avatar agent={by} size={14} />}
@@ -116,6 +164,11 @@ function Card({ node, index, onOpen }: { node: ContextLite; index: number; onOpe
     </motion.button>
   );
 }
+
+/** Sizes a one-line text area to its content so long titles wrap instead of being cut off. */
+const grow = (el: HTMLTextAreaElement | null) => {
+  if (el) (el.style.height = "0px"), (el.style.height = el.scrollHeight + "px");
+};
 
 function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChanged: () => void; onDeleted: () => void }) {
   const { agent } = useMe();
@@ -145,9 +198,24 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
   useEffect(() => () => void flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="glass mb-5 rounded-[26px] p-6 max-md:p-5">
+    <div className="glass mb-5 overflow-hidden rounded-[26px] p-6 max-md:p-5">
+      {node.cover && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={node.cover} alt="" className="-mx-6 -mt-6 mb-5 block h-[200px] w-[calc(100%+3rem)] max-w-none bg-fill object-cover max-md:-mx-5 max-md:-mt-5 max-md:h-[150px] max-md:w-[calc(100%+2.5rem)]" onError={(e) => (e.currentTarget.style.display = "none")} />
+      )}
       <div className="flex items-start gap-3">
-        <input value={title} aria-label="Title" onChange={(e) => setTitle(e.target.value)} onBlur={() => title.trim() && title !== node.title && patch({ title })} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} autoFocus={node.title === "Untitled"} onFocus={(e) => node.title === "Untitled" && e.currentTarget.select()} className="min-w-0 flex-1 text-[26px] font-bold tracking-[-0.025em]" />
+        <textarea
+          value={title}
+          rows={1}
+          aria-label="Title"
+          onChange={(e) => setTitle(e.target.value.replace(/\n/g, ""))}
+          onBlur={() => title.trim() && title !== node.title && patch({ title })}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), e.currentTarget.blur())}
+          autoFocus={node.title === "Untitled"}
+          onFocus={(e) => node.title === "Untitled" && e.currentTarget.select()}
+          ref={grow}
+          className="min-w-0 flex-1 resize-none overflow-hidden text-[26px] font-bold leading-[1.2] tracking-[-0.025em]"
+        />
         <AnimatePresence mode="wait" initial={false}>
           {confirm ? (
             <motion.button key="c" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} onClick={async () => (await api(`context/${node.id}`, { method: "DELETE" }), onDeleted())} onBlur={() => setConfirm(false)} autoFocus className="mt-1 h-8 rounded-full bg-danger px-3 text-[13px] font-medium text-white">
@@ -160,8 +228,18 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
           )}
         </AnimatePresence>
       </div>
-      <input value={summary} aria-label="Summary" onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== node.summary && patch({ summary })} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} placeholder="One line on what this is about" className="mt-0.5 w-full text-[15px] text-ink2" />
-      <div className="mb-5 mt-2 flex items-center gap-1.5 text-[12.5px] text-ink3">
+      <textarea
+        value={summary}
+        rows={1}
+        aria-label="Summary"
+        onChange={(e) => setSummary(e.target.value.replace(/\n/g, ""))}
+        onBlur={() => summary !== node.summary && patch({ summary })}
+        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), e.currentTarget.blur())}
+        placeholder="One line on what this is about"
+        ref={grow}
+        className="mt-0.5 block w-full resize-none overflow-hidden text-[15px] leading-snug text-ink2"
+      />
+      <div className="mb-6 mt-2 flex items-center gap-1.5 pr-10 text-[12.5px] text-ink3">
         {by && <Avatar agent={by} size={15} />}
         Updated by {by?.name ?? "someone"} · {ago(node.updated_at)} · version {node.version}
       </div>

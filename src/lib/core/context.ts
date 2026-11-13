@@ -1,3 +1,4 @@
+import { checkBlocks } from "../blocks";
 import { q, q1 } from "../db";
 import { markAgentText } from "./todos";
 import { ApiError, bad, findMentions, indexDoc, logEvent, newId, notFound, slugify, unindexDoc, type Agent } from "./util";
@@ -9,6 +10,8 @@ export type ContextNode = {
   title: string;
   summary: string;
   body: string;
+  kind: "note" | "page";
+  cover: string | null;
   version: number;
   updated_by: string;
   archived: boolean;
@@ -16,7 +19,7 @@ export type ContextNode = {
   updated_at: string;
 };
 
-const LITE = "id, parent_id, path, title, summary, version, updated_by, created_at, updated_at, length(body) AS body_chars";
+const LITE = "id, parent_id, path, title, summary, kind, cover, version, updated_by, created_at, updated_at, length(body) AS body_chars";
 export type ContextLite = Omit<ContextNode, "body" | "archived"> & { body_chars: number; child_count?: number };
 
 export async function getNode(ref: string): Promise<ContextNode> {
@@ -51,25 +54,37 @@ async function uniquePath(parentPath: string | null, title: string, ignoreId?: s
   }
 }
 
-export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string }) {
+/** Agents' pages must be well formed before they are stored; the owner's editor only produces valid blocks. */
+function guard(actor: Agent, body: string) {
+  if (actor.kind !== "agent") return;
+  const problems = checkBlocks(body);
+  if (problems.length) throw bad(`${problems.join(" ")} Fix the block and send it again. See guide("pages") for each block's fields.`);
+}
+
+const okCover = (c: unknown) => (typeof c === "string" && /^https:\/\//.test(c) && c.length < 2000 ? c : null);
+
+export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string; kind?: "note" | "page"; cover?: string }) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Context node needs a title.");
   const parent = input.parent ? await getNode(input.parent) : null;
   const id = newId("c");
   const path = await uniquePath(parent?.path ?? null, title);
   const body = input.body ?? "";
-  await q("INSERT INTO context_nodes (id, parent_id, path, title, summary, body, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7)", [
-    id, parent?.id ?? null, path, title.slice(0, 120), (input.summary ?? "").slice(0, 400), body, actor.id,
+  guard(actor, body);
+  const kind = input.kind === "page" ? "page" : "note";
+  if (kind === "page" && !parent) throw bad("A page needs a parent. Put it under the context area it belongs to, in a folder for its topic.");
+  await q("INSERT INTO context_nodes (id, parent_id, path, title, summary, body, updated_by, kind, cover) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)", [
+    id, parent?.id ?? null, path, title.slice(0, 120), (input.summary ?? "").slice(0, 400), body, actor.id, kind, okCover(input.cover),
   ]);
   await indexDoc("context", id, title, `${input.summary ?? ""}\n${body}`);
-  await logEvent({ actor: actor.id, type: "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
+  await logEvent({ actor: actor.id, type: kind === "page" ? "page.created" : "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
   return getNode(id);
 }
 
 export async function updateNode(
   actor: Agent,
   ref: string,
-  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number },
+  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page" },
 ) {
   const before = await getNode(ref);
   if (patch.expect_version !== undefined && patch.expect_version !== before.version)
@@ -83,6 +98,9 @@ export async function updateNode(
     body = before.body.replace(patch.body_replace.find, patch.body_replace.replace);
   }
   if (body.length > 400_000) throw bad("Node body is too long. Split it into child nodes.");
+  if (body !== before.body) guard(actor, body);
+  const cover = patch.cover === undefined ? before.cover : patch.cover === null ? null : okCover(patch.cover);
+  const kind = patch.kind ?? before.kind;
   const title = patch.title?.trim() || before.title;
   const summary = patch.summary !== undefined ? patch.summary.slice(0, 400) : before.summary;
 
@@ -96,7 +114,7 @@ export async function updateNode(
     path = await uniquePath(parent?.path ?? null, title, before.id);
   }
 
-  const changed = body !== before.body || title !== before.title || summary !== before.summary;
+  const changed = body !== before.body || title !== before.title || summary !== before.summary || cover !== before.cover || kind !== before.kind;
   if (!changed && path === before.path) return before;
 
   if (changed) {
@@ -105,8 +123,8 @@ export async function updateNode(
     ]);
   }
   await q(
-    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8 WHERE id=$1",
-    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0],
+    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10 WHERE id=$1",
+    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind],
   );
   if (path !== before.path) {
     // Keep every descendant's address in step with its ancestor.
@@ -142,3 +160,11 @@ export async function revisions(ref: string, limit = 10) {
 }
 
 export { markAgentText };
+
+/** The newest pages, for people and agents who want to see what was made lately without walking the tree. */
+export async function recentPages(limit = 20, before?: string): Promise<ContextLite[]> {
+  return q<ContextLite>(
+    `SELECT ${LITE} FROM context_nodes n WHERE kind = 'page' AND NOT archived ${before ? "AND created_at < $2::timestamptz" : ""} ORDER BY created_at DESC LIMIT $1`,
+    before ? [Math.min(limit, 50), before] : [Math.min(limit, 50)],
+  );
+}

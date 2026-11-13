@@ -1,3 +1,4 @@
+import { checkBlocks } from "../blocks";
 import { q, q1 } from "../db";
 import { addDays, bad, findMentions, indexDoc, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
 
@@ -103,6 +104,12 @@ async function nextPosition(scope: string, date: string | null) {
   return r!.p;
 }
 
+function guardBlocks(actor: Agent, md: string) {
+  if (actor.kind !== "agent") return;
+  const problems = checkBlocks(md);
+  if (problems.length) throw bad(`${problems.join(" ")} Fix the block and send it again. See guide("pages") for each block's fields.`);
+}
+
 /** Wraps each line an agent wrote in <ins> so the editor can show exactly what changed and who did it. */
 export function markAgentText(md: string, handle: string): string {
   let fence = false;
@@ -134,6 +141,7 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   const cal = await calendar();
   const { add } = viewSpec(input.view || "today", cal);
   const id = newId("t");
+  if (input.notes) guardBlocks(actor, input.notes);
   const notes = input.notes ? (actor.kind === "agent" ? markAgentText(input.notes, actor.handle) : input.notes) : "";
   await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [
     id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent",
@@ -200,6 +208,7 @@ export async function updateTodo(
     notes = before.notes.replace(find, actor.kind === "agent" ? markAgentText(replace, actor.handle) : replace);
   }
   if (notes !== undefined && notes !== before.notes) {
+    guardBlocks(actor, patch.notes_append ?? patch.notes_replace?.replace ?? "");
     if (notes.length > 400_000) throw bad("Notes are too long.");
     set("notes", notes);
     const was = new Set(await findMentions(before.notes));

@@ -16,6 +16,8 @@
   --ai: rgba(107, 92, 246, 0.14);
   --ai-line: rgba(107, 92, 246, 0.55);
   --danger: #e5484d;
+  --good: #1f9d55;
+  --warn: #b7791f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 8px 30px rgba(30, 20, 60, 0.06);
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.04), 0 24px 60px rgba(30, 20, 60, 0.14);
   --glow: 0.55;
@@ -40,6 +42,8 @@
     --ai-line: rgba(157, 146, 255, 0.7);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 30px rgba(0, 0, 0, 0.35);
     --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.3), 0 24px 60px rgba(0, 0, 0, 0.55);
+    --good: #4cc38a;
+    --warn: #e0a84a;
     --glow: 0.2;
   }
 }
@@ -470,6 +474,167 @@ textarea:focus-visible,
 .editor-compact .ProseMirror {
   min-height: 80px;
   padding-bottom: 8px;
+}
+
+/* ---------- Page blocks ---------- */
+.block-card {
+  background: color-mix(in srgb, var(--surface-solid) 78%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+.carousel {
+  scrollbar-width: none;
+  scroll-padding-inline: 4px;
+  -webkit-overflow-scrolling: touch;
+  mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 calc(100% - 28px), transparent 100%);
+}
+.carousel::-webkit-scrollbar {
+  display: none;
+}
+.map-pin {
+  position: static;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font: 600 12.5px/1 var(--font-sans);
+  border: 2px solid var(--surface-solid);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.map-frame {
+  background: var(--fill);
+  border: 1px solid var(--line);
+  z-index: 0;
+  isolation: isolate;
+}
+/* Shown while map tiles load, or if they cannot */
+.map-frame.leaflet-container {
+  background: color-mix(in srgb, var(--surface-solid) 55%, var(--bg));
+  font-family: var(--font-sans);
+}
+.map-frame .leaflet-control-attribution {
+  background: color-mix(in srgb, var(--surface-solid) 70%, transparent);
+  color: var(--ink-3);
+  font-size: 10px;
+  border-radius: 8px 0 0 0;
+}
+.map-frame .leaflet-control-attribution a {
+  color: var(--ink-2);
+}
+.map-frame .leaflet-bar {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.map-frame .leaflet-bar a {
+  background: var(--surface-solid);
+  color: var(--ink);
+  border-color: var(--line);
+}
+.map-frame .leaflet-tooltip {
+  background: var(--surface-solid);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: 500 12.5px var(--font-sans);
+  box-shadow: var(--shadow);
+}
+.map-frame .leaflet-tooltip::before {
+  display: none;
+}
+.block-prose {
+  font-size: 15px;
+  line-height: 1.55;
+}
+.block-prose > * + * {
+  margin-top: 0.5em;
+}
+.block-prose h1,
+.block-prose h2,
+.block-prose h3 {
+  font-weight: 650;
+  font-size: 1.08em;
+}
+.block-prose ul {
+  list-style: disc;
+  padding-left: 1.2em;
+}
+.block-prose ol {
+  list-style: decimal;
+  padding-left: 1.3em;
+}
+.block-prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-soft);
+  text-underline-offset: 3px;
+}
+/* A block inside the editor: one unit you can select, never text you can break by typing. */
+.page-block {
+  position: relative;
+  margin: 1.1em 0;
+  border-radius: 22px;
+  outline: 2px solid transparent;
+  outline-offset: 6px;
+  transition: outline-color 0.2s;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.page-block.ProseMirror-selectednode {
+  outline-color: var(--accent-soft);
+}
+.page-block-tools {
+  position: absolute;
+  top: -10px;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.page-block:hover .page-block-tools,
+.page-block:focus-within .page-block-tools,
+.page-block.ProseMirror-selectednode .page-block-tools {
+  opacity: 1;
+}
+/* Blocks carry their own typography: the editor's link and list styles must not leak into them. */
+.ProseMirror .page-block a {
+  color: inherit;
+  text-decoration: none;
+}
+.ProseMirror .page-block .block-prose a,
+.ProseMirror .page-block a.underline {
+  text-decoration: underline;
+}
+.ProseMirror .page-block ol,
+.ProseMirror .page-block ul {
+  list-style: none;
+  padding-left: 0;
+}
+.ProseMirror .page-block .block-prose ul {
+  list-style: disc;
+  padding-left: 1.2em;
+}
+.ProseMirror .page-block .block-prose ol {
+  list-style: decimal;
+  padding-left: 1.3em;
+}
+.ProseMirror .page-block li + li {
+  margin-top: 0;
+}
+.ProseMirror .page-block img {
+  box-shadow: none;
+  max-height: none;
+  border-radius: 0;
+}
+.ProseMirror .page-block code {
+  background: none;
+  padding: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

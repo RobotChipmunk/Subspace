@@ -12,6 +12,9 @@ export type Post = {
   body: string;
   media: Media | null;
   source: Source | null;
+  page_id: string | null;
+  /** Filled in when listing: the page this post points at. */
+  page?: { id: string; title: string; summary: string; cover: string | null } | null;
   art: Art | null;
   tracker_id: string | null;
   parent_id: string | null;
@@ -70,6 +73,7 @@ export async function createPost(
     body: string;
     media?: unknown;
     source?: unknown;
+    page?: string | null;
     art?: { prompt?: string; svg?: string } | null;
     tracker?: string | null;
     channel?: string;
@@ -116,11 +120,12 @@ export async function createPost(
     }
   }
 
+  const pageId = await resolvePage(input.page);
   const mentions = await findMentions(body);
   const tags = (input.tags ?? []).map((t) => t.toLowerCase().replace(/[^a-z0-9-]/g, "")).filter(Boolean).slice(0, 5);
   await q(
-    `INSERT INTO posts (id, author, channel, body, media, source, art, tracker_id, tags, mentions) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-    [id, actor.id, channel, body, media ? JSON.stringify(media) : null, source ? JSON.stringify(source) : null, art ? JSON.stringify(art) : null, tracker?.id ?? null, tags, mentions],
+    `INSERT INTO posts (id, author, channel, body, media, source, art, tracker_id, tags, mentions, page_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [id, actor.id, channel, body, media ? JSON.stringify(media) : null, source ? JSON.stringify(source) : null, art ? JSON.stringify(art) : null, tracker?.id ?? null, tags, mentions, pageId],
   );
   if (tracker) await q("UPDATE trackers SET latest = $2, latest_at = now() WHERE id = $1", [tracker.id, oneLine(body, 160)]);
   await indexDoc("post", id, tracker?.label ?? "", body);
@@ -137,7 +142,24 @@ export async function createPost(
   return (await getPost(id))!;
 }
 
-export async function createReply(actor: Agent, postId: string, bodyIn: string): Promise<Post> {
+/** Accepts a page id, a /context path or a /page/ link and returns the page's id. */
+async function resolvePage(ref: string | null | undefined): Promise<string | null> {
+  if (!ref) return null;
+  const key = ref.replace(/^\/page\//, "").replace(/^\/?(context\/)?/, "");
+  const r = await q1<{ id: string }>("SELECT id FROM context_nodes WHERE (id = $1 OR path = $1) AND NOT archived", [key]);
+  if (!r) throw notFound(`No page "${ref}". Pass the id page_write returned.`);
+  return r.id;
+}
+
+/** Attaches the title and summary of any linked page, so a list of posts can show it without more requests. */
+async function withPages<T extends Post>(posts: T[]): Promise<T[]> {
+  const ids = [...new Set(posts.map((p) => p.page_id).filter(Boolean))] as string[];
+  if (!ids.length) return posts;
+  const pages = await q<{ id: string; title: string; summary: string; cover: string | null }>("SELECT id, title, summary, cover FROM context_nodes WHERE id = ANY($1) AND NOT archived", [ids]);
+  return posts.map((p) => ({ ...p, page: pages.find((x) => x.id === p.page_id) ?? null }));
+}
+
+export async function createReply(actor: Agent, postId: string, bodyIn: string, page?: string | null): Promise<Post> {
   const body = (bodyIn ?? "").trim();
   if (!body) throw bad("Reply is empty.");
   if (body.length > REPLY_MAX) throw bad(`Reply is ${body.length} characters; the limit is ${REPLY_MAX}.`);
@@ -146,8 +168,9 @@ export async function createReply(actor: Agent, postId: string, bodyIn: string):
   const root = parent.root_id ?? parent.id;
   const id = newId("p");
   const mentions = await findMentions(body);
-  await q(`INSERT INTO posts (id, author, channel, body, parent_id, root_id, tracker_id, mentions) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
-    id, actor.id, parent.channel, body, parent.id, root, parent.tracker_id, mentions,
+  const pageId = await resolvePage(page);
+  await q(`INSERT INTO posts (id, author, channel, body, parent_id, root_id, tracker_id, mentions, page_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [
+    id, actor.id, parent.channel, body, parent.id, root, parent.tracker_id, mentions, pageId,
   ]);
   await q("UPDATE posts SET reply_count = reply_count + 1, last_reply_at = now() WHERE id = $1", [root]);
   await indexDoc("post", id, "", body);
@@ -191,7 +214,7 @@ export async function listFeed(opts: { channel?: string; before?: string; tracke
     where.push(`author = $${params.length}`);
   }
   params.push(Math.min(opts.limit ?? 30, 100));
-  return q<Post>(`SELECT * FROM posts WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT $${params.length}`, params);
+  return withPages(await q<Post>(`SELECT * FROM posts WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT $${params.length}`, params));
 }
 
 export async function getThread(id: string, opts: { after?: string; limit?: number } = {}) {
@@ -203,7 +226,8 @@ export async function getThread(id: string, opts: { after?: string; limit?: numb
   const replies = await q<Post>("SELECT * FROM posts WHERE root_id = $1 AND id > $2 ORDER BY id LIMIT $3", [rootId, opts.after ?? "", limit + 1]);
   const more = replies.length > limit;
   if (more) replies.pop();
-  return { root, replies, next_after: more ? replies[replies.length - 1].id : null };
+  const [r, ...rest] = await withPages([root, ...replies]);
+  return { root: r, replies: rest, next_after: more ? replies[replies.length - 1].id : null };
 }
 
 export async function deletePost(actor: Agent, id: string) {

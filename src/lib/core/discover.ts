@@ -11,7 +11,7 @@
  */
 import { q, q1 } from "../db";
 import { openJobs } from "./art";
-import { breadcrumb, children as contextChildren, getNode } from "./context";
+import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
 import { getThread, type Post } from "./posts";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { getTracker, listTrackers } from "./trackers";
@@ -137,6 +137,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       `SELECT (SELECT count(*)::int FROM posts WHERE parent_id IS NULL AND channel = 'feed') AS feed,
               (SELECT count(*)::int FROM todos WHERE NOT done) AS todos,
               (SELECT count(*)::int FROM context_nodes WHERE NOT archived) AS context,
+              (SELECT count(*)::int FROM context_nodes WHERE kind = 'page' AND NOT archived) AS pages,
               (SELECT count(*)::int FROM trackers WHERE NOT archived) AS following,
               (SELECT count(*)::int FROM agents WHERE NOT archived) AS agents,
               (SELECT count(*)::int FROM events) AS log`,
@@ -149,6 +150,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/feed", title: "Feed", about: "Short updates from agents and the owner, with conversation threads.", count: n!.feed },
         { path: "/todos", title: "Todos", about: "The owner's task list, by day and week.", count: n!.todos },
         { path: "/context", title: "Context", about: "Shared long-term memory about the owner, their life and the agents' work. A tree you can reshape.", count: n!.context },
+        { path: "/pages", title: "Pages", about: "Finished documents agents have made: research, shortlists, plans. Newest first; they live in the context tree.", count: n!.pages },
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
         { path: "/log", title: "Log", about: "Every change ever made, oldest to newest.", count: n!.log },
@@ -260,6 +262,29 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     };
   }
 
+  if (space === "pages") {
+    const pageItem = (r: Record<string, unknown>): Item => ({ id: r.id, path: "/context/" + r.path, title: r.title, about: r.summary || undefined, created: r.created_at });
+    if (a === "by-time")
+      return timeTree(
+        { path: "/pages/by-time", title: "Pages" },
+        { from: "context_nodes", where: "kind = 'page' AND NOT archived", params: [], ts: "created_at", order: "id", select: "id, path, title, summary, created_at", item: pageItem },
+        b,
+        cursor,
+      );
+    const recent = await recentPages(15);
+    return {
+      path: "/pages",
+      title: "Pages",
+      about: "The most recent pages. You do not need to read them all: open one only when its title or summary is relevant.",
+      items: recent.map((r) => pageItem(r as unknown as Record<string, unknown>)),
+      children: [
+        { path: "/pages/by-time", title: "All pages by time", about: "Every page, split by year, month and day as needed." },
+        { path: "/context", title: "Pages by topic", about: "Pages sit in the context tree under the area they belong to." },
+      ],
+      hint: "read([id]) returns a page with its blocks as JSON. search(query, types: [\"context\"]) finds pages by content.",
+    };
+  }
+
   if (space === "following") {
     if (!a) {
       const ts = await listTrackers();
@@ -317,9 +342,9 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   throw notFound(`Nothing at "${rawPath}". Start from explore("/").`);
 }
 
-const contextChild = (k: { path: string; title: string; summary: string; child_count?: number; body_chars: number; updated_at: string }): Child => ({
+const contextChild = (k: { path: string; title: string; summary: string; kind?: string; child_count?: number; body_chars: number; updated_at: string }): Child => ({
   path: `/context/${k.path}`,
-  title: k.title,
+  title: k.kind === "page" ? `${k.title} (page)` : k.title,
   about: k.summary || undefined,
   ...(k.child_count ? { count: k.child_count } : {}),
   latest: k.updated_at,
@@ -438,6 +463,7 @@ const slimPost = (p: Post, handles: Map<string, string>) => ({
   body: p.body,
   ...(p.media ? { media: p.media } : {}),
   ...(p.source ? { source: p.source } : {}),
+  ...(p.page_id ? { page: p.page_id } : {}),
   ...(p.art?.status === "pending" ? { illustration: "pending" } : {}),
 });
 
@@ -482,8 +508,9 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         const crumbs = await breadcrumb(n);
         const kids = await contextChildren(n.id);
         out.push({
-          type: "context",
+          type: n.kind === "page" ? "page" : "context",
           id: n.id,
+          ...(n.kind === "page" ? { link: `/page/${n.id}` } : {}),
           path: "/context/" + n.path,
           trail: crumbs.map((c) => c.title).join(" › "),
           title: n.title,
@@ -524,6 +551,7 @@ export async function briefing(agent: Agent) {
       open_jobs: peek.open_jobs?.length ?? 0,
       next: "Call changes() to see them and move your cursor forward.",
     },
+    recent_pages: (await recentPages(5)).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })),
     your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),
     map: (await explore(agent, "/")).children,

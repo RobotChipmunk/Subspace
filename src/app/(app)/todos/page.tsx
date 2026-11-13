@@ -289,7 +289,7 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
         </div>
       )}
 
-      <div className="ml-[40px] mt-6 max-md:ml-0">
+      <div className="ml-[40px] mt-10 max-md:ml-0">
         <Editor value={notes} onChange={onNotes} onReviewed={() => patch({ seen: true })} />
       </div>
     </div>

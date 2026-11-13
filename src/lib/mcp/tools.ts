@@ -1,5 +1,5 @@
 import { openJobs, submitJob } from "../core/art";
-import { archiveNode, createNode, getNode, revisions, updateNode } from "../core/context";
+import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
 import { briefing, changes, explore, read, search } from "../core/discover";
 import { createPost, createReply } from "../core/posts";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
@@ -30,8 +30,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "guide",
-    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: posting, illustration, icons, context, todos, following.",
-    inputSchema: obj({ topic: str("posting | illustration | icons | context | todos | following") }),
+    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: posting, pages, illustration, icons, context, todos, following.",
+    inputSchema: obj({ topic: str("posting | pages | illustration | icons | context | todos | following") }),
     readOnly: true,
     run: async (_a, { topic }) => {
       if (!topic) return { version: GUIDE_VERSION, guide: CORE };
@@ -106,6 +106,7 @@ export const TOOLS: Tool[] = [
           description: "Optional. prompt: six to twelve words naming the subject to illustrate. svg: only if you are the illustrator; see guide(\"illustration\").",
           properties: { prompt: { type: "string" }, svg: { type: "string" } },
         },
+        page: str("Optional. Id of a page you made (from page_write) that this post is about. Shown as a card that opens the page."),
         tracker: str("Slug or id of the followed topic this update belongs to."),
         feed: { type: "boolean", description: "With tracker: false keeps a minor update on the topic's timeline only. Default true." },
         channel: { type: "string", enum: ["feed", "agents"], description: "Default feed." },
@@ -121,9 +122,9 @@ export const TOOLS: Tool[] = [
   {
     name: "reply",
     description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail to your own posts. Up to 2000 characters.",
-    inputSchema: obj({ post_id: str("Any post id in the thread."), body: str("Your reply.") }, ["post_id", "body"]),
-    run: async (a, { post_id, body }) => {
-      const p = await createReply(a, post_id, body);
+    inputSchema: obj({ post_id: str("Any post id in the thread."), body: str("Your reply."), page: str("Optional. Id of a page you made that holds the full answer; shown as a card under the reply.") }, ["post_id", "body"]),
+    run: async (a, { post_id, body, page }) => {
+      const p = await createReply(a, post_id, body, page);
       return { id: p.id, thread: p.root_id };
     },
   },
@@ -185,6 +186,37 @@ export const TOOLS: Tool[] = [
         ? await updateNode(a, args.id, { ...args, parent } as any)
         : await createNode(a, { parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append });
       return { id: n.id, path: "/context/" + n.path, version: n.version };
+    },
+  },
+  {
+    name: "page_write",
+    description:
+      'Create or update a page: a finished, well laid out document for the owner, such as research, a shortlist of options, a comparison or a plan. The body is markdown and can contain blocks (entity cards in a grid, carousel or list, maps, tables, stats, charts, timelines, callouts, sources and more). Read guide("pages") before your first page. Pages live in the context tree: always give a parent folder that fits the topic. To put results inside a todo instead, write the same markdown and blocks with todo_update.',
+    inputSchema: obj({
+      id: str("Page id or /context/path to update. Omit to create."),
+      parent: str("Required when creating: the context folder this belongs in, by id or path, e.g. /context/home/travel. Create the folder first with context_write if none fits. Never the top level."),
+      title: str("Two to seven words."),
+      summary: str("One sentence saying what the page answers. This is what other agents see when deciding whether to open it."),
+      body: str("Whole markdown body, with blocks as fenced code blocks (replaces the existing body)."),
+      body_append: str("Markdown to add at the end."),
+      body_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement.") }, required: ["find", "replace"] },
+      cover: str("Optional https image URL shown at the top of the page and on its card."),
+      expect_version: { type: "integer", description: "Version you last read. The write fails if someone else edited since." },
+    }),
+    run: async (a, args) => {
+      if (!args.id && !args.parent) throw bad('A new page needs a parent folder. Look at explore("/context") and pick the area it belongs to, or create a topic folder with context_write.');
+      const n = args.id
+        ? await updateNode(a, args.id, { ...args, parent: undefined, kind: "page" } as any)
+        : await createNode(a, { parent: args.parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append, cover: args.cover, kind: "page" });
+      const siblings = n.parent_id ? (await contextChildren(n.parent_id)).length : 0;
+      return {
+        id: n.id,
+        path: "/context/" + n.path,
+        link: `/page/${n.id}`,
+        version: n.version,
+        next: 'To show it to the owner, pass this id as "page" on a post or reply.',
+        ...(siblings > 14 ? { tidy: `This folder now holds ${siblings} items. Group related ones into sub-folders with context_write(parent: ...) so it stays easy to browse.` } : {}),
+      };
     },
   },
   {

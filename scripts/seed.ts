@@ -64,6 +64,65 @@ async function main() {
   await createNode(claude, { parent: "work", title: "Robotics thesis", summary: "Why I hold robotics positions and what would change my mind.", body: "## Position\n\n- Agility Robotics, secondary shares (as of 2026-11)\n\n## Thesis\n\n- Paid deployments matter more than demos\n- Multiples: Figure about 95x revenue, Agility about 31x\n\n## Would change my mind\n\n- A fleet recall\n- A competitor reaching 1,000 paid units first" });
   await createNode(atlas, { parent: "home", title: "Weekly rhythm", summary: "School run, pickups and recurring household chores.", body: "- School run: 8:10 out, 3:05 pickup\n- Compost: every other Monday from 2026-11-16\n- Recycling: Mondays" });
   await createNode(owner, { parent: "me", title: "How I like updates", summary: "Short, concrete, numbers first. No preamble.", body: "- Lead with what changed\n- Give me the decision you need, if any\n- Morning is for planning; do not send non-urgent things before 9" });
+
+  // ---- Pages: a consumer shortlist and a research brief, filed by topic ----
+  const travel = await createNode(atlas, { parent: "home", title: "Travel", summary: "Trips: plans, bookings and shortlists." });
+  const fence = "```";
+  const block = (type: string, data: unknown) => `${fence}${type}\n${JSON.stringify(data)}\n${fence}`;
+  const places = [
+    { title: "Nostrana", subtitle: "Italian · Buckman", rating: 4.6, reviews: 2140, price: "$$$", badge: "Top pick", description: "Wood-fired fish and a long list of dishes without cheese. Quiet tables at the back.", meta: ["12 min drive", "Book ahead"], url: "https://nostrana.com", lat: 45.5152, lng: -122.6512 },
+    { title: "Luce", subtitle: "Italian · Kerns", rating: 4.5, reviews: 860, price: "$$", description: "Small room, daily whole fish, simple pastas with olive oil rather than cream.", meta: ["14 min drive"], url: "https://www.luceportland.com", lat: 45.5229, lng: -122.6418 },
+    { title: "Gilda's", subtitle: "Italian · Goose Hollow", rating: 4.4, reviews: 520, price: "$$$", description: "Grilled branzino and cioppino. Easy to get a table midweek.", meta: ["8 min walk", "Quiet"], url: "https://www.gildasitalianrestaurant.com", lat: 45.5203, lng: -122.6931 },
+    { title: "Caffe Mingo", subtitle: "Italian · Northwest", rating: 4.5, reviews: 1310, price: "$$", description: "Neighbourhood favourite. Fish special most nights; lively at weekends.", meta: ["15 min walk", "No bookings"], url: "https://caffemingonw.com", lat: 45.5265, lng: -122.6942 },
+  ];
+  const card = ({ lat: _a, lng: _b, ...c }: (typeof places)[number]) => c;
+  const dinner = await createNode(claude, {
+    kind: "page",
+    parent: travel.id,
+    title: "Portland dinner options",
+    summary: "Italian restaurants near the Pearl District with fish and plenty of dishes without cheese.",
+    body: [
+      block("callout", { tone: "decision", title: "Book Nostrana for Saturday", text: "It has the widest choice of fish and dishes without cheese, and takes bookings. Gilda's is the fallback if you would rather walk from the hotel." }),
+      "## Shortlist",
+      block("cards", { layout: "carousel", items: places.map(card) }),
+      "## Where they are",
+      block("map", { markers: [{ title: "Residence Inn Pearl District", lat: 45.5296, lng: -122.6817, note: "Your hotel" }, ...places.map((p) => ({ title: p.title, lat: p.lat, lng: p.lng, note: p.meta[0], url: p.url }))] }),
+      "## Side by side",
+      block("table", { columns: ["", "Nostrana", "Luce", "Gilda's", "Caffe Mingo"], rows: [["Fish dishes", 5, 3, 4, 2], ["Without cheese", "Many", "Several", "Several", "A few"], ["Noise", "Moderate", "Quiet", "Quiet", "Lively"], ["Takes bookings", "Yes", "Yes", "Yes", "No"]], highlight_column: 1, caption: "Counted from current online menus." }),
+      block("columns", {
+        columns: [
+          [{ type: "proscons", title: "Nostrana", pros: ["Most fish on the menu", "Bookable", "Quiet back room"], cons: ["A drive from the hotel", "Pricey"] }],
+          [{ type: "facts", title: "For the booking", items: [{ label: "When", value: "Saturday, 7:00 pm" }, { label: "Party", value: "2" }, { label: "Ask for", value: "A table at the back" }] }],
+        ],
+      }),
+      "## Sources",
+      block("sources", { items: places.map((p) => ({ title: `${p.title} menu`, url: p.url, date: "Nov 2026" })) }),
+    ].join("\n\n"),
+  });
+  const research = await createNode(scout, { parent: "work", title: "Research", summary: "Briefings and deep dives on topics I follow for work." });
+  await createNode(scout, {
+    kind: "page",
+    parent: research.id,
+    title: "Humanoid robotics funding 2026",
+    summary: "Who raised what in humanoid robotics this year, and how Agility compares.",
+    body: [
+      "Three humanoid companies raised rounds above $1B in 2026. Agility remains the only one with a fleet doing paid shifts at scale, and trades at the lowest revenue multiple.",
+      block("stats", { items: [{ label: "Raised in 2026", value: "$4.9B", delta: "+62%", trend: "up", note: "vs 2025" }, { label: "Rounds over $1B", value: "3" }, { label: "Agility multiple", value: "31x", delta: "lowest", trend: "flat" }, { label: "Figure multiple", value: "95x" }] }),
+      "## Funding by quarter",
+      block("chart", { kind: "bar", unit: "$B", labels: ["Q1", "Q2", "Q3", "Q4"], series: [{ name: "Humanoid", values: [0.6, 1.4, 1.7, 1.2] }, { name: "Warehouse", values: [0.4, 0.5, 0.3, 0.6] }] }),
+      "## Valuation over time",
+      block("chart", { kind: "line", unit: "$B", labels: ["2023", "2024", "2025", "2026"], series: [{ values: [0.4, 2.6, 12, 39] }] }),
+      "## How it unfolded",
+      block("timeline", { items: [{ when: "Feb 2026", title: "Apptronik closes $1.1B", text: "First humanoid round above $1B." }, { when: "Jun 2026", title: "Agility passes 1,000 paid units" }, { when: "Nov 2026", title: "Figure raises $1.2B at $39B", text: "Third round above $1B this year." }] }),
+      block("callout", { tone: "warn", title: "What would change this", text: "A fleet recall, or a competitor reaching 1,000 paid units before year end." }),
+      block("sources", { items: [{ title: "Figure closes $1.2B Series C", url: "https://example.com/figure-series-c", publisher: "The Information", date: "Nov 12, 2026" }] }),
+    ].join("\n\n"),
+  });
+  const asked = await createPost(owner, { body: "@claude can you find us an Italian place for Saturday in Portland?" });
+  await createReply(claude, asked.id, "Nostrana is the one to book. Shortlist, map and comparison are on the page.", dinner.id);
+  const find = await createTodo(owner, { title: "Find a restaurant in Portland", view: "today" });
+  await updateTodo(owner, find.id, { notes: "@claude please look for this for us. Italian, with fish and plenty of dishes without cheese." });
+  await updateTodo(claude, find.id, { notes_append: ["## Options", block("cards", { layout: "list", items: places.slice(0, 3).map(card) })].join("\n\n") });
   console.log("Seeded.");
   process.exit(0);
 }
