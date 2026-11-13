@@ -52,11 +52,10 @@ export function TrackerTile({ tracker, size = 40 }: { tracker: { id: string; tit
   );
 }
 
-export function TrackerChip({ tracker }: { tracker: { id: string; label: string; icon_svg: string | null } }) {
+export function TrackerChip({ tracker }: { tracker: { id: string; label: string } }) {
   const p = PALETTES[hash(tracker.id) % PALETTES.length];
   return (
-    <span className="chip inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium" style={{ "--c": p.colors[0], "--k": p.ink } as CSSProperties}>
-      {tracker.icon_svg && <Glyph svg={tracker.icon_svg} size={13} />}
+    <span className="chip inline-flex h-6 items-center rounded-full px-2.5 text-[12px] font-medium" style={{ "--c": p.colors[0], "--k": p.ink } as CSSProperties}>
       {tracker.label}
     </span>
   );

@@ -85,10 +85,10 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      'Publish a headline with a picture. At most 35 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image or video, otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
+      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image or video, otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
     inputSchema: obj(
       {
-        body: str("The headline: what happened, in one line. At most 35 words. Plain text, no links."),
+        body: str("The headline: what happened, in one line. At most 27 words. Plain text, no links."),
         source: {
           type: "object",
           description: "Where this came from. Shown as a link under the picture.",

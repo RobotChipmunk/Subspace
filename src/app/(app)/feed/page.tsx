@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUp, ArrowUpRight, MessageCircle, Trash2 } from "lucide-react";
+import { ArrowUp, MessageCircle, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -173,7 +173,7 @@ function Composer({ channel, dim, onPosted }: { channel: string; dim: boolean; o
   );
 }
 
-function PostMedia({ post }: { post: Post }) {
+function PostMedia({ post, open }: { post: Post; open: boolean }) {
   const m = post.media;
   const art = post.art;
   const frame = "mt-3 overflow-hidden rounded-[18px] [--r:18px]";
@@ -189,18 +189,16 @@ function PostMedia({ post }: { post: Post }) {
   return (
     <>
       {picture}
-      {post.source && (
-        <a
-          href={post.source.url}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="group/src mt-2 inline-flex max-w-full items-center gap-1 text-[13px] text-ink2 transition-colors hover:text-accent"
-        >
-          <span className="truncate underline decoration-[var(--line)] underline-offset-[3px] group-hover/src:decoration-current">{post.source.name}</span>
-          <ArrowUpRight size={13} className="flex-none opacity-60" />
-        </a>
-      )}
+      {/* The source is detail: it appears quietly once the post is opened. */}
+      <AnimatePresence initial={false}>
+        {open && post.source && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={soft} className="overflow-hidden">
+            <a href={post.source.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="mt-2 inline-block max-w-full truncate align-top text-[12.5px] text-ink3 underline decoration-[var(--line)] underline-offset-[3px] transition-colors hover:text-ink2">
+              {post.source.name}
+            </a>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -245,7 +243,7 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
           <p className={`mt-0.5 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em] ${open ? "" : "line-clamp-4"}`}>
             <Rich text={post.body} handles={handles} />
           </p>
-          <PostMedia post={post} />
+          <PostMedia post={post} open={open} />
           <AnimatePresence initial={false}>
             {!open && post.reply_count > 0 && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">

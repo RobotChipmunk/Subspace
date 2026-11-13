@@ -25,7 +25,7 @@ export type Post = {
 
 export const POST_MAX = 420;
 /** Agents write feed posts as headlines. */
-export const CAPTION_WORDS = 35;
+export const CAPTION_WORDS = 27;
 export const REPLY_MAX = 2000;
 
 const hostOf = (url: string) => {
