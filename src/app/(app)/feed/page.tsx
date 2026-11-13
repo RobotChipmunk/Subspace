@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUp, ArrowUpRight, MessageCircle, Trash2 } from "lucide-react";
+import { ArrowUp, ArrowUpRight, Eraser, MessageCircle, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +17,17 @@ export default function FeedPage() {
   const [done, setDone] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  async function clear() {
+    setConfirmClear(false);
+    await api(`feed?channel=${channel}`, { method: "DELETE" });
+    setOlder([]);
+    setDone(false);
+    setOpenId(null);
+    mutate({ posts: [] }, false);
+    mutate();
+  }
 
   useEffect(() => (setOlder([]), setDone(false), setOpenId(null)), [channel]);
   useEffect(() => {
@@ -49,13 +60,27 @@ export default function FeedPage() {
       <PageHeader
         title="Feed"
         right={
-          <div className="glass flex rounded-full p-1 text-[13px] font-medium" onClick={(e) => e.stopPropagation()}>
+          <div className="flex flex-wrap items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+            <AnimatePresence mode="wait" initial={false}>
+              {posts.length > 0 &&
+                (confirmClear ? (
+                  <motion.button key="yes" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} autoFocus onBlur={() => setConfirmClear(false)} onClick={clear} className="h-9 whitespace-nowrap rounded-full bg-danger px-3.5 text-[13px] font-medium text-white">
+                    Delete all?
+                  </motion.button>
+                ) : (
+                  <motion.button key="no" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} aria-label="Clear feed" title="Clear feed" onClick={() => setConfirmClear(true)} className="glass grid h-9 w-9 place-items-center rounded-full text-ink3 transition-colors hover:text-danger">
+                    <Eraser size={15} />
+                  </motion.button>
+                ))}
+            </AnimatePresence>
+          <div className="glass flex rounded-full p-1 text-[13px] font-medium">
             {(["feed", "agents"] as const).map((c) => (
               <button key={c} onClick={() => setChannel(c)} className={`relative rounded-full px-3.5 py-1 transition-colors ${channel === c ? "text-ink" : "text-ink2"}`}>
                 {channel === c && <motion.span layoutId="channel" transition={spring} className="pill absolute inset-0 rounded-full" />}
                 <span className="relative">{c === "feed" ? "For you" : "Between agents"}</span>
               </button>
             ))}
+          </div>
           </div>
         }
       />

@@ -1,6 +1,6 @@
 import { q, q1 } from "../db";
 import { cleanSvg, createJob, newArt, type Art } from "./art";
-import { bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
+import { ApiError, bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
 
 export type Media = { type: "image" | "video" | "link"; url: string; title?: string; source?: string; poster?: string };
 
@@ -178,4 +178,19 @@ export async function deletePost(actor: Agent, id: string) {
   await q("DELETE FROM search_docs WHERE entity_type = 'post' AND entity_id = $1", [id]);
   if (p.root_id) await q("UPDATE posts SET reply_count = GREATEST(reply_count - 1, 0) WHERE id = $1", [p.root_id]);
   await logEvent({ actor: actor.id, type: "post.deleted", entity_type: "post", entity_id: id, summary: p.body });
+}
+
+/** Removes every post in a channel, with its threads. Topics stay; their timelines are emptied. */
+export async function clearFeed(actor: Agent, channel: "feed" | "agents") {
+  if (actor.kind !== "human") throw new ApiError(403, "Only the owner can clear the feed.");
+  // Updates filed on a topic's timeline only are part of the feed's content too.
+  const channels = channel === "feed" ? ["feed", "timeline"] : ["agents"];
+  const gone = await q<{ id: string }>("DELETE FROM posts WHERE channel = ANY($1) RETURNING id", [channels]);
+  const ids = gone.map((g) => g.id);
+  if (!ids.length) return { deleted: 0 };
+  await q("DELETE FROM search_docs WHERE entity_type = 'post' AND entity_id = ANY($1)", [ids]);
+  await q("UPDATE jobs SET status = 'cancelled' WHERE target_type = 'post' AND target_id = ANY($1) AND status = 'open'", [ids]);
+  if (channel === "feed") await q("UPDATE trackers SET latest = '', latest_at = NULL");
+  await logEvent({ actor: actor.id, type: "feed.cleared", entity_type: "feed", entity_id: channel, summary: `Cleared ${ids.length} posts from ${channel === "feed" ? "the feed" : "the agents channel"}` });
+  return { deleted: ids.length };
 }
