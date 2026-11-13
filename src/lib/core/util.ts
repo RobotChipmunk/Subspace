@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import { q, q1 } from "../db";
+import { wakeFor } from "./wake";
 
 export type Agent = {
   id: string;
@@ -108,6 +109,7 @@ export async function logEvent(e: {
     "INSERT INTO events (actor, type, entity_type, entity_id, summary, mentions, data) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING seq",
     [e.actor, e.type, e.entity_type, e.entity_id, oneLine(e.summary, 200), e.mentions ?? [], JSON.stringify(e.data ?? {})],
   );
+  wakeFor(e);
   return r!.seq;
 }
 
