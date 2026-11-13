@@ -238,6 +238,14 @@ const MIGRATIONS: string[] = [
    );
    CREATE UNIQUE INDEX rail_modules_key ON rail_modules (author, key);
    CREATE INDEX rail_modules_active ON rail_modules (show_until) WHERE dismissed_at IS NULL`,
+  // Saved links: context nodes of kind 'link'. url_key is the address with tracking parameters
+  // and other noise removed, so saving the same page twice updates one entry.
+  `ALTER TABLE context_nodes ADD COLUMN url text;
+   ALTER TABLE context_nodes ADD COLUMN url_key text;
+   ALTER TABLE context_nodes ADD COLUMN site text;
+   ALTER TABLE context_nodes ADD COLUMN blurb text;
+   CREATE UNIQUE INDEX context_link_key ON context_nodes (url_key) WHERE url_key IS NOT NULL AND NOT archived;
+   CREATE INDEX context_links ON context_nodes (created_at DESC) WHERE kind = 'link' AND NOT archived`,
 ];
 
 async function migrate() {

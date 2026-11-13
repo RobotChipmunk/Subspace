@@ -371,6 +371,103 @@ async function run(profile) {
     await settle(500);
   });
 
+  // ---------- Saved links ----------
+  await step("links", async () => {
+    await page.goto(`${BASE}/context`);
+    await settle(1200);
+    const pill = page.getByRole("button", { name: "Links", exact: true });
+    await reachable(pill, "links button");
+    await reachable(page.getByLabel("Search context"), "context search beside the links button");
+    await press(pill);
+    await page.waitForURL("**/context?view=links");
+    const row = (name) => page.locator("[data-link]", { hasText: name });
+    await row("The case for slow interfaces").waitFor({ timeout: 6000 });
+    await settle(700);
+    // a row shows the title, the reason and the site, and is itself the link
+    const slow = row("The case for slow interfaces");
+    await reachable(slow.getByText("Good argument for calm UI"), "link reason");
+    await reachable(slow.getByText(/Works in Progress/), "link site");
+    const href = await slow.getByRole("link").getAttribute("href");
+    const target = await slow.getByRole("link").getAttribute("target");
+    if (href !== "https://example.com/slow-interfaces" || target !== "_blank") fail(`links: row does not open the page in a new tab (href ${href}, target ${target})`);
+    // a link filed under an area says where it is; one with no reason falls back to what the page is
+    await reachable(row("Heat pump sizing guide").getByText(/Energy Trust · Home/), "link area");
+    await reachable(row("Heat pump sizing guide").getByText("How to size a heat pump"), "link description");
+    await reachable(row("Unlined linen jacket").getByRole("button", { name: /Notes on/ }), "link notes button");
+    await noSidewaysScroll("links");
+    await shot("links");
+
+    // add one: the reason field appears once an address is typed
+    const before = await page.locator("[data-link]").count();
+    const address = page.getByLabel("Link address");
+    await reachable(address, "link address field");
+    if (await page.getByLabel("Why you’re keeping it").count()) fail("links: the reason field shows before an address is typed");
+    const slug = `night-trains-${profile.name}`;
+    await typeIn(address, `example.org/journal/${slug}?utm_source=newsletter`);
+    const why = page.getByLabel("Why you’re keeping it");
+    await why.waitFor({ timeout: 3000 });
+    await settle(500);
+    await reachable(why, "link reason field");
+    await reachable(page.getByRole("button", { name: "Save", exact: true }), "link save button");
+    await typeIn(why, "For the summer trip");
+    await shot("links-adding");
+    await page.keyboard.press("Enter");
+    const added = row(`Night trains ${profile.name.replace(/-/g, " ")}`);
+    await added.waitFor({ timeout: 12000 }).catch(() => fail("links: a saved link did not appear in the list"));
+    await reachable(added.getByText("For the summer trip"), "new link reason");
+    if ((await page.locator("[data-link]").count()) !== before + 1) fail("links: saving one link did not add exactly one row");
+    if ((await address.inputValue()) !== "") fail("links: the address field was not cleared after saving");
+    const stored = await added.getByRole("link").getAttribute("href");
+    if (/utm_/.test(stored || "")) fail(`links: tracking parameters were kept in the saved address (${stored})`);
+    // the same page again, written differently, must not make a second entry
+    await typeIn(address, `https://www.example.org/journal/${slug}/`);
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector('[aria-label="Link address"]').value === "", null, { timeout: 12000 });
+    await settle(600);
+    if ((await page.locator("[data-link]").count()) !== before + 1) fail("links: saving the same page twice made a second entry");
+    // something that is not an address is refused with a reason
+    await typeIn(address, "not a link.at all");
+    await settle(200);
+    if (await page.getByRole("button", { name: "Save", exact: true }).count()) fail("links: text with spaces was accepted as an address");
+    await address.fill("");
+
+    // details: the reason and notes can be edited, and the address is shown
+    await press(row("Unlined linen jacket").getByRole("button", { name: /Notes on/ }));
+    await page.getByLabel("Title").waitFor({ timeout: 5000 });
+    await settle(900);
+    await reachable(page.getByRole("link", { name: /example\.com\/shop\/linen-jacket/ }), "link address on its page");
+    await reachable(page.getByText("The navy one, size M"), "link notes");
+    if ((await page.getByLabel("Summary").inputValue()) !== "Saw it in the shop on 23rd") fail("links: the reason is not editable on the link's page");
+    await noSidewaysScroll("link page");
+    await shot("link-page");
+
+    // inside an area, its links are listed and one can be added there
+    await page.goto(`${BASE}/context`);
+    await settle(1000);
+    await press(page.locator("main button", { hasText: "The house, routines" }).first());
+    await row("Heat pump sizing guide").waitFor({ timeout: 6000 });
+    await settle(600);
+    await reachable(row("Heat pump sizing guide").getByRole("link"), "link inside its area");
+    await press(page.getByRole("button", { name: "Add a link" }));
+    await reachable(page.getByLabel("Link address"), "add a link inside an area");
+    await noSidewaysScroll("area with links");
+    await shot("links-in-area");
+  });
+  await step("save a link from the feed", async () => {
+    await page.goto(`${BASE}/feed`);
+    const save = page.getByRole("button", { name: /^(Save link|Saved to links)$/ }).first();
+    await save.waitFor({ timeout: 8000 });
+    await settle(800);
+    await reachable(save, "feed save button");
+    await press(save);
+    await page.getByRole("button", { name: "Saved to links" }).first().waitFor({ timeout: 4000 }).catch(() => fail("feed: saving a post's source did not confirm"));
+    await settle(1500);
+    await shot("feed-saved");
+    await page.goto(`${BASE}/context?view=links`);
+    await page.locator('[data-link] a[href="https://example.com/figure-series-c"]').waitFor({ timeout: 12000 }).catch(() => fail("feed: the saved source is not in the links list"));
+    if ((await page.locator('[data-link] a[href="https://example.com/figure-series-c"]').count()) !== 1) fail("feed: saving the same source again made a second entry");
+  });
+
   // ---------- Pages ----------
   await step("pages in context", async () => {
     await page.goto(`${BASE}/context`);

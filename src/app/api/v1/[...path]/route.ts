@@ -2,6 +2,7 @@ import { actorFromRequest, SESSION_COOKIE, signIn } from "@/lib/auth";
 import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
+import { listLinks, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { activeModules, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
@@ -57,6 +58,9 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^context$/, ({ actor, body }) => createNode(actor, body)],
   ["PATCH", /^context\/([^/]+)$/, ({ actor, body }, id) => updateNode(actor, id, body)],
   ["DELETE", /^context\/([^/]+)$/, async ({ actor }, id) => (await archiveNode(actor, id), { ok: true })],
+
+  ["GET", /^links$/, async ({ url }) => ({ links: await listLinks(60, url.searchParams.get("before") ?? undefined) })],
+  ["POST", /^links$/, ({ actor, body }) => saveLink(actor, body)],
 
   ["GET", /^trackers$/, async () => ({ trackers: await listTrackers() })],
   ["POST", /^trackers$/, ({ actor, body }) => createTracker(actor, body)],

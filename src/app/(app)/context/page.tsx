@@ -1,5 +1,5 @@
 "use client";
-import { ChevronRight, FileText, LayoutTemplate, Plus, Search, Trash2, X } from "lucide-react";
+import { ArrowUpRight, ChevronRight, FileText, LayoutTemplate, Link2, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -8,6 +8,7 @@ import { Avatar, mesh } from "@/components/bits";
 import { Editor } from "@/components/Editor";
 import { ago, api, fetcher, hash, soft, useMe } from "@/lib/client";
 import type { ContextLite, ContextNode } from "@/lib/core/context";
+import type { LinkLite } from "@/lib/core/links";
 import { PALETTES } from "@/lib/palettes";
 
 type View = { node: ContextNode | null; trail: { id: string; path: string; title: string }[]; children: ContextLite[] };
@@ -23,8 +24,12 @@ export default function ContextPage() {
 
 function Inner() {
   const router = useRouter();
-  const nodeId = useSearchParams().get("node");
+  const params = useSearchParams();
+  const nodeId = params.get("node");
+  const links = !nodeId && params.get("view") === "links";
   const go = (id: string | null) => router.push(id ? `/context?node=${id}` : "/context", { scroll: false });
+  const [adding, setAdding] = useState(false);
+  useEffect(() => setAdding(false), [nodeId]);
   const { data, mutate } = useSWR<View>(`context${nodeId ? `?node=${nodeId}` : ""}`, fetcher, { refreshInterval: 20_000, keepPreviousData: true });
   const [query, setQuery] = useState("");
   const { data: hits } = useSWR<{ results: Hit[] }>(query.trim().length > 1 ? `search?types=context&q=${encodeURIComponent(query.trim())}` : null, fetcher, { keepPreviousData: true });
@@ -39,9 +44,15 @@ function Inner() {
     <div className="mx-auto max-w-[880px]">
       <header className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3 px-1">
         <nav className="flex min-w-0 flex-1 items-center gap-1 max-sm:basis-full text-[30px] font-bold leading-tight tracking-[-0.03em]" aria-label="Breadcrumb">
-          <button onClick={() => go(null)} className={`transition-colors ${data?.node ? "text-ink3 hover:text-ink" : ""}`}>
+          <button onClick={() => go(null)} className={`transition-colors ${data?.node || links ? "text-ink3 hover:text-ink" : ""}`}>
             Context
           </button>
+          {links && (
+            <span className="flex min-w-0 items-center gap-1 text-[17px] font-semibold tracking-normal">
+              <ChevronRight size={18} className="flex-none text-ink3" />
+              Links
+            </span>
+          )}
           {data?.trail.slice(0, -1).map((t) => (
             <span key={t.id} className="flex min-w-0 items-center gap-1 text-[17px] font-semibold tracking-normal">
               <ChevronRight size={18} className="flex-none text-ink3" />
@@ -51,15 +62,20 @@ function Inner() {
             </span>
           ))}
         </nav>
-        <label className="glass flex h-10 w-[220px] flex-none items-center gap-2 rounded-full px-3.5 transition-[width] duration-500 ease-out-soft focus-within:w-[300px] max-sm:w-full max-sm:focus-within:w-full">
-          <Search size={16} className="flex-none text-ink3" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} placeholder="Search" aria-label="Search context" className="min-w-0 flex-1 text-[15px]" />
-          {query && (
-            <button type="button" aria-label="Clear" onClick={() => setQuery("")} className="text-ink3">
-              <X size={15} />
-            </button>
-          )}
-        </label>
+        <div className="flex flex-none items-center gap-3 max-sm:w-full">
+          <button onClick={() => router.push(links ? "/context" : "/context?view=links", { scroll: false })} aria-pressed={links} className={`glass flex h-10 flex-none items-center gap-1.5 rounded-full px-3.5 text-[14.5px] font-medium transition-colors ${links ? "text-accent" : "text-ink2 hover:text-ink"}`}>
+            <Link2 size={16} /> Links
+          </button>
+          <label className="glass flex h-10 w-[220px] flex-none items-center gap-2 rounded-full px-3.5 transition-[width] duration-500 ease-out-soft focus-within:w-[300px] max-sm:w-auto max-sm:min-w-0 max-sm:flex-1 max-sm:focus-within:w-auto">
+            <Search size={16} className="flex-none text-ink3" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} placeholder="Search" aria-label="Search context" className="min-w-0 flex-1 text-[15px]" />
+            {query && (
+              <button type="button" aria-label="Clear" onClick={() => setQuery("")} className="text-ink3">
+                <X size={15} />
+              </button>
+            )}
+          </label>
+        </div>
       </header>
 
       <AnimatePresence mode="wait" initial={false}>
@@ -76,23 +92,132 @@ function Inner() {
             ))}
             {hits && !hits.results.length && <p className="py-16 text-center text-ink3">Nothing found for “{query.trim()}”.</p>}
           </motion.div>
+        ) : links ? (
+          <motion.div key="links" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
+            <LinksView onOpen={go} />
+          </motion.div>
         ) : data ? (
           <motion.div key={nodeId ?? "root"} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
             {data.node && data.node.id === nodeId && <NodeEditor node={data.node} onChanged={() => mutate()} onDeleted={() => go(data.node!.parent_id)} />}
             {!data.node && <p className="-mt-4 mb-6 px-1 text-[14px] text-ink2">What your agents know about you, your life and their work. They keep it current; you can change anything.</p>}
             {!data.node && <RecentPages onOpen={go} />}
             <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
-              {data.children.map((c, i) => (
+              {data.children.filter((c) => c.kind !== "link").map((c, i) => (
                 <Card key={c.id} node={c} index={i} onOpen={() => go(c.id)} />
               ))}
-              <motion.button whileTap={{ scale: 0.98 }} onClick={addChild} className="flex min-h-[84px] items-center justify-center gap-2 rounded-[22px] border border-dashed border-[var(--fill-strong)] text-[14.5px] text-ink2 transition-colors hover:border-accent hover:text-accent">
-                <Plus size={17} /> {data.node ? "Add a note inside" : "New area"}
-              </motion.button>
+              {data.node?.kind !== "link" && (
+                <motion.button whileTap={{ scale: 0.98 }} onClick={addChild} className="flex min-h-[84px] items-center justify-center gap-2 rounded-[22px] border border-dashed border-[var(--fill-strong)] text-[14.5px] text-ink2 transition-colors hover:border-accent hover:text-accent">
+                  <Plus size={17} /> {data.node ? "Add a note inside" : "New area"}
+                </motion.button>
+              )}
+              {data.node && data.node.kind !== "link" && !adding && (
+                <motion.button whileTap={{ scale: 0.98 }} onClick={() => setAdding(true)} className="flex min-h-[84px] items-center justify-center gap-2 rounded-[22px] border border-dashed border-[var(--fill-strong)] text-[14.5px] text-ink2 transition-colors hover:border-accent hover:text-accent">
+                  <Link2 size={17} /> Add a link
+                </motion.button>
+              )}
             </div>
+            {adding && data.node && (
+              <div className="mt-4">
+                <QuickAdd parent={data.node.id} autoFocus onSaved={() => (setAdding(false), mutate())} />
+              </div>
+            )}
+            {data.children.some((c) => c.kind === "link") && (
+              <div className="mt-4 flex flex-col">
+                {data.children.filter((c) => c.kind === "link").map((c, i) => (
+                  <LinkRow key={c.id} link={c} index={i} onOpen={() => go(c.id)} />
+                ))}
+              </div>
+            )}
           </motion.div>
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** Shows an address the way people say it: no scheme, no www, no trailing slash. */
+const bare = (url: string) => url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+
+/** Every saved link, newest first, with a box to add one. */
+function LinksView({ onOpen }: { onOpen: (id: string) => void }) {
+  const { data, mutate } = useSWR<{ links: LinkLite[] }>("links", fetcher, { refreshInterval: 30_000 });
+  return (
+    <div>
+      <QuickAdd onSaved={() => mutate()} />
+      <div className="mt-4 flex flex-col">
+        {data?.links.map((l, i) => (
+          <LinkRow key={l.id} link={l} index={i} area={l.parent_path && l.parent_path !== "links" ? l.parent_title : null} onOpen={() => onOpen(l.id)} />
+        ))}
+      </div>
+      {data && !data.links.length && <p className="py-14 text-center text-[14.5px] text-ink3">No links yet. Paste one above, or tell an agent to save one.</p>}
+    </div>
+  );
+}
+
+/** Paste an address, optionally say why, save. */
+function QuickAdd({ parent, autoFocus, onSaved }: { parent?: string; autoFocus?: boolean; onSaved: () => void }) {
+  const [url, setUrl] = useState("");
+  const [why, setWhy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const ready = /^\S+\.\S{2,}$/.test(url.trim());
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api("links", { body: { url: url.trim(), why: why.trim() || undefined, parent } });
+      setUrl("");
+      setWhy("");
+      onSaved();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="glass rounded-[22px] px-4">
+      <div className="flex h-12 items-center gap-2.5">
+        <Link2 size={17} className="flex-none text-ink3" />
+        <input value={url} onChange={(e) => (setUrl(e.target.value), setError(""))} autoFocus={autoFocus} inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="Paste a link" aria-label="Link address" className="min-w-0 flex-1 text-[15.5px]" />
+        <AnimatePresence initial={false}>
+          {ready && (
+            <motion.button key="save" type="submit" disabled={busy} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={soft} className="h-8 flex-none rounded-full bg-accent px-3.5 text-[13.5px] font-medium text-white transition-opacity disabled:opacity-60">
+              {busy ? "Saving" : "Save"}
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
+      <AnimatePresence initial={false}>
+        {ready && (
+          <motion.div key="why" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
+            <input value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Why you’re keeping it (optional)" aria-label="Why you’re keeping it" maxLength={400} className="mb-3 block w-full pl-[27px] text-[14.5px] text-ink2" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {error && <p className="pb-3 pl-[27px] text-[13px] text-danger">{error}</p>}
+    </form>
+  );
+}
+
+/** One saved link: tapping it opens the page; the small button opens its notes. */
+function LinkRow({ link, index, area, onOpen }: { link: ContextLite; index: number; area?: string | null; onOpen: () => void }) {
+  const line = link.summary || link.blurb;
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: Math.min(index, 12) * 0.025 }} className="link-row flex items-start rounded-[16px]" data-link={link.id}>
+      <a href={link.url ?? "#"} target="_blank" rel="noreferrer" className="min-w-0 flex-1 py-2.5 pl-3 pr-1">
+        <span className="block truncate text-[15.5px] font-medium">{link.title}</span>
+        {line && <span className={`line-clamp-2 text-[13.5px] leading-snug ${link.summary ? "text-ink2" : "text-ink3"}`}>{line}</span>}
+        <span className="mt-0.5 block truncate text-[12px] text-ink3">{[link.site, area, ago(link.created_at)].filter(Boolean).join(" · ")}</span>
+      </a>
+      <button onClick={onOpen} aria-label={link.body_chars ? `Notes on ${link.title}` : `Details for ${link.title}`} title={link.body_chars ? "Notes" : "Details"} className={`mr-1.5 mt-2 grid h-9 w-9 flex-none place-items-center rounded-full transition-colors hover:bg-fill hover:text-ink ${link.body_chars ? "text-ink2" : "text-ink3"}`}>
+        {link.body_chars ? <FileText size={16} /> : <MoreHorizontal size={16} />}
+      </button>
+    </motion.div>
   );
 }
 
@@ -235,10 +360,19 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
         onChange={(e) => setSummary(e.target.value.replace(/\n/g, ""))}
         onBlur={() => summary !== node.summary && patch({ summary })}
         onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), e.currentTarget.blur())}
-        placeholder="One line on what this is about"
+        placeholder={node.kind === "link" ? "Why you’re keeping it" : "One line on what this is about"}
         ref={grow}
         className="mt-0.5 block w-full resize-none overflow-hidden text-[15px] leading-snug text-ink2"
       />
+      {node.kind === "link" && node.url && (
+        <div className="mt-1.5">
+          {node.blurb && <p className="mb-1.5 text-[14px] leading-snug text-ink3">{node.blurb}</p>}
+          <a href={node.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 text-[13.5px] text-ink2 underline decoration-[var(--line)] underline-offset-[3px] transition-colors hover:text-ink">
+            <span className="truncate">{bare(node.url)}</span>
+            <ArrowUpRight size={13} className="flex-none text-ink3" />
+          </a>
+        </div>
+      )}
       <div className="mb-6 mt-2 flex items-center gap-1.5 pr-10 text-[12.5px] text-ink3">
         {by && <Avatar agent={by} size={15} />}
         Updated by {by?.name ?? "someone"} · {ago(node.updated_at)} · version {node.version}
@@ -246,7 +380,7 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
       <div className="editor-compact">
         <Editor
           value={body}
-          placeholder="Write what is worth remembering. Agents read this before they ask you."
+          placeholder={node.kind === "link" ? "Notes, if you want them." : "Write what is worth remembering. Agents read this before they ask you."}
           onChange={(md) => {
             latest.current = md;
             if (pending.current) clearTimeout(pending.current);

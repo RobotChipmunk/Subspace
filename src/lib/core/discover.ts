@@ -12,6 +12,7 @@
 import { q, q1 } from "../db";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
+import { listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule } from "./rail";
 import { calendar, folders, getTodo, listTodos } from "./todos";
@@ -139,6 +140,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
               (SELECT count(*)::int FROM todos WHERE NOT done) AS todos,
               (SELECT count(*)::int FROM context_nodes WHERE NOT archived) AS context,
               (SELECT count(*)::int FROM context_nodes WHERE kind = 'page' AND NOT archived) AS pages,
+              (SELECT count(*)::int FROM context_nodes WHERE kind = 'link' AND NOT archived) AS links,
               (SELECT count(*)::int FROM trackers WHERE NOT archived) AS following,
               (SELECT count(*)::int FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()) AS rail,
               (SELECT count(*)::int FROM agents WHERE NOT archived) AS agents,
@@ -153,6 +155,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/todos", title: "Todos", about: "The owner's task list, by day and week.", count: n!.todos },
         { path: "/context", title: "Context", about: "Shared long-term memory about the owner, their life and the agents' work. A tree you can reshape.", count: n!.context },
         { path: "/pages", title: "Pages", about: "Finished documents agents have made: research, shortlists, plans. Newest first; they live in the context tree.", count: n!.pages },
+        { path: "/links", title: "Links", about: "Web links the owner saved, each with why they kept it and optional notes. Newest first; they live in the context tree.", count: n!.links },
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
         { path: "/rail", title: "Rail", about: "Timely modules shown beside the owner's screen right now (bookings, deadlines, today's details).", count: n!.rail },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
@@ -308,6 +311,39 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     };
   }
 
+  if (space === "links") {
+    const linkItem = (r: Record<string, unknown>): Item => ({
+      id: r.id,
+      path: "/context/" + r.path,
+      title: r.title,
+      url: r.url,
+      site: r.site || undefined,
+      why: r.summary || undefined,
+      about: r.blurb || undefined,
+      ...(Number(r.body_chars) ? { has_notes: true } : {}),
+      saved: r.created_at,
+    });
+    if (a === "by-time")
+      return timeTree(
+        { path: "/links/by-time", title: "Links" },
+        { from: "context_nodes", where: "kind = 'link' AND NOT archived", params: [], ts: "created_at", order: "id", select: "id, path, title, url, site, summary, blurb, length(body) AS body_chars, created_at", item: linkItem },
+        b,
+        cursor,
+      );
+    const recent = await listLinks(20);
+    return {
+      path: "/links",
+      title: "Links",
+      about: "The links the owner saved most recently. why is their own reason for keeping it; about says what the page is.",
+      items: recent.map((r) => linkItem(r as unknown as Record<string, unknown>)),
+      children: [
+        { path: "/links/by-time", title: "All links by time", about: "Every saved link, split by year, month and day as needed." },
+        { path: "/context", title: "Links by topic", about: "Links sit in the context tree under the area they belong to; unfiled ones are in /context/links." },
+      ],
+      hint: 'search(query, types: ["context"]) finds a link by title, address, reason or notes. read([id]) returns its notes. link_save(url, ...) saves one.',
+    };
+  }
+
   if (space === "following") {
     if (!a) {
       const ts = await listTrackers();
@@ -365,10 +401,10 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   throw notFound(`Nothing at "${rawPath}". Start from explore("/").`);
 }
 
-const contextChild = (k: { path: string; title: string; summary: string; kind?: string; child_count?: number; body_chars: number; updated_at: string }): Child => ({
+const contextChild = (k: { path: string; title: string; summary: string; kind?: string; blurb?: string | null; child_count?: number; body_chars: number; updated_at: string }): Child => ({
   path: `/context/${k.path}`,
-  title: k.kind === "page" ? `${k.title} (page)` : k.title,
-  about: k.summary || undefined,
+  title: k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.title,
+  about: k.summary || k.blurb || undefined,
   ...(k.child_count ? { count: k.child_count } : {}),
   latest: k.updated_at,
 });
@@ -534,9 +570,10 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         const crumbs = await breadcrumb(n);
         const kids = await contextChildren(n.id);
         out.push({
-          type: n.kind === "page" ? "page" : "context",
+          type: n.kind === "page" ? "page" : n.kind === "link" ? "link" : "context",
           id: n.id,
           ...(n.kind === "page" ? { link: `/page/${n.id}` } : {}),
+          ...(n.kind === "link" ? { url: n.url, site: n.site, about: n.blurb || undefined } : {}),
           path: "/context/" + n.path,
           trail: crumbs.map((c) => c.title).join(" › "),
           title: n.title,

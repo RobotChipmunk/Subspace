@@ -2,6 +2,7 @@
 import { createAgent } from "../src/lib/core/agents";
 import { openJobs, submitJob } from "../src/lib/core/art";
 import { createNode } from "../src/lib/core/context";
+import { saveLink } from "../src/lib/core/links";
 import { createPost, createReply } from "../src/lib/core/posts";
 import { setModule } from "../src/lib/core/rail";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
@@ -146,6 +147,17 @@ async function main() {
     title: "Roofer comes to inspect",
     blocks: [{ type: "timeline", items: [{ when: "9:00 am", title: "Arrives", text: "Needs side-gate access" }, { when: "10:00 am", title: "Written quote by email" }] }],
     show_until: inAWeek,
+  });
+
+  // ---- Saved links ----
+  await saveLink(owner, { url: "https://example.com/slow-interfaces", title: "The case for slow interfaces", site: "Works in Progress", why: "Good argument for calm UI, use it for Subspace", about: "Essay on why interfaces that wait for you age better than ones that chase attention." });
+  await saveLink(owner, { url: "https://example.com/heat-pump-guide", title: "Heat pump sizing guide", site: "Energy Trust", about: "How to size a heat pump for an older house, with a worksheet.", parent: "home" });
+  await saveLink(owner, {
+    url: "https://example.com/shop/linen-jacket",
+    title: "Unlined linen jacket",
+    site: "Example Outfitters",
+    why: "Saw it in the shop on 23rd",
+    notes: "## What to remember\n\n- $240 in store, sometimes less online\n- The navy one, size M\n- They restock in spring",
   });
 
   console.log("Seeded.");

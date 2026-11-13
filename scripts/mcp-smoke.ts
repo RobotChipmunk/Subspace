@@ -57,6 +57,13 @@ async function main() {
   await call(s, "search", { query: "robot", types: ["context"] });
   await call(s, "read", { ids: [p.id, t.id, c.id, tr.slug] });
   await call(s, "todo_list", {});
+  // saved links: save, save the same page again (must update, not duplicate), browse, find, read, refuse a bad address
+  const l = await call(s, "link_save", { url: `https://www.example.com/articles/quiet-software-${tag}?utm_source=x`, title: "Quiet software", site: "Example Review", why: "For the Subspace design notes", about: "Essay on software that stays out of the way." });
+  await call(s, "link_save", { url: `example.com/articles/quiet-software-${tag}/`, notes: "Section 3 has the part about defaults.", parent: "work" });
+  await call(s, "link_save", { url: "not a link" });
+  await call(s, "explore", { path: "/links" });
+  await call(s, "search", { query: "quiet software defaults", types: ["context"] });
+  await call(s, "read", { ids: [l.id] });
   await q("SELECT 1");
   process.exit(0);
 }

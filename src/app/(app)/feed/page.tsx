@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUp, MessageCircle, Trash2 } from "lucide-react";
+import { ArrowUp, Bookmark, MessageCircle, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -195,6 +195,33 @@ function ToSource({ post, children }: { post: Post; children: React.ReactNode })
   );
 }
 
+/** Keeps a post's source in the owner's saved links. Saving twice is harmless: the same page is stored once. */
+function SaveLink({ post }: { post: Post }) {
+  const [saved, setSaved] = useState(false);
+  if (!post.source) return null;
+  const { url, name } = post.source;
+  return (
+    <button
+      type="button"
+      aria-label={saved ? "Saved to links" : "Save link"}
+      aria-pressed={saved}
+      title={saved ? "Saved to links" : "Save link"}
+      onClick={async () => {
+        if (saved) return;
+        setSaved(true);
+        try {
+          await api("links", { body: { url, site: name, about: post.body } });
+        } catch {
+          setSaved(false);
+        }
+      }}
+      className={`-mr-2 grid h-9 w-9 flex-none place-items-center rounded-full transition-colors ${saved ? "text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+    >
+      <Bookmark size={16} fill={saved ? "currentColor" : "none"} />
+    </button>
+  );
+}
+
 function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post; index: number; open: boolean; dim: boolean; onToggle: () => void; onDeleted: () => void }) {
   const { agent, tracker, agents, me } = useMe();
   const author = agent(post.author);
@@ -254,6 +281,7 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
               <span />
             )}
             <span className="flex-1" />
+            {post.source && <SaveLink post={post} />}
             <button
               type="button"
               onClick={onToggle}

@@ -1,6 +1,7 @@
 import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
 import { briefing, changes, explore, read, search } from "../core/discover";
+import { saveLink } from "../core/links";
 import { createPost, createReply } from "../core/posts";
 import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
@@ -179,6 +180,7 @@ export const TOOLS: Tool[] = [
       body: str("Whole markdown body (replaces the existing one)."),
       body_append: str("Markdown to add at the end."),
       body_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement.") }, required: ["find", "replace"] },
+      about: str("Saved links only: the line on what the page is."),
       expect_version: { type: "integer", description: "Version you last read. The write fails if someone else edited since." },
     }),
     run: async (a, args) => {
@@ -221,8 +223,30 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "link_save",
+    description:
+      'Save a web link for the owner, or update the one already saved for the same page (links are matched by address, so saving twice never duplicates). Use it when the owner says to save, keep or remember a link, and when they tell you why. The page\'s title, site name and picture are read automatically. Links live in the context tree: remove one with context_archive, move or edit one with context_write. See the server instructions for the rules on "why".',
+    inputSchema: obj(
+      {
+        url: str("The address."),
+        why: str("The owner's own reason for keeping it, in their words, one line. Copy it verbatim; never reword it and never invent one. Leave it out if they gave no reason."),
+        about: str("One plain line on what the page is, written by you. Shown when there is no why. Optional: the page's own description is used otherwise."),
+        notes: str("Optional longer notes as markdown (may contain blocks). On an existing link they are added to the end."),
+        parent: str("Optional context area or folder it belongs under, by id or path, e.g. /context/home. Left out, it goes to /context/links for filing later."),
+        title: str("Optional. Only to override the page's own title."),
+        site: str('Optional site or publication name, e.g. "The Verge". Read from the page when left out.'),
+        image: str("Optional https picture for the link. Read from the page when left out."),
+      },
+      ["url"],
+    ),
+    run: async (a, args) => {
+      const { link, existed } = await saveLink(a, args as any);
+      return { id: link.id, path: "/context/" + link.path, title: link.title, site: link.site, ...(existed ? { already_saved: true, note: "This page was already saved; the existing entry was updated." } : {}) };
+    },
+  },
+  {
     name: "context_archive",
-    description: "Remove a context node and its children from the tree. History is kept. Use for things that are wrong or obsolete, after merging anything still useful elsewhere.",
+    description: "Remove a context node (a note, page or saved link) and its children from the tree. History is kept. Use for things that are wrong or obsolete, after merging anything still useful elsewhere.",
     inputSchema: obj({ id: str("Node id or path.") }, ["id"]),
     run: async (a, { id }) => {
       await archiveNode(a, id);

@@ -582,6 +582,16 @@ textarea:focus-visible,
   text-decoration-color: var(--accent-soft);
   text-underline-offset: 3px;
 }
+/* ---------- Saved links: quiet rows, no dividers ---------- */
+.link-row {
+  transition: background 0.25s ease;
+}
+@media (hover: hover) {
+  .link-row:hover {
+    background: var(--fill);
+  }
+}
+
 /* ---------- The rail: blocks drawn small ---------- */
 .rail-sheet {
   background: var(--bg);

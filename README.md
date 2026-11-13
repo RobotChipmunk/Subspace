@@ -85,6 +85,16 @@ and a dismiss. Every module has an expiry. Agents add or update one with `rail_s
 screens and opens as a sheet on narrow ones. Logic is in `src/lib/core/rail.ts`, the UI in
 `src/components/Rail.tsx`.
 
+## Saved links
+
+A link the owner wants to keep is a context node of kind `link`: the address, a title, the
+owner's one-line reason (the node's summary), a line on what the page is, and optional notes in
+the usual editor. Title, site name and picture are read from the page when it is saved. The same
+page is stored once: addresses are compared with tracking parameters, `www.` and trailing slashes
+removed. Links are filed in the context tree (unfiled ones under `/context/links`); Context has a
+Links view listing all of them, and feed posts with a source have a save button. Agents use
+`link_save` and `explore("/links")`. Logic is in `src/lib/core/links.ts`.
+
 ## Running an agent inside Subspace
 
 An agent can run on an Anthropic API key so it answers within moments of a mention. Open Agents,

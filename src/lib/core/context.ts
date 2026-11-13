@@ -10,8 +10,12 @@ export type ContextNode = {
   title: string;
   summary: string;
   body: string;
-  kind: "note" | "page";
+  kind: "note" | "page" | "link";
   cover: string | null;
+  /** Links only: the address, the site's name and a line on what the page is. */
+  url: string | null;
+  site: string | null;
+  blurb: string | null;
   version: number;
   updated_by: string;
   archived: boolean;
@@ -19,7 +23,7 @@ export type ContextNode = {
   updated_at: string;
 };
 
-const LITE = "id, parent_id, path, title, summary, kind, cover, version, updated_by, created_at, updated_at, length(body) AS body_chars";
+const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, version, updated_by, created_at, updated_at, length(body) AS body_chars";
 export type ContextLite = Omit<ContextNode, "body" | "archived"> & { body_chars: number; child_count?: number };
 
 export async function getNode(ref: string): Promise<ContextNode> {
@@ -61,9 +65,14 @@ function guard(actor: Agent, body: string) {
   if (problems.length) throw bad(`${problems.join(" ")} Fix the block and send it again. See guide("pages") for each block's fields.`);
 }
 
+/** What search looks through: for a link that includes its address, site and description. */
+const docText = (n: { summary: string; body: string; url?: string | null; site?: string | null; blurb?: string | null }) =>
+  [n.summary, n.blurb, n.site, n.url, n.body].filter(Boolean).join("\n");
+
 const okCover = (c: unknown) => (typeof c === "string" && /^https:\/\//.test(c) && c.length < 2000 ? c : null);
 
-export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string; kind?: "note" | "page"; cover?: string }) {
+export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string; kind?: "note" | "page" | "link"; cover?: string; link?: { url: string; key: string; site: string; blurb: string } },
+) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Context node needs a title.");
   const parent = input.parent ? await getNode(input.parent) : null;
@@ -71,20 +80,22 @@ export async function createNode(actor: Agent, input: { parent?: string | null; 
   const path = await uniquePath(parent?.path ?? null, title);
   const body = input.body ?? "";
   guard(actor, body);
-  const kind = input.kind === "page" ? "page" : "note";
+  const link = input.kind === "link" ? input.link : undefined;
+  const kind = link ? "link" : input.kind === "page" ? "page" : "note";
   if (kind === "page" && !parent) throw bad("A page needs a parent. Put it under the context area it belongs to, in a folder for its topic.");
-  await q("INSERT INTO context_nodes (id, parent_id, path, title, summary, body, updated_by, kind, cover) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)", [
+  await q("INSERT INTO context_nodes (id, parent_id, path, title, summary, body, updated_by, kind, cover, url, url_key, site, blurb) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", [
     id, parent?.id ?? null, path, title.slice(0, 120), (input.summary ?? "").slice(0, 400), body, actor.id, kind, okCover(input.cover),
+    link?.url ?? null, link?.key ?? null, link?.site ?? null, link?.blurb ?? null,
   ]);
-  await indexDoc("context", id, title, `${input.summary ?? ""}\n${body}`);
-  await logEvent({ actor: actor.id, type: kind === "page" ? "page.created" : "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
+  await indexDoc("context", id, title, docText({ summary: input.summary ?? "", body, url: link?.url, site: link?.site, blurb: link?.blurb }));
+  await logEvent({ actor: actor.id, type: kind === "link" ? "link.saved" : kind === "page" ? "page.created" : "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
   return getNode(id);
 }
 
 export async function updateNode(
   actor: Agent,
   ref: string,
-  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page" },
+  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string },
 ) {
   const before = await getNode(ref);
   if (patch.expect_version !== undefined && patch.expect_version !== before.version)
@@ -100,7 +111,8 @@ export async function updateNode(
   if (body.length > 400_000) throw bad("Node body is too long. Split it into child nodes.");
   if (body !== before.body) guard(actor, body);
   const cover = patch.cover === undefined ? before.cover : patch.cover === null ? null : okCover(patch.cover);
-  const kind = patch.kind ?? before.kind;
+  const kind = before.kind === "link" ? "link" : (patch.kind ?? before.kind);
+  const blurb = before.kind === "link" && patch.about !== undefined ? patch.about.slice(0, 400) : before.blurb;
   const title = patch.title?.trim() || before.title;
   const summary = patch.summary !== undefined ? patch.summary.slice(0, 400) : before.summary;
 
@@ -114,7 +126,7 @@ export async function updateNode(
     path = await uniquePath(parent?.path ?? null, title, before.id);
   }
 
-  const changed = body !== before.body || title !== before.title || summary !== before.summary || cover !== before.cover || kind !== before.kind;
+  const changed = body !== before.body || title !== before.title || summary !== before.summary || cover !== before.cover || kind !== before.kind || blurb !== before.blurb;
   if (!changed && path === before.path) return before;
 
   if (changed) {
@@ -123,14 +135,14 @@ export async function updateNode(
     ]);
   }
   await q(
-    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10 WHERE id=$1",
-    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind],
+    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10, blurb=$11 WHERE id=$1",
+    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind, blurb],
   );
   if (path !== before.path) {
     // Keep every descendant's address in step with its ancestor.
     await q("UPDATE context_nodes SET path = $2 || substr(path, $3) WHERE path LIKE $1", [before.path.replace(/[%_\\]/g, "\\$&") + "/%", path, before.path.length + 1]);
   }
-  await indexDoc("context", before.id, title, `${summary}\n${body}`);
+  await indexDoc("context", before.id, title, docText({ summary, body, url: before.url, site: before.site, blurb }));
   const was = new Set(await findMentions(before.body));
   const mentions = (await findMentions(body)).filter((h) => !was.has(h));
   await logEvent({
