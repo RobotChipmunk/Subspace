@@ -158,12 +158,12 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
                   }}
                   className="relative -mx-2 flex cursor-grab touch-pan-y items-start gap-3 rounded-2xl px-3 active:cursor-grabbing"
                 >
-                  <button role="checkbox" aria-checked={r.done} aria-label={r.done ? "Mark not done" : "Mark done"} data-on={r.done} onClick={() => toggle(r)} onPointerDown={(e) => e.stopPropagation()} className="check mt-[11px]">
+                  <button role="checkbox" aria-checked={r.done} aria-label={r.done ? "Mark not done" : "Mark done"} data-on={r.done} onClick={() => toggle(r)} onPointerDown={(e) => e.stopPropagation()} className="check mt-[9px]">
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M2.5 6.2l2.4 2.4 4.6-5" />
                     </svg>
                   </button>
-                  <div onClick={() => !dragging.current && onOpen(r.id)} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-b hairline py-[11px]">
+                  <div onClick={() => !dragging.current && onOpen(r.id)} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-[9px]">
                     <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>{r.title}</span>
                     {r.ai_unseen && <span title="An agent made changes" className="h-2 w-2 flex-none rounded-full bg-accent shadow-[0_0_0_4px_var(--accent-soft)]" />}
                     {r.has_notes && <AlignLeft size={15} className="flex-none text-ink3" />}
@@ -181,7 +181,7 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
         {adding ? (
           <motion.form initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} onSubmit={(e) => (e.preventDefault(), add())} className="flex flex-1 items-center gap-3">
             <span className="check opacity-40" />
-            <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setAdding(false))} placeholder="New task" className="flex-1 py-[11px] text-[16px]" />
+            <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setAdding(false))} placeholder="New task" className="flex-1 py-[9px] text-[16px]" />
           </motion.form>
         ) : (
           <motion.button whileTap={{ scale: 0.9 }} onClick={() => setAdding(true)} aria-label="Add task" className="mt-2 grid h-[22px] w-[22px] place-items-center rounded-full bg-fill2 text-ink2 transition-colors hover:bg-accent hover:text-white">
