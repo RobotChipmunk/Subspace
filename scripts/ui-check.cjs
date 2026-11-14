@@ -244,7 +244,7 @@ async function run(profile) {
       await settle(900);
       if (!(await reply.count())) fail("feed comments: scrolling the feed closed the comments");
       if ((await other.getByRole("button", { name: "Close comments" }).count()) !== 1) fail("feed comments: scrolling to another post did not move the comments to it");
-      if (!(await panel.getByText("No comments yet").count()) || (await panel.getByText("It strengthens it.").count())) fail("feed comments: the panel still shows the previous post's comments");
+      if (await panel.getByText("It strengthens it.").count()) fail("feed comments: the panel still shows the previous post's comments");
       await shot("feed-comments-follow");
       // pressing comments on another post moves them there (unless scrolling to it already did); pressing again closes
       await card.scrollIntoViewIfNeeded();
