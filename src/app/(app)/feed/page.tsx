@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { preload, useSWRConfig } from "swr";
 import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton, TrackerChip } from "@/components/bits";
+import { Clip } from "@/components/Clip";
 import { MentionInput } from "@/components/MentionInput";
 import { useComments } from "@/components/Shell";
 import { ago, api, fetcher, soft, useMe } from "@/lib/client";
@@ -192,7 +193,7 @@ function Skeletons() {
   );
 }
 
-/** A post's picture. Video plays in place; anything else opens the source when tapped. */
+/** A post's picture. Video plays in place as it scrolls into view; anything else opens the source when tapped. */
 function Picture({ post }: { post: Post }) {
   const m = post.media;
   const art = post.art;
@@ -205,7 +206,15 @@ function Picture({ post }: { post: Post }) {
         <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />
       </ToSource>
     );
-  if (m?.type === "video") return <video src={m.url} poster={m.poster} controls playsInline preload="metadata" className={`${frame} aspect-video w-full bg-black`} />;
+  // A repeating clip is a picture that moves, so it opens the source like one. A video keeps its taps for itself.
+  if (m?.type === "video")
+    return m.loop && !m.embed ? (
+      <ToSource post={post}>
+        <Clip media={m} />
+      </ToSource>
+    ) : (
+      <Clip media={m} />
+    );
   if (art && art.status !== "none")
     return (
       <ToSource post={post}>

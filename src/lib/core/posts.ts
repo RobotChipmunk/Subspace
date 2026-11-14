@@ -7,7 +7,19 @@ export type Image = { url: string; title?: string };
  * A post's picture. `images` is set only when there are several: the whole set in order, the first
  * repeating `url`, so anything that knows about one picture still shows the right one.
  */
-export type Media = { type: "image" | "video"; url: string; title?: string; poster?: string; images?: Image[] };
+/** A video that plays inside its host's own player. `tall` marks an upright clip (a YouTube Short). */
+export type Embed = { provider: "youtube" | "vimeo"; id: string; tall?: boolean };
+export type Media = {
+  type: "image" | "video";
+  url: string;
+  title?: string;
+  poster?: string;
+  images?: Image[];
+  /** Video only: played through YouTube or Vimeo rather than from a file. */
+  embed?: Embed;
+  /** Video only: a short silent clip that repeats, shown like an animated GIF with no controls. */
+  loop?: boolean;
+};
 export type Source = { name: string; url: string };
 
 export type Post = {
@@ -46,6 +58,30 @@ const hostOf = (url: string) => {
   }
 };
 
+/** Recognises a YouTube or Vimeo address, in any of the forms people copy, and returns what is needed to embed it. */
+export function embedOf(url: string): Embed | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.replace(/^(www|m|music)\./, "");
+  const parts = u.pathname.split("/").filter(Boolean);
+  const yt = (id: string | null | undefined, tall = false): Embed | null => (id && /^[\w-]{11}$/.test(id) ? { provider: "youtube", id, ...(tall ? { tall } : {}) } : null);
+  if (host === "youtu.be") return yt(parts[0]);
+  if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    if (parts[0] === "watch") return yt(u.searchParams.get("v"));
+    if (["embed", "shorts", "live", "v"].includes(parts[0])) return yt(parts[1], parts[0] === "shorts");
+    return null;
+  }
+  if (host === "vimeo.com" || host === "player.vimeo.com") {
+    const id = [...parts].reverse().find((x) => /^\d{6,}$/.test(x));
+    return id ? { provider: "vimeo", id } : null;
+  }
+  return null;
+}
+
 /** Splits what an agent attached into the picture (image or video) and the source it came from. */
 function checkAttachments(m: unknown, src: unknown): { media: Media | null; source: Source | null } {
   let media: Media | null = null;
@@ -64,14 +100,22 @@ function checkAttachments(m: unknown, src: unknown): { media: Media | null; sour
     // Inside "more", a bare URL is enough.
     const raw = (typeof item === "string" ? { url: item } : (item ?? {})) as { type?: string; url?: unknown; title?: unknown; source?: unknown; poster?: unknown };
     const type = raw.type ?? (i > 0 ? "image" : "");
-    if (!["image", "video", "link"].includes(type)) throw bad("media.type must be image or video.");
+    if (!["image", "video", "gif", "link"].includes(type)) throw bad("media.type must be image, gif or video.");
     if (typeof raw.url !== "string" || !/^(https:\/\/|\/api\/media\/)/.test(raw.url)) throw bad("media.url must be an https URL.");
-    if (list.length > 1 && type !== "image") throw bad("Several pictures must all be images. A video stands alone.");
     const title = raw.title ? { title: String(raw.title).slice(0, 140) } : {};
+    const poster = typeof raw.poster === "string" && /^https:\/\//.test(raw.poster) ? { poster: raw.poster } : {};
     // An article link is a source, not a picture.
-    if (type === "link") source ??= { name: String(raw.source ?? "").trim().slice(0, 40) || hostOf(raw.url), url: raw.url };
-    else if (type === "video") media = { type: "video", url: raw.url, ...title, ...(typeof raw.poster === "string" && /^https:\/\//.test(raw.poster) ? { poster: raw.poster } : {}) };
-    else if (!images.some((x) => x.url === raw.url)) images.push({ url: raw.url, ...title });
+    if (type === "link") return void (source ??= { name: String(raw.source ?? "").trim().slice(0, 40) || hostOf(raw.url), url: raw.url });
+    // Many "GIFs" on the web are really short video files. Those play as a silent repeating clip; a true .gif is an image.
+    const file = /\.(mp4|webm|mov|m4v|gifv)(\?|#|$)/i.test(raw.url);
+    const embed = type === "image" ? null : embedOf(raw.url);
+    if (type === "video" || embed || (type === "gif" && file)) {
+      if (list.length > 1) throw bad("Several pictures must all be images. A video stands alone.");
+      if (embed) media = { type: "video", url: raw.url, ...title, ...poster, embed };
+      else if (type === "video" && !file && !raw.url.startsWith("/api/media/"))
+        throw bad("media.url for a video must be the video file itself (.mp4 or .webm) or a YouTube or Vimeo link. A page that merely contains a video cannot be played; give that page as source instead.");
+      else media = { type: "video", url: raw.url.replace(/\.gifv(?=\?|#|$)/i, ".mp4"), ...title, ...poster, ...(type === "gif" ? { loop: true } : {}) };
+    } else if (!images.some((x) => x.url === raw.url)) images.push({ url: raw.url, ...title });
   });
   if (images.length > IMAGES_MAX)
     throw bad(`A post carries at most ${IMAGES_MAX} pictures; this has ${images.length}. Keep only the ones that each show something different the owner needs to see.`);
