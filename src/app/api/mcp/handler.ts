@@ -1,5 +1,5 @@
 import { challengeFor, mcpCaller } from "@/lib/auth";
-import type { Target } from "@/lib/core/oauth";
+import { originOf, type Target } from "@/lib/core/oauth";
 import { handleMcp } from "@/lib/mcp/server";
 
 const CORS = {
@@ -22,7 +22,7 @@ export async function mcpPost(req: Request, at: { target?: Target } = {}) {
   } catch {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, { status: 400, headers: CORS });
   }
-  const out = await handleMcp(who.agent, body, { readOnly: who.grant?.read_only });
+  const out = await handleMcp(who.agent, body, { readOnly: who.grant?.read_only, origin: originOf(req) });
   if (out.json === undefined) return new Response(null, { status: out.status, headers: CORS });
   return Response.json(out.json, { status: out.status, headers: CORS });
 }

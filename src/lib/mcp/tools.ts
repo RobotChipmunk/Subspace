@@ -1,7 +1,9 @@
 import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
 import { briefing, changes, explore, read, search } from "../core/discover";
+import { uploadTicket } from "../auth";
 import { saveLink } from "../core/links";
+import { saveMedia } from "../core/media";
 import { createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
 import { sharingFor } from "../core/guests";
@@ -17,7 +19,7 @@ export type Tool = {
   description: string;
   inputSchema: Schema;
   readOnly?: boolean;
-  run: (agent: Agent, args: Record<string, any>) => Promise<unknown>;
+  run: (agent: Agent, args: Record<string, any>, ctx?: { origin?: string }) => Promise<unknown>;
 };
 
 const str = (description: string) => ({ type: "string", description });
@@ -132,6 +134,30 @@ export const TOOLS: Tool[] = [
     run: async (a, args) => {
       const p = await createPost(a, args as any);
       return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", ...(p.media?.images ? { pictures: p.media.images.length } : {}), ...(p.media?.type === "video" ? { plays: p.media.embed?.provider ?? (p.media.loop ? "gif" : "video") } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
+    },
+  },
+  {
+    name: "media_upload",
+    description:
+      'Put a clip or picture you made into Subspace so a post can show it: above all a short preview you recorded of a video that cannot be embedded. Call it with no arguments to get an address to send the file to (GIF, MP4 or WebM, at most 4 MB). Then pass the returned url as media on post. See guide("posting"), "When the video cannot be embedded".',
+    inputSchema: obj({
+      data: str("Optional. The file as base64, for a small file when you cannot make web requests yourself. Leave out to get an upload address instead."),
+      mime: { type: "string", enum: ["image/gif", "video/mp4", "video/webm", "image/png", "image/jpeg", "image/webp"], description: "With data: what kind of file it is." },
+    }),
+    run: async (a, { data, mime }, ctx) => {
+      if (data) {
+        if (!mime) throw bad("Say what the file is with mime, for example video/mp4.");
+        const url = await saveMedia(a, Buffer.from(String(data).replace(/^data:[^,]*,/, ""), "base64"), mime, { clips: true });
+        return { url, media: { type: mime.startsWith("video/") ? "video" : mime === "image/gif" ? "gif" : "image", url }, next: "Pass media on post." };
+      }
+      const { ticket, minutes } = await uploadTicket(a);
+      const to = `${ctx?.origin ?? process.env.SUBSPACE_URL?.replace(/\/+$/, "") ?? ""}/api/media/upload/${ticket}`;
+      return {
+        upload_to: to,
+        how: `POST the file to that address within ${minutes} minutes, as a form field named "file" or as the request body with its Content-Type. For example: curl -F file=@preview.mp4 "${to}"`,
+        accepts: "GIF, MP4 (H.264) or WebM, at most 4 MB. No sound is needed: previews play muted.",
+        then: 'The response is { url, media }. Pass media on post; use type "gif" for a silent preview that should repeat.',
+      };
     },
   },
   {

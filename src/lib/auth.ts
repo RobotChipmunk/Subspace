@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { checkAttempts, ipOf, noteFailure, originOf, pathOfTarget, verifyAccess, type Grant, type Target } from "./core/oauth";
-import { agentByToken, ApiError, ownerAgent, sha256, type Agent } from "./core/util";
+import { agentById, agentByToken, ApiError, ownerAgent, sha256, type Agent } from "./core/util";
 
 export const SESSION_COOKIE = "ss_session";
 const NINETY_DAYS = 60 * 60 * 24 * 90;
@@ -39,6 +39,24 @@ export async function ownerFromSession(token: string | undefined): Promise<Agent
   try {
     await jwtVerify(token, secret());
     return await ownerAgent();
+  } catch {
+    return null;
+  }
+}
+
+const uploadSecret = () => new TextEncoder().encode(sha256("subspace-upload:" + password()));
+const UPLOAD_MINUTES = 30;
+
+/** A short-lived address an agent can send one file to, without its own credentials travelling with the file. */
+export async function uploadTicket(agent: Agent): Promise<{ ticket: string; minutes: number }> {
+  const ticket = await new SignJWT({ sub: agent.id }).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime(`${UPLOAD_MINUTES}m`).sign(uploadSecret());
+  return { ticket, minutes: UPLOAD_MINUTES };
+}
+
+export async function agentFromUploadTicket(ticket: string): Promise<Agent | null> {
+  try {
+    const { payload } = await jwtVerify(ticket, uploadSecret());
+    return payload.sub ? await agentById(payload.sub) : null;
   } catch {
     return null;
   }

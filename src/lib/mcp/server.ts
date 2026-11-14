@@ -16,7 +16,7 @@ const ok = (id: Rpc["id"], result: unknown) => ({ jsonrpc: "2.0", id, result });
 const err = (id: Rpc["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
 /** What a connection may do. A guest gets a different, much smaller server; a read-only connection loses the tools that change things. */
-export type Access = { readOnly?: boolean };
+export type Access = { readOnly?: boolean; origin?: string };
 
 async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | null> {
   if (m.id === undefined) return null; // notifications need no reply
@@ -56,7 +56,7 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
       const tool = tools.find((t) => t.name === m.params?.name) ?? tools.find((t) => t.aliases?.includes(m.params?.name));
       if (!tool) return err(m.id, -32602, `Unknown tool: ${m.params?.name}`);
       try {
-        const out = await tool.run(agent, m.params?.arguments ?? {});
+        const out = await tool.run(agent, m.params?.arguments ?? {}, { origin: access.origin });
         return ok(m.id, { content: [{ type: "text", text: JSON.stringify(out) }] });
       } catch (e) {
         // Tool errors go back as content so the model can read them and correct itself.

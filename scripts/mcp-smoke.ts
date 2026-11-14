@@ -67,6 +67,15 @@ async function main() {
   expect("a true GIF", gif.type === "image" && !gif.loop, gif);
   expect("a page that is not a video", !!(await media({ type: "video", url: "https://example.com/articles/watch-this" })).ERROR, "accepted");
   expect("a video among pictures", !!(await media({ type: "image", url: shots[0].url, more: [{ type: "gif", url: "https://example.com/a.mp4" }] })).ERROR, "accepted");
+  // a recorded preview: uploaded as data, then posted as a repeating clip; a file that is not what it claims is refused
+  const webm = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(64)]).toString("base64");
+  const up = await call(s, "media_upload", { data: webm, mime: "video/webm" });
+  expect("an uploaded clip", /^\/api\/media\/m_\w+\.webm$/.test(up.url ?? "") || /\.webm$/.test(up.url ?? ""), up);
+  const preview = await media({ type: "gif", url: up.url });
+  expect("an uploaded preview posted as a GIF", preview.type === "video" && preview.loop === true, preview);
+  expect("a fake clip", !!(await call(s, "media_upload", { data: Buffer.from("not a video at all, just text").toString("base64"), mime: "video/mp4" })).ERROR, "accepted");
+  const addr = await call(s, "media_upload");
+  expect("an upload address", /\/api\/media\/upload\/[\w.-]+$/.test(addr.upload_to ?? ""), addr);
   await call(claude, "changes");
   const jobs = await call(claude, "jobs");
   for (const j of jobs.jobs) {
