@@ -1,6 +1,6 @@
 import { ApiError, type Agent } from "../core/util";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
-import { GUEST_GUIDE, GUEST_TOOLS } from "./guest";
+import { GUEST_GUIDE, guestServerInfo, guestTools } from "./guest";
 import { TOOLS, type Tool } from "./tools";
 
 /**
@@ -20,7 +20,7 @@ export type Access = { readOnly?: boolean };
 async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | null> {
   if (m.id === undefined) return null; // notifications need no reply
   const guest = agent.kind === "guest";
-  const tools: Tool[] = (guest ? GUEST_TOOLS : TOOLS).filter((t) => !access.readOnly || t.readOnly);
+  const tools: (Tool & { aliases?: string[] })[] = (guest ? await guestTools() : TOOLS).filter((t) => !access.readOnly || t.readOnly);
   if (guest) {
     // A guest's server has tasks and nothing else: no guide topics, resources or prompts from the owner's side.
     if (m.method === "resources/list") return ok(m.id, { resources: [] });
@@ -33,7 +33,7 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
       return ok(m.id, {
         protocolVersion: VERSIONS.includes(asked) ? asked : VERSIONS[0],
         capabilities: { tools: { listChanged: false }, resources: { listChanged: false }, prompts: { listChanged: false } },
-        serverInfo: { name: "subspace", title: "Subspace", version: GUIDE_VERSION },
+        serverInfo: { ...(guest ? await guestServerInfo() : { name: "subspace", title: "Subspace" }), version: GUIDE_VERSION },
         instructions: guest
           ? await GUEST_GUIDE(agent, !!access.readOnly)
           : `You are connected as @${agent.handle} (${agent.name}).${access.readOnly ? " This connection is read-only: you can look, but not post or change anything." : ""}\n\n${CORE}`,
@@ -51,7 +51,8 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
         })),
       });
     case "tools/call": {
-      const tool = tools.find((t) => t.name === m.params?.name);
+      // earlier names still answer, for an agent that listed the tools before they were renamed
+      const tool = tools.find((t) => t.name === m.params?.name) ?? tools.find((t) => t.aliases?.includes(m.params?.name));
       if (!tool) return err(m.id, -32602, `Unknown tool: ${m.params?.name}`);
       try {
         const out = await tool.run(agent, m.params?.arguments ?? {});

@@ -100,6 +100,10 @@ tasks tagged as theirs, with notes, status and the day you gave them. It reaches
 server has five task tools and no others (`src/lib/mcp/guest.ts`), and every query behind them is
 limited to that person's tasks (`src/lib/core/guests.ts`).
 
+Their agents see it as "Tasks for <your first name>", with tools such as `send_task_to_chris`, and
+instructions to use it whenever they are asked to send you a task or a reminder, without the
+person having to name the service.
+
 A task they add waits in a "From <name>" list in Todos and shows in the rail until you move it to
 a day. It keeps its tag afterwards, so they can see where it went and when it is done.
 

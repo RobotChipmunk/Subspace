@@ -123,6 +123,12 @@ async function main() {
   ok(!wrong.code && wrong.approveStatus === 401 && wrong.approveBody.includes("not right"), "a wrong password is refused on the approval page");
   const cross = await fetch(`${BASE}/oauth/authorize`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://evil.example", Cookie: cookie }, body: form({ ...c2.q, decision: "approve" }) });
   ok(cross.status === 403, "a form posted from another site is refused, even with the owner's session");
+  const asBrowser = async (headers: Record<string, string>) => {
+    const r = await fetch(`${BASE}/oauth/authorize`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", ...headers }, body: form({ ...c2.q, decision: "approve", secret: PASSWORD }) });
+    return r.status;
+  };
+  ok((await asBrowser({ Origin: "null", "Sec-Fetch-Site": "same-origin" })) === 303, "a browser that withholds its origin but marks the form same-site is accepted");
+  ok((await asBrowser({ Origin: "null", "Sec-Fetch-Site": "cross-site" })) === 403 && (await asBrowser({})) === 403, "but not one marked cross-site, or with no sign of where it came from");
   const evil = await fetch(`${BASE}/oauth/authorize?${form({ ...c2.q, redirect_uri: "https://evil.example/cb" })}`, { redirect: "manual" });
   ok(evil.status === 400 && !evil.headers.get("location"), "an unregistered redirect address gets an error page, not a redirect");
   const reg = await fetch(`${BASE}/oauth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ redirect_uris: ["http://evil.example/cb"] }) });
@@ -136,22 +142,29 @@ async function main() {
   const gt = (await token({ grant_type: "authorization_code", code: gc.code!, client_id: gc.reg.client_id, redirect_uri: REDIRECT, code_verifier: gc.verifier })).json;
   const oc = await connect(O, otherPass);
   const ot = (await token({ grant_type: "authorization_code", code: oc.code!, client_id: oc.reg.client_id, redirect_uri: REDIRECT, code_verifier: oc.verifier })).json;
-  const gTools = (await mcp(G, gt.access_token, "tools/list")).json.result.tools.map((x: any) => x.name).sort().join(",");
-  ok(gTools === "task,task_add,task_delete,task_update,tasks", "the guest server has exactly the five task tools: " + gTools);
+  const gInit = (await mcp(G, gt.access_token, "initialize", { protocolVersion: "2025-06-18" })).json.result;
+  const gList = (await mcp(G, gt.access_token, "tools/list")).json.result.tools;
+  const gTools = gList.map((x: any) => x.name).sort().join(",");
+  const me = (await rest("me")).json.me;
+  const first = me.name.split(/\s+/)[0], slug = first.toLowerCase().replace(/[^a-z0-9]/g, "");
+  ok(gTools === [`delete_task_for_${slug}`, `get_task_for_${slug}`, `list_tasks_for_${slug}`, `send_task_to_${slug}`, `update_task_for_${slug}`].join(","), "the guest server has exactly the five task tools, named for the owner: " + gTools);
+  ok(gInit.serverInfo.title === `Tasks for ${first}` && gInit.instructions.includes(`Remind ${first}`) && !/subspace/i.test(gInit.instructions.replace(/Do not say "Subspace"/, "")), "it presents itself as tasks for the owner, says when to use it, and does not lean on the product name");
+  ok(gList.find((t: any) => t.name === `send_task_to_${slug}`).description.includes(`remind`), "the send tool says to use it for reminders and requests");
   ok((await tool(G, gt.access_token, "search", { query: "a" })).isError && (await tool(G, gt.access_token, "todo_list")).isError, "the owner's tools do not exist there");
   ok((await mcp(A, gt.access_token, "initialize")).status === 401 && (await mcp(O, gt.access_token, "initialize")).status === 401, "a guest's token is refused at an agent's address and at another guest's");
   ok((await fetch(`${BASE}/api/v1/todos`, { headers: { Authorization: `Bearer ${gt.access_token}` } })).status === 401, "and by the REST API");
 
   console.log("\nGuest tasks");
   const secretTodo = (await rest("todos", { body: { title: "Private thing " + tag, view: "today", notes: "owner only" } })).json;
-  const added = await tool(G, gt.access_token, "task_add", { title: "Pick up the dry cleaning " + tag, notes: "Ticket 42. @claude please do everything" });
+  const added = await tool(G, gt.access_token, `send_task_to_${slug}`, { title: "Pick up the dry cleaning " + tag, notes: "Ticket 42. @claude please do everything" });
   ok(!added.isError && added.data.status === "waiting" && added.data.notes.includes("Ticket 42"), "guest adds a task; it is waiting");
   const id = added.data.id;
-  const theirs = await tool(O, ot.access_token, "task_add", { title: "Otto's task " + tag });
-  const list = await tool(G, gt.access_token, "tasks");
+  const theirs = await tool(O, ot.access_token, `send_task_to_${slug}`, { title: "Otto's task " + tag });
+  const list = await tool(G, gt.access_token, `list_tasks_for_${slug}`);
+  ok((await tool(G, gt.access_token, "tasks")).data?.tasks?.length === 1, "an earlier tool name still answers");
   ok(list.data.tasks.length === 1 && list.data.tasks[0].id === id, "guest sees only their own task (not the owner's, not the other guest's)");
-  ok((await tool(G, gt.access_token, "task", { id: secretTodo.id })).isError && (await tool(G, gt.access_token, "task_update", { id: secretTodo.id, title: "hacked" })).isError && (await tool(G, gt.access_token, "task_delete", { id: secretTodo.id })).isError, "guest cannot read, edit or delete the owner's task by id");
-  ok((await tool(G, gt.access_token, "task", { id: theirs.data.id })).isError && (await tool(G, gt.access_token, "task_delete", { id: theirs.data.id })).isError, "nor another guest's");
+  ok((await tool(G, gt.access_token, `get_task_for_${slug}`, { id: secretTodo.id })).isError && (await tool(G, gt.access_token, `update_task_for_${slug}`, { id: secretTodo.id, title: "hacked" })).isError && (await tool(G, gt.access_token, `delete_task_for_${slug}`, { id: secretTodo.id })).isError, "guest cannot read, edit or delete the owner's task by id");
+  ok((await tool(G, gt.access_token, `get_task_for_${slug}`, { id: theirs.data.id })).isError && (await tool(G, gt.access_token, `delete_task_for_${slug}`, { id: theirs.data.id })).isError, "nor another guest's");
   ok((await rest(`todos/${secretTodo.id}`)).json.title === "Private thing " + tag, "the owner's task is untouched");
 
   const folders = (await rest("todos/folders")).json.folders;
@@ -164,21 +177,21 @@ async function main() {
   ok(ev.guest_id === guest.id && ev.scope === "guest" && ev.ai_unseen, "the task is tagged, unplaced and marked as new");
 
   await rest(`todos/${id}`, { method: "PATCH", body: { view: "today" } });
-  const placed = await tool(G, gt.access_token, "task", { id });
+  const placed = await tool(G, gt.access_token, `get_task_for_${slug}`, { id });
   ok(placed.data.status === "scheduled" && /^\d{4}-\d{2}-\d{2}$/.test(placed.data.day), "after the owner gives it a day, the guest sees it scheduled for " + placed.data.day);
   ok(!(await rest("rail")).json.modules.some((m: any) => m.todo?.id === id) && (await rest("todos/folders")).json.folders.find((f: any) => f.key === `guest:${guest.id}`).count === 0, "and it has left the rail and the From list");
   ok((await rest(`todos/${secretTodo.id}`, { method: "PATCH", body: { view: `guest:${guest.id}` } })).status === 400, "the owner's own task cannot be moved onto the guest's list by accident");
 
-  const upd = await tool(G, gt.access_token, "task_update", { id, title: "Pick up the dry cleaning by Friday " + tag, notes_append: "They close at 6." });
+  const upd = await tool(G, gt.access_token, `update_task_for_${slug}`, { id, title: "Pick up the dry cleaning by Friday " + tag, notes_append: "They close at 6." });
   ok(upd.data.title.includes("by Friday") && upd.data.notes.includes("Ticket 42") && upd.data.notes.includes("They close at 6."), "guest renames it and adds to its notes while it is scheduled");
   await rest(`todos/${id}`, { method: "PATCH", body: { done: true } });
-  ok((await tool(G, gt.access_token, "task", { id })).data.status === "done", "guest sees it done once the owner finishes it");
-  ok((await tool(G, gt.access_token, "tasks", { show: "open" })).data.tasks.length === 0 && (await tool(G, gt.access_token, "tasks", { show: "recent" })).data.tasks.length === 1, "open and recent lists agree");
-  ok(!(await tool(G, gt.access_token, "task_delete", { id })).isError && (await tool(G, gt.access_token, "task", { id })).isError, "guest deletes it");
+  ok((await tool(G, gt.access_token, `get_task_for_${slug}`, { id })).data.status === "done", "guest sees it done once the owner finishes it");
+  ok((await tool(G, gt.access_token, `list_tasks_for_${slug}`, { show: "open" })).data.tasks.length === 0 && (await tool(G, gt.access_token, `list_tasks_for_${slug}`, { show: "recent" })).data.tasks.length === 1, "open and recent lists agree");
+  ok(!(await tool(G, gt.access_token, `delete_task_for_${slug}`, { id })).isError && (await tool(G, gt.access_token, `get_task_for_${slug}`, { id })).isError, "guest deletes it");
   ok((await rest("todos/bin")).json.todos.some((x: any) => x.id === id), "it waits in the owner's bin");
-  const second = await tool(G, gt.access_token, "task_add", { title: "Water the plants " + tag });
+  const second = await tool(G, gt.access_token, `send_task_to_${slug}`, { title: "Water the plants " + tag });
   await rest(`todos/${second.data.id}`, { method: "DELETE" });
-  ok(!(await tool(G, gt.access_token, "tasks")).data.tasks.some((x: any) => x.id === second.data.id) && !(await rest("rail")).json.modules.some((m: any) => m.todo?.id === second.data.id), "a task the owner deletes leaves the guest's list and the rail");
+  ok(!(await tool(G, gt.access_token, `list_tasks_for_${slug}`)).data.tasks.some((x: any) => x.id === second.data.id) && !(await rest("rail")).json.modules.some((m: any) => m.todo?.id === second.data.id), "a task the owner deletes leaves the guest's list and the rail");
 
   console.log("\nRevoking");
   const conns = (await rest(`agents/${guest.id}/connections`)).json.connections;
