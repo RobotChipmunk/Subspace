@@ -1,5 +1,7 @@
 import { actorFromRequest, SESSION_COOKIE, signIn } from "@/lib/auth";
 import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
+import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
+import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
 import { listLinks, saveLink } from "@/lib/core/links";
@@ -9,7 +11,7 @@ import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime"
 import { createPost, createReply, deletePost, getThread, listFeed } from "@/lib/core/posts";
 import { createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
-import { ApiError, listAgents, setSetting, timezone, type Agent } from "@/lib/core/util";
+import { ApiError, listAgents, listGuests, setSetting, timezone, type Agent } from "@/lib/core/util";
 
 /**
  * The REST API used by the web app, and by the iOS app later. Everything goes through the same
@@ -23,7 +25,7 @@ type Ctx = { actor: Agent; url: URL; body: any; req: Request };
 type Handler = (c: Ctx, ...args: string[]) => Promise<unknown>;
 
 const routes: [string, RegExp, Handler][] = [
-  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), trackers: await listTrackers(), timezone: await timezone() })],
+  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), guests: await listGuests(), trackers: await listTrackers(), timezone: await timezone() })],
   ["PATCH", /^me$/, async ({ body }) => {
     if (typeof body.timezone === "string") {
       new Intl.DateTimeFormat("en", { timeZone: body.timezone }); // throws on an invalid zone
@@ -83,6 +85,15 @@ const routes: [string, RegExp, Handler][] = [
   ["GET", /^runtime\/options$/, async () => ({ models: MODELS, efforts: EFFORTS, contexts: CONTEXTS, env_key: !!process.env.ANTHROPIC_API_KEY })],
   ["POST", /^agents\/([^/]+)\/token$/, ({ actor }, id) => ownerOnly(actor, async () => ({ token: await issueToken(id) }))],
 
+  // Connections approved by signing in (OAuth), for an agent or a guest. Revoking one cuts that app off at once.
+  ["GET", /^agents\/([^/]+)\/connections$/, ({ actor }, id) => ownerOnly(actor, async () => ({ connections: await listGrants(id) }))],
+  ["DELETE", /^connections\/([^/]+)$/, ({ actor }, id) => ownerOnly(actor, async () => (await revokeGrant(id), { ok: true }))],
+
+  // Guests: other people whose agents may add tasks for the owner.
+  ["POST", /^guests$/, ({ actor, body }) => ownerOnly(actor, () => createGuest(actor, body))],
+  ["POST", /^guests\/([^/]+)\/passcode$/, ({ actor }, id) => ownerOnly(actor, async () => ({ passcode: await issuePasscode(id) }))],
+  ["DELETE", /^guests\/([^/]+)$/, ({ actor }, id) => ownerOnly(actor, () => removeGuest(actor, id))],
+
   ["POST", /^media$/, async ({ actor, req }) => {
     const form = await req.formData();
     const file = form.get("file");
@@ -102,7 +113,7 @@ async function handle(req: Request, ctx: { params: Promise<{ path: string[] }> }
   try {
     if (path === "auth/login" && req.method === "POST") {
       const { password } = await req.json();
-      const s = await signIn(password);
+      const s = await signIn(password, req);
       const res = Response.json({ ok: true, token: s.token });
       res.headers.append("Set-Cookie", `${SESSION_COOKIE}=${s.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${s.maxAge}${process.env.NODE_ENV === "production" ? "; Secure" : ""}`);
       return res;

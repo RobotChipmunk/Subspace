@@ -1,26 +1,29 @@
 import { checkBlocks } from "../blocks";
 import { q, q1 } from "../db";
-import { addDays, bad, findMentions, indexDoc, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
+import { addDays, bad, findMentions, indexDoc, listGuests, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
 
 export type Todo = {
   id: string;
   title: string;
   notes: string;
-  scope: "day" | "week" | "backlog";
+  /** guest: added by a guest and not yet placed on a day by the owner. */
+  scope: "day" | "week" | "backlog" | "guest";
   date: string | null;
   position: number;
   done: boolean;
   done_at: string | null;
   ai_unseen: boolean;
   created_by: string;
+  /** Set when the task belongs to a guest's shared list ("From Meredith"). The guest can see and edit it wherever it is. */
+  guest_id: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export type Folder = { key: string; label: string; hint?: string; count: number };
+export type Folder = { key: string; label: string; hint?: string; count: number; guest?: string };
 
 const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const LIST_COLS = "id, title, scope, date, position, done, done_at, ai_unseen, created_by, created_at, updated_at, (notes <> '') AS has_notes";
+const LIST_COLS = "id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, created_at, updated_at, (notes <> '') AS has_notes";
 
 /** Unfinished tasks never get left behind: past days roll to today, past weeks roll to this week. */
 async function rollover(today: string) {
@@ -35,10 +38,15 @@ export async function calendar() {
   return { today, monday, saturday: addDays(monday, 5), sunday: addDays(monday, 6), nextMonday: addDays(monday, 7), dow: weekday(today) };
 }
 
+type Spec = { where: string; params: unknown[]; add: { scope: string; date: string | null; guest_id?: string } };
+
 /** Where a view's tasks live, and where a task added to that view should go. */
-function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>) {
+function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec {
   const { today, monday, saturday, sunday, nextMonday } = cal;
+  // a guest's tasks that the owner has not yet placed on a day
+  if (view.startsWith("guest:")) return { where: "scope = 'guest' AND guest_id = $1", params: [view.slice(6)], add: { scope: "guest", date: null, guest_id: view.slice(6) } };
   if (view === "today") return { where: "scope = 'day' AND date = $1", params: [today], add: { scope: "day", date: today } };
+  if (view === "tomorrow") return viewSpec(addDays(today, 1), cal);
   if (view === "week")
     return {
       where: "((scope = 'day' AND date BETWEEN $1 AND $2) OR (scope = 'week' AND date = $1))",
@@ -55,13 +63,13 @@ function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>) {
     };
   if (view === "backlog") return { where: "scope = 'backlog'", params: [], add: { scope: "backlog", date: null } };
   if (/^\d{4}-\d{2}-\d{2}$/.test(view)) return { where: "scope = 'day' AND date = $1", params: [view], add: { scope: "day", date: view } };
-  throw bad(`Unknown view "${view}". Use today, week, weekend, next_week, backlog or a YYYY-MM-DD date.`);
+  throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, backlog or a YYYY-MM-DD date.`);
 }
 
 export async function folders(): Promise<{ today: string; folders: Folder[] }> {
   const cal = await calendar();
   await rollover(cal.today);
-  const list: { key: string; label: string; hint?: string }[] = [
+  const list: { key: string; label: string; hint?: string; guest?: string }[] = [
     { key: "week", label: "This week" },
     { key: "today", label: "Today", hint: DAY_NAMES[cal.dow] },
   ];
@@ -70,6 +78,7 @@ export async function folders(): Promise<{ today: string; folders: Folder[] }> {
   if (cal.dow <= 5) list.push({ key: "weekend", label: "Weekend" });
   else if (cal.dow === 6) list.push({ key: cal.sunday, label: "Tomorrow", hint: "Sunday" });
   list.push({ key: "next_week", label: "Next week" }, { key: "backlog", label: "Backlog" });
+  for (const g of await listGuests()) list.push({ key: `guest:${g.id}`, label: `From ${g.name}`, guest: g.id });
 
   const out: Folder[] = [];
   for (const f of list) {
@@ -131,7 +140,8 @@ export function markAgentText(md: string, handle: string): string {
 
 async function afterWrite(actor: Agent, t: Todo, type: string, summary: string, extraMentions: string[] = []) {
   await indexDoc("todo", t.id, t.title, t.notes);
-  const mentions = [...new Set([...(await findMentions(t.title)), ...extraMentions])];
+  // A guest's task carries someone else's words: an @handle in its title must not call on the owner's agents.
+  const mentions = [...new Set([...(t.guest_id ? [] : await findMentions(t.title)), ...extraMentions])];
   await logEvent({ actor: actor.id, type, entity_type: "todo", entity_id: t.id, summary, mentions, data: { scope: t.scope, date: t.date } });
 }
 
@@ -140,11 +150,12 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   if (!title) throw bad("Todo needs a title.");
   const cal = await calendar();
   const { add } = viewSpec(input.view || "today", cal);
+  if (add.guest_id && !(await listGuests()).some((g) => g.id === add.guest_id)) throw bad(`Unknown view "${input.view}".`);
   const id = newId("t");
   if (input.notes) guardBlocks(actor, input.notes);
   const notes = input.notes ? (actor.kind === "agent" ? markAgentText(input.notes, actor.handle) : input.notes) : "";
-  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [
-    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent",
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)", [
+    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null,
   ]);
   const t = await getTodo(id);
   await afterWrite(actor, t, "todo.created", title, await findMentions(notes));
@@ -186,6 +197,8 @@ export async function updateTodo(
   }
   if (patch.view) {
     const { add } = viewSpec(patch.view, await calendar());
+    // Only a task already shared with a guest can go back to their list; moving another task there would show it to them.
+    if (add.guest_id && add.guest_id !== before.guest_id) throw bad("Only tasks from that person can be moved to their list.");
     if (add.scope !== before.scope || add.date !== before.date) {
       set("scope", add.scope);
       set("date", add.date);

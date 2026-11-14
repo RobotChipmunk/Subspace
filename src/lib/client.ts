@@ -18,15 +18,18 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
 
 export const fetcher = (path: string) => api(path);
 
-export type Me = { me: Agent; agents: Agent[]; trackers: Tracker[]; timezone: string };
+export type Me = { me: Agent; agents: Agent[]; guests: Agent[]; trackers: Tracker[]; timezone: string };
 
 export function useMe() {
   const { data, mutate } = useSWR<Me>("me", fetcher, { refreshInterval: 30_000 });
   return {
     me: data?.me,
     agents: data?.agents ?? [],
+    /** Other people whose agents may add tasks (see core/guests.ts). Kept apart from agents. */
+    guests: data?.guests ?? [],
     trackers: data?.trackers ?? [],
-    agent: (id: string) => data?.agents.find((a) => a.id === id),
+    /** Anyone by id: the owner, an agent or a guest. */
+    agent: (id: string | null | undefined) => (id ? (data?.agents.find((a) => a.id === id) ?? data?.guests?.find((a) => a.id === id)) : undefined),
     tracker: (id: string | null) => (id ? data?.trackers.find((t) => t.id === id) : undefined),
     refresh: mutate,
   };

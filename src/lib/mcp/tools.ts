@@ -11,7 +11,7 @@ import { q } from "../db";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 
 type Schema = { type: "object"; properties: Record<string, unknown>; required?: string[] };
-type Tool = {
+export type Tool = {
   name: string;
   description: string;
   inputSchema: Schema;
@@ -137,7 +137,7 @@ export const TOOLS: Tool[] = [
     readOnly: true,
     run: async (_a, { view }) => {
       const l = await listTodos(view || "today");
-      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}) })) };
+      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...(t.guest_id ? { from_guest: t.guest_id } : {}) })) };
     },
   },
   {

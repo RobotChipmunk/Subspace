@@ -6,7 +6,8 @@ export type Agent = {
   id: string;
   handle: string;
   name: string;
-  kind: "human" | "agent";
+  /** human: the owner. agent: one of the owner's agents. guest: another person, who reaches only their shared tasks. */
+  kind: "human" | "agent" | "guest";
   bio: string;
   roles: string[];
   cursor_seq: number;
@@ -14,6 +15,10 @@ export type Agent = {
   archived: boolean;
   created_at: string;
   has_token?: boolean;
+  /** Whether the static token may still be given in the address itself (the older way to connect). */
+  url_token?: boolean;
+  /** Guests: whether a passcode has been issued. */
+  has_passcode?: boolean;
   /** Built-in runtime settings, without the key. */
   runtime?: {
     enabled: boolean;
@@ -69,18 +74,27 @@ export function oneLine(s: string, max = 140): string {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
 }
 
-const AGENT_COLS = "id, handle, name, kind, bio, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token, runtime - 'key_enc' AS runtime";
+const AGENT_COLS = "id, handle, name, kind, bio, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token, url_token, passcode_hash IS NOT NULL AS has_passcode, runtime - 'key_enc' AS runtime";
 
 export async function listAgents(includeArchived = false): Promise<Agent[]> {
-  return q<Agent>(`SELECT ${AGENT_COLS} FROM agents ${includeArchived ? "" : "WHERE NOT archived"} ORDER BY kind DESC, created_at`);
+  return q<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE kind <> 'guest' ${includeArchived ? "" : "AND NOT archived"} ORDER BY kind DESC, created_at`);
+}
+
+/** Guests are kept apart from agents everywhere: they are not mentioned, assigned or listed with them. */
+export async function listGuests(): Promise<Agent[]> {
+  return q<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE kind = 'guest' AND NOT archived ORDER BY created_at`);
 }
 
 export async function agentByToken(token: string): Promise<Agent | null> {
-  return q1<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE token_hash = $1 AND NOT archived`, [sha256(token)]);
+  return q1<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE token_hash = $1 AND kind = 'agent' AND NOT archived`, [sha256(token)]);
 }
 
 export async function agentById(id: string): Promise<Agent | null> {
   return q1<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE id = $1`, [id]);
+}
+
+export async function agentByHandle(handle: string, kind: "agent" | "guest"): Promise<Agent | null> {
+  return q1<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE handle = $1 AND kind = $2 AND NOT archived`, [handle.toLowerCase(), kind]);
 }
 
 export async function ownerAgent(): Promise<Agent> {
@@ -93,7 +107,7 @@ export async function ownerAgent(): Promise<Agent> {
 export async function resolveAgents(refs: string[]): Promise<string[]> {
   if (!refs.length) return [];
   const clean = refs.map((r) => r.replace(/^@/, "").toLowerCase());
-  const rows = await q<{ id: string }>("SELECT id FROM agents WHERE (lower(handle) = ANY($1) OR id = ANY($2)) AND NOT archived", [clean, refs]);
+  const rows = await q<{ id: string }>("SELECT id FROM agents WHERE (lower(handle) = ANY($1) OR id = ANY($2)) AND NOT archived AND kind <> 'guest'", [clean, refs]);
   return rows.map((r) => r.id);
 }
 
@@ -102,7 +116,7 @@ export async function findMentions(text: string): Promise<string[]> {
   const found = new Set<string>();
   for (const m of text.matchAll(/(^|[^\w@/])@([a-zA-Z0-9_-]{2,32})/g)) found.add(m[2].toLowerCase());
   if (!found.size) return [];
-  const rows = await q<{ handle: string }>("SELECT handle FROM agents WHERE handle = ANY($1) AND NOT archived", [[...found]]);
+  const rows = await q<{ handle: string }>("SELECT handle FROM agents WHERE handle = ANY($1) AND NOT archived AND kind <> 'guest'", [[...found]]);
   return rows.map((r) => r.handle);
 }
 

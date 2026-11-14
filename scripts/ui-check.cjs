@@ -649,10 +649,51 @@ async function run(profile) {
     await page.getByRole("button", { name: "Done" }).scrollIntoViewIfNeeded();
     await settle(300);
     await reachable(page.getByRole("button", { name: "Done" }), "connect panel Done");
+    if (!(await page.locator("code").first().innerText()).match(/\/api\/mcp\/probe[a-z0-9]+$/)) fail("agents: the connector address should be the agent's own address, with no secret in it");
+    await press(page.getByText("For scripts: a token sent as a header"));
+    await reachable(page.getByRole("button", { name: "Make a token" }), "make a token");
     await noSidewaysScroll("agents connect panel");
     await shot("agents-connect");
+    // removing asks once more
     await press(page.getByRole("button", { name: "Remove agent" }));
+    await press(page.getByRole("button", { name: "Remove and disconnect?" }));
     await settle(800);
+  });
+  await step("people", async () => {
+    const name = `Guest ${Date.now().toString(36).slice(-5)}`;
+    await page.getByRole("button", { name: "Add a person" }).scrollIntoViewIfNeeded();
+    await press(page.getByRole("button", { name: "Add a person" }));
+    await page.getByLabel("Their name").fill(name);
+    await press(page.getByRole("button", { name: "Add", exact: true }));
+    await page.getByText(`${name}'s connector address`).waitFor({ timeout: 5000 });
+    await settle(700);
+    await press(page.getByRole("button", { name: "Make a passcode" }));
+    await page.getByText("Passcode (shown once)").waitFor({ timeout: 5000 });
+    await settle(500);
+    const codes = page.locator("code");
+    const shown = await codes.allInnerTexts();
+    if (!shown.some((t) => /\/api\/mcp\/guest\/guest[a-z0-9]+$/.test(t))) fail("people: the guest's connector address is missing");
+    if (!shown.some((t) => /^[A-Z0-9]{4}(-[A-Z0-9]{4}){4}$/.test(t))) fail("people: the passcode is missing");
+    await reachable(page.getByText("Passcode (shown once)"), "passcode");
+    await noSidewaysScroll("people connect panel");
+    await shot("people-connect");
+    // the person has a list of their own in Todos
+    await press(page.getByRole("link", { name: "Todos", exact: true }));
+    await page.waitForURL("**/todos");
+    await page.getByRole("button", { name: `From ${name}` }).waitFor({ timeout: 5000 });
+    await page.getByRole("button", { name: `From ${name}` }).scrollIntoViewIfNeeded();
+    await reachable(page.getByRole("button", { name: `From ${name}` }), "From list in todos");
+    await press(page.getByRole("link", { name: "Agents", exact: true }));
+    await page.waitForURL("**/agents");
+    await settle(900);
+    const row = page.locator("div.glass", { hasText: name });
+    await press(row.getByRole("button", { name: "Connect" }));
+    await settle(600);
+    await row.getByRole("button", { name: `Remove ${name}` }).scrollIntoViewIfNeeded();
+    await press(row.getByRole("button", { name: `Remove ${name}` }));
+    await press(page.getByRole("button", { name: "Remove and disconnect?" }));
+    await settle(800);
+    if (await page.getByText(name, { exact: true }).count()) fail("people: removed person is still listed");
   });
   await step("agents realtime", async () => {
     await page.locator("main").evaluate((m) => m.scrollTo(0, 0));

@@ -3,7 +3,7 @@ import { ArrowUpRight, ChevronDown, PanelRightClose } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
 import type { AnyBlock } from "@/lib/blocks";
 import type { RailModule } from "@/lib/core/rail";
@@ -66,6 +66,34 @@ export type RailState = ReturnType<typeof useRail>;
  * One module. Closed, it is two quiet lines: when, and what. Everything else
  * (picture, details, buttons) waits behind a tap.
  */
+/** For a task waiting for a day: one tap puts it on the list. It leaves the rail as soon as it has a place. */
+function Place({ id }: { id: string }) {
+  const { mutate } = useSWRConfig();
+  const [busy, setBusy] = useState(false);
+  const move = async (view: string) => {
+    setBusy(true);
+    try {
+      await api(`todos/${id}`, { method: "PATCH", body: { view } });
+      await mutate((k) => typeof k === "string" && (k === "rail" || k.startsWith("todos")));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cls = "flex h-8 items-center rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2 disabled:opacity-40";
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {[["today", "Today"], ["tomorrow", "Tomorrow"], ["week", "This week"]].map(([view, label]) => (
+        <button key={view} disabled={busy} onClick={() => move(view)} className={cls}>
+          {label}
+        </button>
+      ))}
+      <Link href={`/todos?open=${id}`} className={`${cls} text-ink2`}>
+        Open
+      </Link>
+    </div>
+  );
+}
+
 function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean; onToggle: () => void; onDismiss: () => void }) {
   const { agent } = useMe();
   const by = agent(m.author);
@@ -101,6 +129,7 @@ function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean
                   ))}
                 </div>
               )}
+              {m.todo && <Place id={m.todo.id} />}
               {actions.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {actions.map((a, i) =>
@@ -122,9 +151,12 @@ function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean
                 <span className="min-w-0 flex-1 truncate">
                   {by?.name} · {ago(m.updated_at)}
                 </span>
-                <button onClick={onDismiss} aria-label={`Dismiss ${m.title}`} className="-my-1 rounded-full px-2 py-1 transition-colors hover:bg-fill hover:text-ink">
-                  Dismiss
-                </button>
+                {/* a waiting task stays until it is given a day, so it cannot be missed */}
+                {!m.todo && (
+                  <button onClick={onDismiss} aria-label={`Dismiss ${m.title}`} className="-my-1 rounded-full px-2 py-1 transition-colors hover:bg-fill hover:text-ink">
+                    Dismiss
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>

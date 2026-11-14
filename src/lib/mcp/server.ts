@@ -1,6 +1,7 @@
 import { ApiError, type Agent } from "../core/util";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
-import { TOOLS } from "./tools";
+import { GUEST_GUIDE, GUEST_TOOLS } from "./guest";
+import { TOOLS, type Tool } from "./tools";
 
 /**
  * A stateless MCP server over Streamable HTTP. Each POST carries one JSON-RPC message (or a
@@ -13,8 +14,19 @@ type Rpc = { jsonrpc: "2.0"; id?: string | number | null; method: string; params
 const ok = (id: Rpc["id"], result: unknown) => ({ jsonrpc: "2.0", id, result });
 const err = (id: Rpc["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
-async function handle(agent: Agent, m: Rpc): Promise<unknown | null> {
+/** What a connection may do. A guest gets a different, much smaller server; a read-only connection loses the tools that change things. */
+export type Access = { readOnly?: boolean };
+
+async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | null> {
   if (m.id === undefined) return null; // notifications need no reply
+  const guest = agent.kind === "guest";
+  const tools: Tool[] = (guest ? GUEST_TOOLS : TOOLS).filter((t) => !access.readOnly || t.readOnly);
+  if (guest) {
+    // A guest's server has tasks and nothing else: no guide topics, resources or prompts from the owner's side.
+    if (m.method === "resources/list") return ok(m.id, { resources: [] });
+    if (m.method === "prompts/list") return ok(m.id, { prompts: [] });
+    if (m.method === "resources/read" || m.method === "prompts/get") return err(m.id, -32602, "Nothing by that name.");
+  }
   switch (m.method) {
     case "initialize": {
       const asked = m.params?.protocolVersion;
@@ -22,14 +34,16 @@ async function handle(agent: Agent, m: Rpc): Promise<unknown | null> {
         protocolVersion: VERSIONS.includes(asked) ? asked : VERSIONS[0],
         capabilities: { tools: { listChanged: false }, resources: { listChanged: false }, prompts: { listChanged: false } },
         serverInfo: { name: "subspace", title: "Subspace", version: GUIDE_VERSION },
-        instructions: `You are connected as @${agent.handle} (${agent.name}).\n\n${CORE}`,
+        instructions: guest
+          ? await GUEST_GUIDE(agent, !!access.readOnly)
+          : `You are connected as @${agent.handle} (${agent.name}).${access.readOnly ? " This connection is read-only: you can look, but not post or change anything." : ""}\n\n${CORE}`,
       });
     }
     case "ping":
       return ok(m.id, {});
     case "tools/list":
       return ok(m.id, {
-        tools: TOOLS.map((t) => ({
+        tools: tools.map((t) => ({
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
@@ -37,7 +51,7 @@ async function handle(agent: Agent, m: Rpc): Promise<unknown | null> {
         })),
       });
     case "tools/call": {
-      const tool = TOOLS.find((t) => t.name === m.params?.name);
+      const tool = tools.find((t) => t.name === m.params?.name);
       if (!tool) return err(m.id, -32602, `Unknown tool: ${m.params?.name}`);
       try {
         const out = await tool.run(agent, m.params?.arguments ?? {});
@@ -84,13 +98,13 @@ async function handle(agent: Agent, m: Rpc): Promise<unknown | null> {
   }
 }
 
-export async function handleMcp(agent: Agent, body: unknown): Promise<{ status: number; json?: unknown }> {
+export async function handleMcp(agent: Agent, body: unknown, access: Access = {}): Promise<{ status: number; json?: unknown }> {
   if (Array.isArray(body)) {
-    const out = (await Promise.all(body.map((m) => handle(agent, m as Rpc)))).filter(Boolean);
+    const out = (await Promise.all(body.map((m) => handle(agent, m as Rpc, access)))).filter(Boolean);
     return out.length ? { status: 200, json: out } : { status: 202 };
   }
   const m = body as Rpc;
   if (!m || m.jsonrpc !== "2.0" || typeof m.method !== "string") return { status: 400, json: err(null, -32600, "Invalid request") };
-  const out = await handle(agent, m);
+  const out = await handle(agent, m, access);
   return out ? { status: 200, json: out } : { status: 202 };
 }

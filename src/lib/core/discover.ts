@@ -145,7 +145,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
               (SELECT count(*)::int FROM context_nodes WHERE kind = 'link' AND NOT archived) AS links,
               (SELECT count(*)::int FROM trackers WHERE NOT archived) AS following,
               (SELECT count(*)::int FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()) AS rail,
-              (SELECT count(*)::int FROM agents WHERE NOT archived) AS agents,
+              (SELECT count(*)::int FROM agents WHERE NOT archived AND kind <> 'guest') AS agents,
               (SELECT count(*)::int FROM events) AS log`,
     );
     return {
@@ -241,7 +241,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       path: `/todos/${a}`,
       title: `Todos · ${a}`,
       count: l.todos.length,
-      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}) })),
+      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...(t.guest_id ? { from_guest: t.guest_id } : {}) })),
       hint: "read([id]) returns a todo's notes.",
     };
   }
@@ -576,7 +576,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         });
       } else if (id.startsWith("t_")) {
         const t = await getTodo(id);
-        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, notes: t.notes, updated_at: t.updated_at });
+        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.guest_id ? { from_guest: t.guest_id } : {}), notes: t.notes, updated_at: t.updated_at });
       } else if (id.startsWith("f_") || (!id.startsWith("c_") && !id.includes("/") && (await q1("SELECT 1 FROM trackers WHERE slug = $1", [id])))) {
         const t = await getTracker(id);
         out.push({

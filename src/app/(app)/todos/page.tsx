@@ -14,9 +14,23 @@ type Folders = { today: string; folders: Folder[] };
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
+/** The small tag on a task that came from a guest ("From Meredith"). */
+function FromTag({ id }: { id: string | null }) {
+  const { agent } = useMe();
+  const g = agent(id);
+  if (!g) return null;
+  return <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-accent-soft px-2 py-[1px] align-middle text-[11.5px] font-medium text-accent">From {g.name}</span>;
+}
+
 export default function TodosPage() {
   const [view, setView] = useState("today");
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // The rail links here with ?open=<task id> to show one task.
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get("open");
+    if (id) (setOpenId(id), history.replaceState(null, "", location.pathname));
+  }, []);
   const { data: f } = useSWR<Folders>("todos/folders", fetcher, { refreshInterval: 30_000 });
   const folder = f?.folders.find((x) => x.key === view);
 
@@ -31,7 +45,7 @@ export default function TodosPage() {
         <nav className="flex gap-0.5 max-md:-mx-4 max-md:overflow-x-auto max-md:px-4 md:flex-col" aria-label="Lists">
           {f?.folders.map((x, i) => {
             const on = x.key === view;
-            const gap = x.key === "next_week" || (i === 2 && x.key !== "weekend");
+            const gap = x.key === "next_week" || (i === 2 && x.key !== "weekend") || (!!x.guest && !f.folders[i - 1]?.guest);
             return (
               <button
                 key={x.key}
@@ -76,7 +90,7 @@ const HOLD_MS = 260;
  * still so the row can travel any distance. (Safari hands a moving touch to scrolling and cancels
  * the drag unless the page is told to stay put, which is why a row used to move only one place.)
  */
-function TodoRow({ r, dragging, onToggle, onOpen, onDropped }: { r: Row; dragging: React.MutableRefObject<boolean>; onToggle: () => void; onOpen: () => void; onDropped: () => void }) {
+function TodoRow({ r, tag, dragging, onToggle, onOpen, onDropped }: { r: Row; tag: boolean; dragging: React.MutableRefObject<boolean>; onToggle: () => void; onOpen: () => void; onDropped: () => void }) {
   const controls = useDragControls();
   const el = useRef<HTMLLIElement>(null);
   const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
@@ -159,8 +173,9 @@ function TodoRow({ r, dragging, onToggle, onOpen, onDropped }: { r: Row; draggin
       <div onClick={() => !dragging.current && onOpen()} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 py-[9px]">
         <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>
           {r.title}
-          {/* an agent changed this task since you last opened it: the dot sits right after the words */}
-          {r.ai_unseen && <span title="An agent made changes" aria-label="An agent made changes" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
+          {tag && <FromTag id={r.guest_id} />}
+          {/* someone else changed this task since you last opened it: the dot sits right after the words */}
+          {r.ai_unseen && <span title="Changed since you last looked" aria-label="Changed since you last looked" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
         </span>
         {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
       </div>
@@ -224,7 +239,7 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
   }
 
   const title = folder?.label ?? "";
-  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : undefined;
+  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : folder?.guest ? "Waiting for a day. Open one and move it when you are ready." : undefined;
   const openCount = rows?.filter((r) => !r.done).length ?? 0;
 
   return (
@@ -247,6 +262,7 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
                 <TodoRow
                   key={r.id}
                   r={r}
+                  tag={!!r.guest_id && !folder?.guest}
                   dragging={dragging}
                   onToggle={() => toggle(r)}
                   onOpen={() => onOpen(r.id)}
@@ -335,7 +351,7 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
             className="h-8 cursor-pointer appearance-none rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 outline-none transition-colors hover:bg-fill2"
           >
             <option value="">Move to…</option>
-            {folders.filter((x) => x.key !== "week").map((x) => (
+            {folders.filter((x) => x.key !== "week" && (!x.guest || x.guest === todo.guest_id)).map((x) => (
               <option key={x.key} value={x.key}>
                 {x.label}
               </option>
@@ -366,9 +382,15 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
           className={`min-w-0 flex-1 resize-none overflow-hidden text-[26px] font-bold leading-[1.25] tracking-[-0.025em] ${todo.done ? "text-ink3" : ""}`}
         />
       </div>
-      {creator && creator.kind === "agent" && (
+      {creator && creator.kind !== "human" && (
         <div className="ml-[40px] mt-1.5 flex items-center gap-1.5 text-[13px] text-ink2">
           <Avatar agent={creator} size={16} /> Added by {creator.name}
+        </div>
+      )}
+      {todo.guest_id && (
+        <div className="ml-[40px] mt-1.5 text-[13px] text-ink2 [&>span]:ml-0">
+          <FromTag id={todo.guest_id} />
+          <span className="ml-2">{todo.scope === "guest" ? `Not on a day yet. ${agent(todo.guest_id)?.name ?? "They"} can see where you put it.` : `${agent(todo.guest_id)?.name ?? "They"} can see this task, its notes and its day.`}</span>
         </div>
       )}
 
