@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUpRight, ChevronDown, PanelRightClose } from "lucide-react";
+import { ArrowUpRight, ChevronDown, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -28,32 +28,20 @@ function useWide(): boolean {
 
 export function useRail() {
   const { data, mutate } = useSWR<{ modules: RailModule[] }>("rail", fetcher, { refreshInterval: 30_000 });
-  const [open, setOpenState] = useState(true);
   const [sheet, setSheet] = useState(false);
-  useEffect(() => {
-    try {
-      if (localStorage.getItem("ss_rail") === "closed") setOpenState(false);
-    } catch {}
-  }, []);
-  const setOpen = (v: boolean) => {
-    setOpenState(v);
-    try {
-      localStorage.setItem("ss_rail", v ? "open" : "closed");
-    } catch {}
-  };
   const modules = data?.modules ?? [];
   const wide = useWide();
   return {
     modules,
     /** The most serious thing waiting: colours the count on the rail button. */
     level: modules.some((m) => m.level === "error") ? ("error" as const) : modules.some((m) => m.level === "warning") ? ("warning" as const) : ("info" as const),
-    open,
     wide,
-    docked: wide && open && modules.length > 0,
-    sheet: sheet && !wide,
-    /** The one control: docks or undocks on a wide screen, opens the sheet on a narrow one. */
-    toggle: () => (wide ? setOpen(!open) : setSheet(!sheet)),
-    close: () => (wide ? setOpen(false) : setSheet(false)),
+    /** On a wide screen the rail is simply there whenever it has something to show. */
+    docked: wide && modules.length > 0,
+    /** On a narrow screen there is no room to dock, so it opens as a sheet from the nav. */
+    sheet: sheet && !wide && modules.length > 0,
+    openSheet: () => setSheet(true),
+    close: () => setSheet(false),
     dismiss: async (id: string) => {
       mutate({ modules: modules.filter((m) => m.id !== id) }, false);
       await api(`rail/${id}`, { method: "DELETE" });
@@ -182,12 +170,14 @@ function Modules({ rail }: { rail: RailState }) {
   );
 }
 
-const Header = ({ rail }: { rail: RailState }) => (
-  <div className="mb-1.5 flex items-center justify-between pl-3">
+const Header = ({ onClose }: { onClose?: () => void }) => (
+  <div className="mb-1.5 flex h-8 items-center justify-between pl-3">
     <h2 className="text-[13px] font-semibold text-ink3">Now</h2>
-    <button onClick={rail.close} aria-label="Hide the rail" title="Hide" className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink">
-      <PanelRightClose size={16} />
-    </button>
+    {onClose && (
+      <button onClick={onClose} aria-label="Close" title="Close" className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink">
+        <X size={16} />
+      </button>
+    )}
   </div>
 );
 
@@ -203,7 +193,7 @@ export function Rail({ rail, docked = rail.docked }: { rail: RailState; docked?:
       <AnimatePresence initial={false}>
         {docked && (
           <motion.aside key="dock" aria-label="Now" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={soft} className="scroll fixed bottom-0 right-0 top-0 z-20 w-[288px] px-3 pb-6 pt-5">
-            <Header rail={rail} />
+            <Header />
             <Modules rail={rail} />
           </motion.aside>
         )}
@@ -213,7 +203,7 @@ export function Rail({ rail, docked = rail.docked }: { rail: RailState; docked?:
           <motion.div key="sheet" className="fixed inset-0 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
             <div className="absolute inset-0 bg-black/25" onClick={rail.close} />
             <motion.aside aria-label="Now" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={spring} className="rail-sheet scroll absolute inset-y-0 right-0 w-[min(340px,88vw)] px-3 pb-10 pt-5">
-              <Header rail={rail} />
+              <Header onClose={rail.close} />
               <Modules rail={rail} />
             </motion.aside>
           </motion.div>

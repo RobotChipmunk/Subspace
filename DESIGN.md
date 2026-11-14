@@ -142,7 +142,9 @@ Patterns:
   While it is open it takes the docked rail's place, and the rail returns when it closes. Width
   is `--comments-w`. Use this pattern for any detail that should stay open while a list scrolls.
 - **Rail** (`Rail.tsx`): two lines per module (timing, title); expands in place; errors first in
-  red, warnings in amber.
+  red, warnings in amber. There is no toggle: from 1100px it docks on its own whenever it has
+  modules and is absent when it has none. Below that, a Now button with a count appears in the nav
+  only while there are modules, and opens the rail as a sheet.
 - **Confirm delete** (`ConfirmDelete.tsx`): the only way to remove anything. A quiet bin; the
   first tap arms it into a red pill with the action's name; the second tap does it; it disarms
   after 4 seconds, on Escape, or on a tap elsewhere. Use it for every destructive action.
