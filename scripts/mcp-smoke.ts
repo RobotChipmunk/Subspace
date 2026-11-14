@@ -40,6 +40,33 @@ async function main() {
   const many = await call(s, "post", { body: "Too many pictures.", media: { type: "image", url: shots[0].url, more: Array.from({ length: 6 }, (_, i) => ({ url: `https://example.com/${tag}/${i}.png` })) } });
   const mixed = await call(s, "post", { body: "A video among pictures.", media: [{ type: "image", url: shots[0].url }, { type: "video", url: "https://example.com/clip.mp4" }] });
   if (!many.ERROR || !mixed.ERROR) throw new Error("a bad set of pictures was accepted");
+  // video and GIFs: YouTube and Vimeo links in the forms people copy, video files, GIFs that are really video; a page that is not a video is refused
+  const media = async (m: any) => {
+    const r = await call(s, "post", { body: "A clip worth watching " + ++n, media: m });
+    return r.ERROR ? r : (await q<{ media: any }>("SELECT media FROM posts WHERE id = $1", [r.id]))[0].media;
+  };
+  const expect = (what: string, ok: boolean, got: unknown) => {
+    if (!ok) throw new Error(`${what}: ${JSON.stringify(got)}`);
+  };
+  for (const [url, provider, id, tall] of [
+    ["https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s", "youtube", "dQw4w9WgXcQ", undefined],
+    ["https://youtu.be/dQw4w9WgXcQ?si=abc", "youtube", "dQw4w9WgXcQ", undefined],
+    ["https://www.youtube.com/shorts/dQw4w9WgXcQ", "youtube", "dQw4w9WgXcQ", true],
+    ["https://m.youtube.com/embed/dQw4w9WgXcQ", "youtube", "dQw4w9WgXcQ", undefined],
+    ["https://vimeo.com/channels/staffpicks/76979871", "vimeo", "76979871", undefined],
+    ["https://player.vimeo.com/video/76979871?h=abc", "vimeo", "76979871", undefined],
+  ] as const) {
+    const m = await media({ type: "video", url });
+    expect(`embed for ${url}`, m.type === "video" && m.embed?.provider === provider && m.embed?.id === id && m.embed?.tall === tall, m);
+  }
+  const file = await media({ type: "video", url: "https://example.com/demo.mp4?x=1", poster: "https://example.com/demo.jpg" });
+  expect("a video file", file.type === "video" && !file.embed && !file.loop && file.poster === "https://example.com/demo.jpg", file);
+  const gifv = await media({ type: "gif", url: "https://i.example.com/abc.gifv" });
+  expect("a GIF served as video", gifv.type === "video" && gifv.loop === true && gifv.url === "https://i.example.com/abc.mp4", gifv);
+  const gif = await media({ type: "gif", url: "https://example.com/spin.gif" });
+  expect("a true GIF", gif.type === "image" && !gif.loop, gif);
+  expect("a page that is not a video", !!(await media({ type: "video", url: "https://example.com/articles/watch-this" })).ERROR, "accepted");
+  expect("a video among pictures", !!(await media({ type: "image", url: shots[0].url, more: [{ type: "gif", url: "https://example.com/a.mp4" }] })).ERROR, "accepted");
   await call(claude, "changes");
   const jobs = await call(claude, "jobs");
   for (const j of jobs.jobs) {

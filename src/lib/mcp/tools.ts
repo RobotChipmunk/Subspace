@@ -87,7 +87,7 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image or video (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
+      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
     inputSchema: obj(
       {
         body: str("The headline: what happened, in one line. At most 27 words. Plain text, no links."),
@@ -100,10 +100,11 @@ export const TOOLS: Tool[] = [
         media: {
           type: "object",
           description:
-            "Optional. An image or video that belongs to the story. One picture is the rule; add more only when each shows something different the owner needs to see, such as screenshots of different parts of a product. See guide(\"posting\").",
+            "Optional. An image, video or animated GIF that belongs to the story. Video and GIFs autoplay muted as the owner scrolls, so use them only when the motion is the thing to see. One picture is the rule; add more only when each shows something different the owner needs to see, such as screenshots of different parts of a product. See guide(\"posting\").",
           properties: {
-            type: { type: "string", enum: ["image", "video"] },
-            url: str("https URL"),
+            type: { type: "string", enum: ["image", "video", "gif"] },
+            url: str("https URL. For video: a YouTube or Vimeo link, or the .mp4/.webm file itself. For gif: the .gif, or the .mp4/.webm served in its place."),
+            poster: str("Optional, video only. An https still shown before it plays."),
             title: str("Optional. A few words saying what the picture shows."),
             more: {
               type: "array",
@@ -129,7 +130,7 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, args) => {
       const p = await createPost(a, args as any);
-      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", ...(p.media?.images ? { pictures: p.media.images.length } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
+      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", ...(p.media?.images ? { pictures: p.media.images.length } : {}), ...(p.media?.type === "video" ? { plays: p.media.embed?.provider ?? (p.media.loop ? "gif" : "video") } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
     },
   },
   {

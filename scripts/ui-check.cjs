@@ -296,6 +296,37 @@ async function run(profile) {
     await noSidewaysScroll("feed pictures");
     await shot("feed-pictures");
   });
+  await step("feed video", async () => {
+    const card = page.locator("article", { hasText: "Digit unloads" }).first();
+    const clip = card.locator("[data-clip]");
+    const state = () => clip.locator("video").evaluate((v) => ({ paused: v.paused, muted: v.muted, time: v.currentTime, ready: v.readyState }));
+    // out of view it waits; scrolled into view it plays by itself, without sound
+    await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
+    await card.evaluate((el) => el.closest("main").scrollBy({ top: el.getBoundingClientRect().top - innerHeight - 200 }));
+    await settle(600);
+    if (!(await state()).paused) fail("feed video: the video is playing while it is off screen");
+    await card.scrollIntoViewIfNeeded();
+    await clip.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await settle(1200);
+    let s = await state();
+    if (s.paused || !s.muted || s.time <= 0) fail(`feed video: scrolled into view, the video did not start playing silently (${JSON.stringify(s)})`);
+    await reachable(clip, "feed video");
+    // a tap turns the sound on; it does not open the source
+    const sound = clip.getByRole("button", { name: "Turn sound on" });
+    await reachable(sound, "video sound button");
+    await press(sound);
+    await settle(400);
+    s = await state();
+    if (s.muted || s.paused) fail(`feed video: the sound button did not turn the sound on (${JSON.stringify(s)})`);
+    await press(clip.getByRole("button", { name: "Turn sound off" }));
+    await noSidewaysScroll("feed video");
+    await shot("feed-video");
+    // scrolled away again, it stops
+    await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
+    await card.evaluate((el) => el.closest("main").scrollBy({ top: el.getBoundingClientRect().top - innerHeight - 200 }));
+    await settle(700);
+    if (!(await state()).paused) fail("feed video: the video kept playing after it was scrolled out of view");
+  });
 
   // ---------- Todos ----------
   await step("todos folders", async () => {

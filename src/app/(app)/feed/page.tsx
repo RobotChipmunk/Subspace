@@ -5,8 +5,9 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import useSWR, { useSWRConfig } from "swr";
+import useSWR, { preload, useSWRConfig } from "swr";
 import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton, TrackerChip } from "@/components/bits";
+import { Clip } from "@/components/Clip";
 import { MentionInput } from "@/components/MentionInput";
 import { useComments } from "@/components/Shell";
 import { ago, api, fetcher, soft, useMe } from "@/lib/client";
@@ -122,7 +123,13 @@ export default function FeedPage() {
     settle.current = setTimeout(() => bringToLine(id), wait);
   };
 
-  const active = commentsOpen ? posts.find((p) => p.id === activeId) : undefined;
+  const activeAt = commentsOpen ? posts.findIndex((p) => p.id === activeId) : -1;
+  const active = posts[activeAt];
+  // Fetch the comments of the posts either side of the one being read, so they are there by the time the feed reaches them.
+  const beside = [posts[activeAt - 1]?.id, posts[activeAt + 1]?.id].filter(Boolean).join();
+  useEffect(() => {
+    if (activeAt >= 0) for (const id of beside.split(",").filter(Boolean)) preload(`posts/${id}`, fetcher);
+  }, [activeAt, beside]);
 
   return (
     <div className="mx-auto max-w-[620px]">
@@ -157,7 +164,7 @@ export default function FeedPage() {
       )}
       {!data && <Skeletons />}
       <div ref={sentinel} className="h-8" />
-      <CommentsPanel post={active} open={commentsOpen} onClose={() => setComments(false)} onDeleted={(id) => (setOlder((o) => o.filter((x) => x.id !== id)), mutate())} />
+      <CommentsPanel post={active} index={activeAt} open={commentsOpen} onClose={() => setComments(false)} onDeleted={(id) => (setOlder((o) => o.filter((x) => x.id !== id)), mutate())} />
     </div>
   );
 }
@@ -186,7 +193,7 @@ function Skeletons() {
   );
 }
 
-/** A post's picture. Video plays in place; anything else opens the source when tapped. */
+/** A post's picture. Video plays in place as it scrolls into view; anything else opens the source when tapped. */
 function Picture({ post }: { post: Post }) {
   const m = post.media;
   const art = post.art;
@@ -199,7 +206,15 @@ function Picture({ post }: { post: Post }) {
         <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />
       </ToSource>
     );
-  if (m?.type === "video") return <video src={m.url} poster={m.poster} controls playsInline preload="metadata" className={`${frame} aspect-video w-full bg-black`} />;
+  // A repeating clip is a picture that moves, so it opens the source like one. A video keeps its taps for itself.
+  if (m?.type === "video")
+    return m.loop && !m.embed ? (
+      <ToSource post={post}>
+        <Clip media={m} />
+      </ToSource>
+    ) : (
+      <Clip media={m} />
+    );
   if (art && art.status !== "none")
     return (
       <ToSource post={post}>
@@ -368,9 +383,20 @@ function PostCard({ post, index, open, onToggle }: { post: Post; index: number; 
  * scrolling; on a narrow one it slides over the feed from the right. It is drawn at the top of the
  * document so that nothing in the page can clip it.
  */
-function CommentsPanel({ post, open, onClose, onDeleted }: { post: Post | undefined; open: boolean; onClose: () => void; onDeleted: (id: string) => void }) {
+function CommentsPanel({ post, index, open, onClose, onDeleted }: { post: Post | undefined; index: number; open: boolean; onClose: () => void; onDeleted: (id: string) => void }) {
   // What is being typed stays with its post while the feed scrolls on to others.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // The comments on show stay until the next post's have arrived, then one set fades out and the
+  // other fades in, arriving from the side the feed is moving towards: from below when scrolling
+  // down, from above when scrolling up.
+  const [shown, setShown] = useState<{ post: Post; index: number; from: number } | null>(null);
+  const { data: ready } = useSWR<{ replies: Post[] }>(open && post ? `posts/${post.id}` : null, fetcher);
+  useEffect(() => {
+    if (!open) return setShown(null);
+    if (!post || !ready) return;
+    setShown((s) => (s?.post.id !== post.id ? { post, index, from: s ? Math.sign(index - s.index) : 0 } : s.index !== index ? { ...s, index } : s));
+  }, [open, post, index, ready]);
+  const current = shown && (post?.id === shown.post.id ? post : shown.post);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
@@ -395,15 +421,18 @@ function CommentsPanel({ post, open, onClose, onDeleted }: { post: Post | undefi
               <X size={17} />
             </button>
           </div>
-          {post && (
-            <Thread
-              key={post.id}
-              post={post}
-              text={drafts[post.id] ?? ""}
-              setText={(t) => setDrafts((d) => ({ ...d, [post.id]: t }))}
-              onDeleted={() => onDeleted(post.id)}
-            />
-          )}
+          <AnimatePresence mode="wait" initial={false} custom={shown?.from ?? 0}>
+            {current && (
+              <Thread
+                key={current.id}
+                post={current}
+                from={shown!.from}
+                text={drafts[current.id] ?? ""}
+                setText={(t) => setDrafts((d) => ({ ...d, [current.id]: t }))}
+                onDeleted={() => onDeleted(current.id)}
+              />
+            )}
+          </AnimatePresence>
         </motion.aside>
       )}
     </AnimatePresence>,
@@ -411,7 +440,14 @@ function CommentsPanel({ post, open, onClose, onDeleted }: { post: Post | undefi
   );
 }
 
-function Thread({ post, text, setText, onDeleted }: { post: Post; text: string; setText: (t: string) => void; onDeleted: () => void }) {
+/** One post's comments. They arrive from below (from = 1) or above (from = -1), following the feed. */
+const THREAD = {
+  enter: (from: number) => ({ opacity: 0, y: from * 16 }),
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.22, 1, 0.36, 1] as const } },
+  leave: { opacity: 0, transition: { duration: 0.13, ease: "easeOut" as const } },
+};
+
+function Thread({ post, from, text, setText, onDeleted }: { post: Post; from: number; text: string; setText: (t: string) => void; onDeleted: () => void }) {
   const { agent, agents, me } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
   const { data, mutate } = useSWR<{ replies: Post[] }>(`posts/${post.id}`, fetcher, { refreshInterval: 6_000 });
@@ -438,7 +474,7 @@ function Thread({ post, text, setText, onDeleted }: { post: Post; text: string; 
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }} className="flex min-h-0 flex-1 flex-col">
+    <motion.div custom={from} variants={THREAD} initial="enter" animate="show" exit="leave" data-thread={post.id} className="flex min-h-0 flex-1 flex-col">
       {/* which post these belong to: one quiet line, so the panel never repeats the feed */}
       <div className="mx-5 flex flex-none items-center gap-2.5 border-b pb-3 hairline">
         <Avatar agent={author} size={22} />
@@ -464,12 +500,7 @@ function Thread({ post, text, setText, onDeleted }: { post: Post; text: string; 
           </div>
         ))}
         {data && replies.length === 0 && (
-          <div className="grid h-full min-h-[160px] place-items-center text-center">
-            <div>
-              <p className="text-[15px] font-semibold">No comments yet</p>
-              <p className="mt-0.5 text-[13.5px] text-ink2">Reply to start the conversation.</p>
-            </div>
-          </div>
+          <p className="grid h-full min-h-[160px] place-items-center text-[13.5px] text-ink3">No comments yet.</p>
         )}
         <div ref={end} />
       </div>
