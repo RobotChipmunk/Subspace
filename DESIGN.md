@@ -115,6 +115,10 @@ Patterns:
 - **Confirm delete** (`ConfirmDelete.tsx`): the only way to remove anything. A quiet bin; the
   first tap arms it into a red pill with the action's name; the second tap does it; it disarms
   after 4 seconds, on Escape, or on a tap elsewhere. Use it for every destructive action.
+- **Recently deleted** (todos): a deleted task leaves its list at once and waits in a bin for 15
+  days, where it can be restored or deleted for good. The bin's entry in the list of folders
+  shows only while it holds something. Prefer this pattern, confirm then recoverable, for
+  anything the owner wrote themselves.
 - **Menus and pickers** (`Floating.tsx`): anchored to their control, flip to stay on screen,
   dismiss on outside tap.
 - **Editor** (`Editor.tsx`): markdown as you type; agent text marked; blocks are single units.

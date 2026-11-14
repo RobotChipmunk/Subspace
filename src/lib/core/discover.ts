@@ -139,7 +139,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   if (!space) {
     const n = await q1<Record<string, number>>(
       `SELECT (SELECT count(*)::int FROM posts WHERE parent_id IS NULL AND channel = 'feed') AS feed,
-              (SELECT count(*)::int FROM todos WHERE NOT done) AS todos,
+              (SELECT count(*)::int FROM todos WHERE NOT done AND deleted_at IS NULL) AS todos,
               (SELECT count(*)::int FROM context_nodes WHERE NOT archived) AS context,
               (SELECT count(*)::int FROM context_nodes WHERE kind = 'page' AND NOT archived) AS pages,
               (SELECT count(*)::int FROM context_nodes WHERE kind = 'link' AND NOT archived) AS links,
@@ -231,7 +231,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     if (a === "done") {
       return timeTree(
         { path: "/todos/done", title: "Completed todos" },
-        { from: "todos", where: "done", params: [], ts: "done_at", order: "id", select: "id, title, done_at", item: (r) => ({ id: r.id, line: r.title, done_at: r.done_at }) },
+        { from: "todos", where: "done AND deleted_at IS NULL", params: [], ts: "done_at", order: "id", select: "id, title, done_at", item: (r) => ({ id: r.id, line: r.title, done_at: r.done_at }) },
         b,
         cursor,
       );

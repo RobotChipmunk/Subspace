@@ -1,16 +1,17 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { AlignLeft, ChevronLeft, Plus } from "lucide-react";
+import { AlignLeft, ChevronLeft, Plus, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
 import { Editor } from "@/components/Editor";
 import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
-import type { Folder, Todo } from "@/lib/core/todos";
+import type { BinnedTodo, Folder, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
-type Folders = { today: string; folders: Folder[] };
+type Folders = { today: string; folders: Folder[]; bin: number };
+const BIN = "bin";
 
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -23,8 +24,10 @@ export default function TodosPage() {
 
   // If the day rolls over while the app is open, a dated folder may no longer exist.
   useEffect(() => {
-    if (f && !folder) setView("today");
-  }, [f, folder]);
+    if (f && !folder && view !== BIN) setView("today");
+    // the bin's entry goes away once it is empty; do not strand the owner on a list with no way back
+    if (f && view === BIN && !f.bin) setView("today");
+  }, [f, folder, view]);
 
   return (
     <div className="mx-auto flex max-w-[920px] gap-8 max-md:flex-col max-md:gap-4">
@@ -47,6 +50,23 @@ export default function TodosPage() {
               </button>
             );
           })}
+          {/* appears only while there is something to bring back */}
+          <AnimatePresence initial={false}>
+            {(f?.bin ?? 0) > 0 && (
+              <motion.button
+                key="bin"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => (setView(BIN), setOpenId(null))}
+                className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors md:mt-3 ${view === BIN ? "font-semibold text-ink" : "text-ink3 hover:text-ink2"}`}
+              >
+                {view === BIN && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
+                <span className="relative flex-1 whitespace-nowrap">Recently deleted</span>
+                <span className={`relative text-[12.5px] tabular-nums ${view === BIN ? "text-accent" : "text-ink3"}`}>{f?.bin}</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
         </nav>
       </aside>
 
@@ -58,7 +78,7 @@ export default function TodosPage() {
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
-              <List view={view} folder={folder} today={f?.today} onOpen={setOpenId} />
+              {view === BIN ? <Bin /> : <List view={view} folder={folder} today={f?.today} onOpen={setOpenId} />}
             </motion.div>
           )}
         </AnimatePresence>
@@ -67,6 +87,47 @@ export default function TodosPage() {
   );
 }
 
+
+/** Deleted tasks, kept for a while so a slip can be undone. Each can be put back or removed for good. */
+function Bin() {
+  const { data, mutate } = useSWR<{ todos: BinnedTodo[]; keep_days: number }>("todos/bin", fetcher, { refreshInterval: 30_000 });
+  const { mutate: globalMutate } = useSWRConfig();
+  const after = () => (mutate(), globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== "todos/bin"));
+  const leave = (id: string) => mutate((cur) => (cur ? { ...cur, todos: cur.todos.filter((t) => t.id !== id) } : cur), false);
+  return (
+    <div>
+      <header className="mb-5 px-1">
+        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Recently deleted</h1>
+        <p className="mt-0.5 text-[14px] text-ink2">Kept for {data?.keep_days ?? 15} days, then removed for good.</p>
+      </header>
+      <ul>
+        <AnimatePresence initial={false}>
+          {data?.todos.map((t) => (
+            <motion.li key={t.id} layout="position" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={soft} className="overflow-hidden" data-binned={t.id}>
+              <div className="-mx-2 flex items-center gap-2 rounded-2xl px-3 py-[7px]">
+                <div className="min-w-0 flex-1">
+                  <div className={`break-words text-[16px] text-ink2 ${t.done ? "line-through decoration-[var(--line)]" : ""}`}>{t.title}</div>
+                  <div className="text-[12px] text-ink3">{t.days_left === 1 ? "Last day" : `${t.days_left} days left`}</div>
+                </div>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  transition={spring}
+                  aria-label={`Restore ${t.title}`}
+                  onClick={async () => (leave(t.id), await api(`todos/${t.id}/restore`, { method: "POST" }), after())}
+                  className="flex h-8 flex-none items-center gap-1.5 rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 transition-colors hover:bg-fill2 hover:text-ink"
+                >
+                  <Undo2 size={14} /> Restore
+                </motion.button>
+                <ConfirmDelete label={`Delete ${t.title} for good`} confirm="Delete for good" size={15} onConfirm={async () => (leave(t.id), await api(`todos/${t.id}?forever=1`, { method: "DELETE" }), after())} />
+              </div>
+            </motion.li>
+          ))}
+        </AnimatePresence>
+      </ul>
+      {data && !data.todos.length && <p className="px-1 py-10 text-[14.5px] text-ink3">Nothing here.</p>}
+    </div>
+  );
+}
 
 /** Where a task added to "Weekend" goes: Saturday, or today when it is already Sunday. */
 function weekendDay(today: string): string {

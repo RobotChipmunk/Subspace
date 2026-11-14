@@ -380,6 +380,42 @@ async function run(profile) {
     await press(bin);
     await settle(1800);
     if (await page.getByText("UI check task").count()) fail("todos: deleted task is still listed");
+    // it is not gone: it waits in Recently deleted, and can be put back
+    const binTab = page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Recently deleted/ });
+    await binTab.scrollIntoViewIfNeeded();
+    await reachable(binTab, "recently deleted entry");
+    await press(binTab);
+    const binned = page.locator("[data-binned]", { hasText: "UI check task" });
+    await binned.waitFor({ timeout: 5000 });
+    await settle(700);
+    await reachable(binned.getByText(/15 days left/), "days left in the bin");
+    await reachable(binned.getByRole("button", { name: /^Restore/ }), "restore button");
+    await reachable(binned.locator(".confirm-delete"), "delete for good button");
+    await noSidewaysScroll("recently deleted");
+    await shot("todos-bin");
+    await press(binned.getByRole("button", { name: /^Restore/ }));
+    await settle(1500);
+    await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
+    await page.locator("li", { hasText: "UI check task" }).waitFor({ timeout: 5000 }).catch(() => fail("todos: a restored task did not come back to its list"));
+    await settle(600);
+    // delete it again, then for good from the bin; the bin's entry disappears once it is empty
+    await press(page.locator("li", { hasText: "UI check task" }).getByText("UI check task"));
+    await page.getByLabel("Task name").waitFor({ timeout: 5000 });
+    await settle(600);
+    await press(page.getByLabel("Delete task"));
+    await settle(500);
+    await press(bin);
+    await settle(1500);
+    await binTab.scrollIntoViewIfNeeded();
+    await press(binTab);
+    await binned.waitFor({ timeout: 5000 });
+    await settle(600);
+    await press(binned.locator(".confirm-delete"));
+    await settle(500);
+    await press(binned.locator(".confirm-delete"));
+    await settle(1800);
+    if (await binned.count()) fail("todos: deleting for good left the task in the bin");
+    if (await binTab.count()) fail("todos: the empty bin is still listed");
   });
   await step("todo agent edits", async () => {
     await press(page.locator("li", { hasText: "Review robotics allocation" }).getByText("Review robotics allocation"));
