@@ -568,7 +568,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         out.push({
           type: "post",
           ...slimPost(t.root, handles),
-          channel: t.root.channel,
+          channel: t.root.channel.startsWith("dm:") ? "direct" : t.root.channel,
           ...(t.root.tracker_id ? { tracker: t.root.tracker_id } : {}),
           ...(t.root.tags.length ? { tags: t.root.tags } : {}),
           replies: t.replies.map((r) => slimPost(r, handles)),

@@ -1,24 +1,22 @@
 "use client";
-import { ArrowUp, Bookmark, MessageCircle, Trash2 } from "lucide-react";
+import { Bookmark, MessageCircle, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { ArtPanel, Avatar, PageCard, PageHeader, Rich, TrackerChip } from "@/components/bits";
+import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton, TrackerChip } from "@/components/bits";
 import { MentionInput } from "@/components/MentionInput";
-import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
+import { ago, api, fetcher, soft, useMe } from "@/lib/client";
 import type { Post } from "@/lib/core/posts";
 
 export default function FeedPage() {
-  const [channel, setChannel] = useState<"feed" | "agents">("feed");
-  const key = `feed?channel=${channel}`;
+  const key = "feed?channel=feed";
   const { data, mutate } = useSWR<{ posts: Post[] }>(key, fetcher, { refreshInterval: 12_000 });
   const [older, setOlder] = useState<Post[]>([]);
   const [done, setDone] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
 
-  useEffect(() => (setOlder([]), setDone(false), setOpenId(null)), [channel]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpenId(null);
     window.addEventListener("keydown", onKey);
@@ -46,23 +44,9 @@ export default function FeedPage() {
 
   return (
     <div className="mx-auto max-w-[620px]" onClick={() => setOpenId(null)}>
-      <PageHeader
-        title="Feed"
-        right={
-          <div className="glass flex rounded-full p-1 text-[13px] font-medium" onClick={(e) => e.stopPropagation()}>
-            {(["feed", "agents"] as const).map((c) => (
-              <button key={c} onClick={() => setChannel(c)} className={`relative rounded-full px-3.5 py-1 transition-colors ${channel === c ? "text-ink" : "text-ink2"}`}>
-                {channel === c && <motion.span layoutId="channel" transition={spring} className="pill absolute inset-0 rounded-full" />}
-                <span className="relative">{c === "feed" ? "For you" : "Between agents"}</span>
-              </button>
-            ))}
-          </div>
-        }
-      />
+      <PageHeader title="Feed" />
 
-      <Composer channel={channel} dim={!!openId} onPosted={() => mutate()} />
-
-      <div className="mt-4 flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         <AnimatePresence initial={false} mode="popLayout">
           {posts.map((p, i) => (
             <PostCard
@@ -99,7 +83,7 @@ export default function FeedPage() {
 
 function Skeletons() {
   return (
-    <div className="mt-4 flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       {[0, 1].map((i) => (
         <div key={i} className="glass rounded-[26px] p-4">
           <div className="flex gap-3">
@@ -113,63 +97,6 @@ function Skeletons() {
         </div>
       ))}
     </div>
-  );
-}
-
-function SendButton({ show, busy }: { show: boolean; busy?: boolean }) {
-  return (
-    <AnimatePresence>
-      {show && (
-        <motion.button
-          type="submit"
-          aria-label="Send"
-          disabled={busy}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0, opacity: 0 }}
-          whileTap={{ scale: 0.85 }}
-          transition={spring}
-          className="grid h-8 w-8 flex-none place-items-center self-end rounded-full bg-accent text-white shadow-[0_4px_14px_var(--accent-soft)]"
-        >
-          <ArrowUp size={17} strokeWidth={2.4} />
-        </motion.button>
-      )}
-    </AnimatePresence>
-  );
-}
-
-function Composer({ channel, dim, onPosted }: { channel: string; dim: boolean; onPosted: () => void }) {
-  const { me } = useMe();
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function send() {
-    if (!text.trim() || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api("posts", { body: { body: text, channel } });
-      setText("");
-      onPosted();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-    setBusy(false);
-  }
-
-  return (
-    <motion.form
-      animate={{ opacity: dim ? 0.4 : 1 }}
-      onClick={(e) => e.stopPropagation()}
-      onSubmit={(e) => (e.preventDefault(), send())}
-      className="glass relative z-20 flex gap-3 rounded-[26px] py-2.5 pl-3 pr-2.5"
-    >
-      <Avatar agent={me} size={34} />
-      <MentionInput value={text} onChange={setText} onSubmit={send} placeholder="Tell your agents something. @ to address one." className="py-[6px] text-[15.5px]" />
-      <SendButton show={!!text.trim()} busy={busy} />
-      {error && <p className="absolute -bottom-6 left-4 text-[12.5px] text-danger">{error}</p>}
-    </motion.form>
   );
 }
 

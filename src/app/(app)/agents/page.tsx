@@ -1,10 +1,12 @@
 "use client";
-import { Check, Copy, LogOut, Plus, Wand2, Zap } from "lucide-react";
+import { Check, Copy, LogOut, MessageCircle, Plus, Wand2, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import useSWR from "swr";
-import { Avatar, PageHeader } from "@/components/bits";
-import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
+import { Avatar, PageCard, PageHeader, Rich, SendButton } from "@/components/bits";
+import { MentionInput } from "@/components/MentionInput";
+import { ago, api, fetcher, soft, spring, useDirectUnread, useMe } from "@/lib/client";
+import type { Post } from "@/lib/core/posts";
 import type { Agent } from "@/lib/core/util";
 
 export default function AgentsPage() {
@@ -93,6 +95,8 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
   const [bio, setBio] = useState(a.bio);
   const [confirm, setConfirm] = useState(false);
   const [realtime, setRealtime] = useState(false);
+  const [chat, setChat] = useState(false);
+  const unread = useDirectUnread().unread(a.id);
   const live = !!a.runtime?.enabled;
   const human = a.kind === "human";
   const illustrator = a.roles.includes("illustrator");
@@ -100,7 +104,7 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
   const patch = async (body: Record<string, unknown>) => (await api(`agents/${a.id}`, { method: "PATCH", body }), onChanged());
 
   return (
-    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: index * 0.04 }} className={`glass rounded-[24px] p-3.5 ${token || realtime ? "glass-lift" : ""}`}>
+    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: index * 0.04 }} className={`glass rounded-[24px] p-3.5 ${token || realtime || chat ? "glass-lift" : ""}`}>
       <div className="flex items-center gap-x-3.5 gap-y-2.5 max-sm:flex-wrap">
         <Avatar agent={a} />
         <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-54px)]">
@@ -126,7 +130,11 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
         </div>
         {!human && (
           <div className="flex flex-none items-center gap-2 max-sm:w-full max-sm:justify-end">
-            <button onClick={() => setRealtime(!realtime)} aria-expanded={realtime} aria-label="Realtime settings" title="Realtime settings" className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${realtime || live ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
+            <button onClick={() => (setChat(!chat), setRealtime(false))} aria-expanded={chat} aria-label={unread ? `Message ${a.name}, new reply` : `Message ${a.name}`} title={`Message ${a.name}`} className={`relative grid h-8 w-8 place-items-center rounded-full transition-colors ${chat ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
+              <MessageCircle size={15} />
+              {unread && !chat && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--bg)] bg-accent" />}
+            </button>
+            <button onClick={() => (setRealtime(!realtime), setChat(false))} aria-expanded={realtime} aria-label="Realtime settings" title="Realtime settings" className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${realtime || live ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
               <Zap size={15} />
             </button>
             <span className="text-[12.5px] text-ink3 max-sm:hidden">{a.last_seen_at ? `Active ${ago(a.last_seen_at)}` : a.has_token ? "Not seen yet" : ""}</span>
@@ -144,6 +152,13 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
           </div>
         )}
       </div>
+      <AnimatePresence initial={false}>
+        {chat && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
+            <Messages agent={a} />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence initial={false}>
         {realtime && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
@@ -184,6 +199,78 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+/** A private conversation with one agent: ask it for something that belongs to nothing else in the app. */
+function Messages({ agent: a }: { agent: Agent }) {
+  const { agents, me, direct, refresh } = useMe();
+  const { markRead } = useDirectUnread();
+  const { data, mutate } = useSWR<{ messages: Post[] }>(`agents/${a.id}/messages`, fetcher, { refreshInterval: 5_000 });
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const list = useRef<HTMLDivElement>(null);
+  const handles = agents.map((x) => x.handle);
+  const messages = data?.messages ?? [];
+  const lastId = messages[messages.length - 1]?.id;
+
+  // Keep the newest message in view, and count the conversation as read while it is open.
+  useEffect(() => {
+    const el = list.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    if (lastId) refresh();
+  }, [lastId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const moved = direct[a.id];
+  useEffect(() => {
+    if (moved) markRead(a.id, moved);
+  }, [moved, a.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function send() {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    setError("");
+    setText("");
+    try {
+      const sent = await api<Post>(`agents/${a.id}/messages`, { body: { body } });
+      await mutate((cur) => ({ messages: [...(cur?.messages ?? []).filter((m) => m.id !== sent.id), sent] }), { revalidate: true });
+    } catch (e) {
+      setText(body);
+      setError((e as Error).message);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="mt-3.5 border-t hairline pt-3.5">
+      {messages.length > 0 ? (
+        <div ref={list} data-messages className="scroll -mr-2 flex max-h-[380px] flex-col gap-1.5 overflow-y-auto pb-1 pr-2">
+          {messages.map((m, i) => {
+            const mine = m.author === me?.id;
+            const prev = messages[i - 1];
+            // A new request starts a new conversation; show when, as a quiet divider.
+            const gap = !prev || (!m.parent_id && new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() > 3_600_000);
+            return (
+              <div key={m.id} className="flex flex-col">
+                {gap && <div className="py-1.5 text-center text-[12px] text-ink3">{ago(m.created_at) === "now" ? "Now" : /^\d+[mhd]$/.test(ago(m.created_at)) ? `${ago(m.created_at)} ago` : ago(m.created_at)}</div>}
+                <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2 text-[15px] leading-[1.42] ${mine ? "self-end bg-accent-soft" : "self-start bg-fill"}`}>
+                  <Rich text={m.body} handles={handles} />
+                  {m.page && <PageCard page={m.page} />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        data && <p className="pb-1 text-[13.5px] leading-relaxed text-ink2">Ask {a.name} for something directly. Its answer appears here, not in the feed.</p>
+      )}
+      <form onSubmit={(e) => (e.preventDefault(), send())} className="mt-2.5 flex gap-2 rounded-[20px] bg-fill py-1.5 pl-3.5 pr-1.5">
+        <MentionInput value={text} onChange={setText} onSubmit={send} placeholder={`Message ${a.name}`} className="py-[5px] text-[15px]" />
+        <SendButton show={!!text.trim()} busy={busy} />
+      </form>
+      {error && <p className="mt-1.5 text-[12.5px] text-danger">{error}</p>}
+    </div>
   );
 }
 
