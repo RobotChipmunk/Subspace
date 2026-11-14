@@ -4,6 +4,7 @@ import { briefing, changes, explore, read, search } from "../core/discover";
 import { saveLink } from "../core/links";
 import { createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
+import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
 import { bad, type Agent } from "../core/util";
@@ -149,7 +150,8 @@ export const TOOLS: Tool[] = [
     readOnly: true,
     run: async (_a, { view }) => {
       const l = await listTodos(view || "today");
-      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...(t.guest_id ? { from_guest: t.guest_id } : {}) })) };
+      const share = await sharingFor(l.todos.map((t) => t.guest_id));
+      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...share.tag(t.guest_id) })) };
     },
   },
   {
@@ -163,7 +165,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_update",
-    description: "Change a task: complete it, rename it, move it, or edit its notes. A todo's notes are a page: when asked to find, compare or research something for a task, write the answer here with notes_append as markdown with blocks (cards, map, table, callout, sources and so on). Your text is marked as yours for the owner to review.",
+    description: "Change a task: complete it, rename it, move it, or edit its notes. If the task is marked shared_with, that person reads its title and notes: write nothing there that is not meant for them. A todo's notes are a page: when asked to find, compare or research something for a task, write the answer here with notes_append as markdown with blocks (cards, map, table, callout, sources and so on). Your text is marked as yours for the owner to review.",
     inputSchema: obj(
       {
         id: str("Todo id."),
@@ -177,7 +179,7 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, { id, ...patch }) => {
       const t = await updateTodo(a, id, patch);
-      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, notes_chars: t.notes.length };
+      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, notes_chars: t.notes.length, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
     },
   },
   {

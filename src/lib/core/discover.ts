@@ -16,8 +16,9 @@ import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule } from "./rail";
 import { calendar, folders, getTodo, listTodos } from "./todos";
+import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
-import { addDays, bad, listAgents, notFound, oneLine, timezone, type Agent } from "./util";
+import { addDays, bad, listAgents, listGuests, notFound, oneLine, timezone, type Agent } from "./util";
 
 const PAGE = 30;
 
@@ -237,12 +238,13 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       );
     }
     const l = await listTodos(a);
+    const share = await sharingFor(l.todos.map((t) => t.guest_id));
     return {
       path: `/todos/${a}`,
       title: `Todos · ${a}`,
       count: l.todos.length,
-      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...(t.guest_id ? { from_guest: t.guest_id } : {}) })),
-      hint: "read([id]) returns a todo's notes.",
+      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...share.tag(t.guest_id) })),
+      hint: "read([id]) returns a todo's notes. A task marked shared_with is seen by that person: write nothing into it that is not meant for them.",
     };
   }
 
@@ -520,6 +522,9 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   const ctxIds = rows.filter((r) => r.entity_type === "context" || r.entity_type === "link").map((r) => r.entity_id);
   const nodes = ctxIds.length ? await q<{ id: string; path: string; url: string | null; site: string | null; summary: string }>("SELECT id, path, url, site, summary FROM context_nodes WHERE id = ANY($1)", [ctxIds]) : [];
   const node = (id: string) => nodes.find((p) => p.id === id);
+  const todoIds = rows.filter((r) => r.entity_type === "todo").map((r) => r.entity_id);
+  const guestOf = new Map((todoIds.length ? await q<{ id: string; guest_id: string | null }>("SELECT id, guest_id FROM todos WHERE id = ANY($1) AND guest_id IS NOT NULL", [todoIds]) : []).map((t) => [t.id, t.guest_id]));
+  const share = await sharingFor([...guestOf.values()]);
   return {
     query,
     ...(exact ? { note: "This address is already saved (first result)." } : loose ? { note: "No exact match; showing partial matches." } : {}),
@@ -531,6 +536,7 @@ export async function search(opts: { query: string; types?: string[]; since?: st
         ...(r.title ? { title: r.title } : {}),
         ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
         ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
+        ...(r.entity_type === "todo" ? share.tag(guestOf.get(r.entity_id)) : {}),
         snippet: oneLine(r.snippet, 220),
         at: r.ts,
       })),
@@ -576,7 +582,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         });
       } else if (id.startsWith("t_")) {
         const t = await getTodo(id);
-        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.guest_id ? { from_guest: t.guest_id } : {}), notes: t.notes, updated_at: t.updated_at });
+        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(await sharingFor([t.guest_id])).warning(t.guest_id), notes: t.notes, updated_at: t.updated_at });
       } else if (id.startsWith("f_") || (!id.startsWith("c_") && !id.includes("/") && (await q1("SELECT 1 FROM trackers WHERE slug = $1", [id])))) {
         const t = await getTracker(id);
         out.push({
@@ -623,6 +629,19 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
 
 // ---------- Briefing ----------
 
+/** In the briefing: who can see which tasks, so it is known before any task is touched. */
+async function sharedListsNote() {
+  const guests = await listGuests();
+  if (!guests.length) return {};
+  return {
+    shared_task_lists: guests.map((g) => ({
+      person: g.name,
+      list: `/todos/guest:${g.id}`,
+      rule: `${g.name} sees every task marked shared_with "${g.name}": title, notes, day and status. Write nothing into those tasks that is not meant for ${g.name}.`,
+    })),
+  };
+}
+
 export async function briefing(agent: Agent) {
   const cal = await calendar();
   const tz = await timezone();
@@ -647,6 +666,7 @@ export async function briefing(agent: Agent) {
     recent_pages: (await recentPages(5)).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })),
     your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),
+    ...(await sharedListsNote()),
     map: (await explore(agent, "/")).children,
   };
 }

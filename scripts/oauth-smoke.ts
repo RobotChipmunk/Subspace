@@ -173,6 +173,23 @@ async function main() {
   const rail = (await rest("rail")).json.modules;
   const mod = rail.find((m: any) => m.todo?.id === id);
   ok(mod && mod.label === `From ${guest.name}` && mod.title.startsWith("Pick up"), "and the task is in the rail");
+  {
+    // what the owner's own agents see around a shared task
+    const ownTok = t.json.access_token; // the owner's agent connection approved earlier
+    const initText = (await mcp(A, ownTok, "initialize", { protocolVersion: "2025-06-18" })).json.result.instructions as string;
+    ok(initText.includes("SHARED TASKS ARE SEEN BY SOMEONE ELSE") && initText.includes(guest.name), "the owner's agents are told on connecting that the shared list is seen by " + guest.name);
+    const brief = (await tool(A, ownTok, "briefing")).data;
+    ok(brief.shared_task_lists?.some((x: any) => x.person === guest.name && /Write nothing/.test(x.rule)), "the briefing names the shared list and the rule");
+    const rd = (await tool(A, ownTok, "read", { ids: [id] })).data[0];
+    ok(rd.shared_with === guest.name && rd.privacy.includes(`${guest.name} can see this task`), "reading the task says who can see it");
+    const listed = (await tool(A, ownTok, "explore", { path: `/todos/guest:${guest.id}` })).data.items.find((x: any) => x.id === id);
+    ok(listed?.shared_with === guest.name, "so does listing it");
+    const found = (await tool(A, ownTok, "search", { query: "dry cleaning", types: ["todo"] })).data.results.find((x: any) => x.id === id);
+    ok(found?.shared_with === guest.name, "and finding it by search");
+    const edited = (await tool(A, ownTok, "todo_update", { id, notes_append: "Shop is on 5th Street." })).data;
+    ok(edited.shared_with === guest.name && edited.privacy, "and editing it repeats the warning");
+    ok(!(await tool(A, ownTok, "read", { ids: [secretTodo.id] })).data[0].shared_with, "the owner's own tasks carry no such mark");
+  }
   const ev = (await rest(`todos/${id}`)).json;
   ok(ev.guest_id === guest.id && ev.scope === "guest" && ev.ai_unseen, "the task is tagged, unplaced and marked as new");
 

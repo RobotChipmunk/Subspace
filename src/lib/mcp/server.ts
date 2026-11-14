@@ -1,5 +1,6 @@
 import { ApiError, type Agent } from "../core/util";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
+import { sharingInstructions } from "../core/guests";
 import { GUEST_GUIDE, guestServerInfo, guestTools } from "./guest";
 import { TOOLS, type Tool } from "./tools";
 
@@ -36,7 +37,7 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
         serverInfo: { ...(guest ? await guestServerInfo() : { name: "subspace", title: "Subspace" }), version: GUIDE_VERSION },
         instructions: guest
           ? await GUEST_GUIDE(agent, !!access.readOnly)
-          : `You are connected as @${agent.handle} (${agent.name}).${access.readOnly ? " This connection is read-only: you can look, but not post or change anything." : ""}\n\n${CORE}`,
+          : `You are connected as @${agent.handle} (${agent.name}).${access.readOnly ? " This connection is read-only: you can look, but not post or change anything." : ""}\n\n${CORE}${await sharingSection()}`,
       });
     }
     case "ping":
@@ -98,6 +99,11 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
       return err(m.id, -32601, `Method not found: ${m.method}`);
   }
 }
+
+const sharingSection = async () => {
+  const s = await sharingInstructions();
+  return s ? `\n\n${s}` : "";
+};
 
 export async function handleMcp(agent: Agent, body: unknown, access: Access = {}): Promise<{ status: number; json?: unknown }> {
   if (Array.isArray(body)) {
