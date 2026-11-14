@@ -2,7 +2,7 @@ import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
 import { briefing, changes, explore, read, search } from "../core/discover";
 import { saveLink } from "../core/links";
-import { createPost, createReply } from "../core/posts";
+import { createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
@@ -87,7 +87,7 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image or video, otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
+      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image or video (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
     inputSchema: obj(
       {
         body: str("The headline: what happened, in one line. At most 27 words. Plain text, no links."),
@@ -99,8 +99,19 @@ export const TOOLS: Tool[] = [
         },
         media: {
           type: "object",
-          description: "Optional. An image or video that belongs to the story.",
-          properties: { type: { type: "string", enum: ["image", "video"] }, url: str("https URL") },
+          description:
+            "Optional. An image or video that belongs to the story. One picture is the rule; add more only when each shows something different the owner needs to see, such as screenshots of different parts of a product. See guide(\"posting\").",
+          properties: {
+            type: { type: "string", enum: ["image", "video"] },
+            url: str("https URL"),
+            title: str("Optional. A few words saying what the picture shows."),
+            more: {
+              type: "array",
+              maxItems: IMAGES_MAX - 1,
+              description: `Optional, images only. Further pictures the owner swipes through, at most ${IMAGES_MAX} in all. Leave out when the other images in the article are decorative or show much the same thing.`,
+              items: { type: "object", properties: { url: str("https URL"), title: str("Optional. What this picture shows.") }, required: ["url"] },
+            },
+          },
           required: ["type", "url"],
         },
         art: {
@@ -118,7 +129,7 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, args) => {
       const p = await createPost(a, args as any);
-      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
+      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", ...(p.media?.images ? { pictures: p.media.images.length } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
     },
   },
   {

@@ -181,11 +181,28 @@ async function run(profile) {
   await step("feed thread", async () => {
     const card = page.locator("article", { hasText: "Figure raised" }).first();
     await card.scrollIntoViewIfNeeded();
-    await press(card.getByRole("button", { name: /conversation/ }));
+    await press(card.getByRole("button", { name: /^Comments/ }));
     await settle(1200);
-    await page.getByText("It strengthens it.").waitFor({ timeout: 5000 });
+    const panel = page.locator('aside[aria-label="Comments"]');
+    await panel.getByText("It strengthens it.").waitFor({ timeout: 5000 });
     const reply = page.getByPlaceholder("Reply. @ to bring in an agent.");
-    // opening a conversation is for reading: the keyboard must only appear when the reply box is tapped
+    await reachable(panel.getByRole("button", { name: "Close comments" }), "comments close button");
+    if (profile.viewport.width >= 768) {
+      // beside the feed: the feed makes room, the docked rail steps aside, and the navigation stays clear
+      const clash = await page.evaluate(() => {
+        const box = (el) => el.getBoundingClientRect();
+        const side = box(document.querySelector('aside[aria-label="Comments"]'));
+        const nav = box(document.querySelector("nav"));
+        const cards = [...document.querySelectorAll("main article, main form, main h1")].map(box);
+        if (cards.some((r) => r.right > side.left - 8)) return "the feed runs underneath the comments";
+        if (cards.some((r) => r.left < nav.right + 8)) return "the feed runs underneath the navigation";
+        if (document.querySelector('aside[aria-label="Now"]')) return "the rail is still showing beside the comments";
+        return null;
+      });
+      if (clash) fail(`feed comments: ${clash}`);
+      await noSidewaysScroll("feed comments");
+    }
+    // opening comments is for reading: the keyboard must only appear when the reply box is tapped
     const focused = await page.evaluate(() => ["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? ""));
     if (focused) fail("feed thread: opening the conversation put the cursor in a text field, which raises the keyboard on a phone or tablet");
     await reply.scrollIntoViewIfNeeded();
@@ -220,18 +237,64 @@ async function run(profile) {
     await page.getByText("Thanks @atlas noted").first().waitFor({ timeout: 5000 });
     await noSidewaysScroll("feed thread");
     await shot("feed-thread");
+    if (profile.viewport.width >= 768) {
+      // comments stay open while the feed scrolls, and follow the post being read (here the first one, at the top of the feed)
+      const other = page.locator("main article").first();
+      await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
+      await settle(900);
+      if (!(await reply.count())) fail("feed comments: scrolling the feed closed the comments");
+      if ((await other.getByRole("button", { name: "Close comments" }).count()) !== 1) fail("feed comments: scrolling to another post did not move the comments to it");
+      if (await panel.getByText("It strengthens it.").count()) fail("feed comments: the panel still shows the previous post's comments");
+      await shot("feed-comments-follow");
+      // pressing comments on another post moves them there (unless scrolling to it already did); pressing again closes
+      await card.scrollIntoViewIfNeeded();
+      await settle(900);
+      if (!(await card.getByRole("button", { name: "Close comments" }).count())) await press(card.getByRole("button", { name: /^Comments/ }));
+      await settle(1400);
+      await panel.getByText("It strengthens it.").waitFor({ timeout: 4000 }).catch(() => fail("feed comments: choosing another post did not show its comments"));
+      await press(card.getByRole("button", { name: "Close comments" }));
+      await settle(1500);
+      if (await reply.count()) fail("feed comments: pressing the comments button again did not close them");
+      if (wide && !(await page.locator('aside[aria-label="Now"]').count())) fail("feed comments: the rail did not come back after comments closed");
+      await press(card.getByRole("button", { name: /^Comments/ }));
+      await settle(1200);
+    }
     await page.keyboard.press("Escape");
     await settle(1500);
     if (await reply.count()) fail("feed thread: Escape did not close the thread");
     // the post itself is a link to its source, shown under the picture; the chat button is the only way into the thread
     const source = card.getByRole("link", { name: "The Information", exact: true });
     await reachable(source, "post source link");
-    await reachable(card.getByRole("button", { name: /conversation/ }), "post chat button");
+    await reachable(card.getByRole("button", { name: /^Comments/ }), "post chat button");
     const hrefs = await card.locator("a[target=_blank]").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
     if (hrefs.length < 3 || !hrefs.every((h) => h === "https://example.com/figure-series-c")) fail(`feed post: text, picture and source name should all link to the source (found ${JSON.stringify(hrefs)})`);
     await press(card.locator("p").first()).catch(() => {});
     await settle(700);
     if (await reply.count()) fail("feed post: tapping the text opened the conversation instead of the source");
+  });
+  await step("feed pictures", async () => {
+    const card = page.locator("article", { hasText: "Three-Live" }).first();
+    const pics = card.locator("[data-pictures]");
+    await reachable(pics, "post pictures");
+    const on = () => pics.locator("[data-dots] span").evaluateAll((d) => d.map((x) => x.dataset.on).join());
+    if ((await on()) !== "true,false,false") fail(`feed pictures: expected three dots with the first lit (found ${await on()})`);
+    await reachable(pics.locator("[data-dots]"), "picture dots");
+    // swiping to the next picture moves the dot, and the card does not grow sideways
+    await pics.locator(".slides").evaluate((el) => el.scrollTo({ left: el.clientWidth }));
+    await settle(500);
+    if ((await on()) !== "false,true,false") fail(`feed pictures: showing the second picture did not move the dot (found ${await on()})`);
+    if (!profile.touch) {
+      await pics.hover();
+      await reachable(pics.getByRole("button", { name: "Next picture" }), "next picture button");
+      await press(pics.getByRole("button", { name: "Next picture" }));
+      await settle(900);
+      if ((await on()) !== "false,false,true") fail("feed pictures: the next button did not show the third picture");
+      if (await pics.getByRole("button", { name: "Next picture" }).count()) fail("feed pictures: a next button is offered on the last picture");
+    }
+    const shown = await pics.locator("img").evaluateAll((imgs) => imgs.filter((i) => i.complete && i.naturalWidth > 0).length);
+    if (shown < 2) fail("feed pictures: the pictures did not load");
+    await noSidewaysScroll("feed pictures");
+    await shot("feed-pictures");
   });
 
   // ---------- Todos ----------
@@ -555,7 +618,7 @@ async function run(profile) {
   });
   await step("save a link from the feed", async () => {
     await page.goto(`${BASE}/feed`);
-    const save = page.getByRole("button", { name: /^(Save link|Saved to links)$/ }).first();
+    const save = page.locator("article", { hasText: "Figure raised" }).getByRole("button", { name: /^(Save link|Saved to links)$/ }).first();
     await save.waitFor({ timeout: 8000 });
     await settle(800);
     await reachable(save, "feed save button");
@@ -620,9 +683,9 @@ async function run(profile) {
     await settle(1500);
     const card = page.locator("article", { hasText: "Italian place for Saturday" }).first();
     await card.scrollIntoViewIfNeeded();
-    await press(card.getByRole("button", { name: /conversation/ }));
+    await press(card.getByRole("button", { name: /^Comments/ }));
     await settle(1300);
-    const link = card.getByRole("link", { name: /Portland dinner options/ });
+    const link = page.locator('aside[aria-label="Comments"]').getByRole("link", { name: /Portland dinner options/ });
     await reachable(link, "page card in a reply");
     await shot("feed-page-card");
     await press(link);

@@ -30,6 +30,16 @@ async function main() {
   const tr = await call(s, "tracker_create", { title: "Robotics investments " + tag, label: "Robotics", description: "Funding rounds over $50M in humanoid and warehouse robotics. Ignore consumer gadgets." });
   const p = await call(s, "post", { body: `Figure raised $1.2B at a $39B valuation. Third humanoid round over $1B this year. @claude worth a context note?`, tracker: tr.slug, art: { prompt: "a humanoid robot hand catching a coin" } });
   await call(s, "post", { body: "x".repeat(500) });
+  // several pictures: kept in order with the first as the main one; duplicates dropped; too many, or a video among them, refused
+  const shots = ["editor", "timeline", "export"].map((x) => ({ url: `https://example.com/${tag}/${x}.png`, title: x }));
+  const multi = await call(s, "post", { body: "Three-Live turns editable 3D scene code into AR-ready assets.", source: { name: "Google Open Source", url: "https://example.com/three-live" }, media: { type: "image", ...shots[0], more: [shots[1], shots[0], shots[2].url] } });
+  const stored = (await q<{ media: any }>("SELECT media FROM posts WHERE id = $1", [multi.id]))[0]?.media;
+  if (stored?.url !== shots[0].url || stored?.images?.map((i: any) => i.url).join() !== shots.map((x) => x.url).join()) throw new Error("several pictures were not stored in order: " + JSON.stringify(stored));
+  const one = await call(s, "post", { body: "One picture stays one picture.", media: { type: "image", url: shots[0].url } });
+  if ((await q<{ media: any }>("SELECT media FROM posts WHERE id = $1", [one.id]))[0]?.media?.images) throw new Error("a single picture was stored as a set");
+  const many = await call(s, "post", { body: "Too many pictures.", media: { type: "image", url: shots[0].url, more: Array.from({ length: 6 }, (_, i) => ({ url: `https://example.com/${tag}/${i}.png` })) } });
+  const mixed = await call(s, "post", { body: "A video among pictures.", media: [{ type: "image", url: shots[0].url }, { type: "video", url: "https://example.com/clip.mp4" }] });
+  if (!many.ERROR || !mixed.ERROR) throw new Error("a bad set of pictures was accepted");
   await call(claude, "changes");
   const jobs = await call(claude, "jobs");
   for (const j of jobs.jobs) {

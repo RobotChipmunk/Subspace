@@ -2,7 +2,12 @@ import { q, q1 } from "../db";
 import { cleanSvg, createJob, newArt, type Art } from "./art";
 import { agentById, bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
 
-export type Media = { type: "image" | "video"; url: string; title?: string; poster?: string };
+export type Image = { url: string; title?: string };
+/**
+ * A post's picture. `images` is set only when there are several: the whole set in order, the first
+ * repeating `url`, so anything that knows about one picture still shows the right one.
+ */
+export type Media = { type: "image" | "video"; url: string; title?: string; poster?: string; images?: Image[] };
 export type Source = { name: string; url: string };
 
 export type Post = {
@@ -30,6 +35,8 @@ export const POST_MAX = 420;
 /** Agents write feed posts as headlines. */
 export const CAPTION_WORDS = 27;
 export const REPLY_MAX = 2000;
+/** The most pictures one post can carry. */
+export const IMAGES_MAX = 6;
 
 const hostOf = (url: string) => {
   try {
@@ -50,20 +57,25 @@ function checkAttachments(m: unknown, src: unknown): { media: Media | null; sour
     if (name.length > 40 || name.split(" ").length > 4) throw bad('source.name is the publication only, a single short phrase such as "The Verge". Put nothing else in it.');
     source = { name, url: s.url };
   }
-  if (m) {
-    const raw = m as { type?: string; url?: unknown; title?: unknown; source?: unknown; poster?: unknown };
-    if (!["image", "video", "link"].includes(raw.type ?? "")) throw bad("media.type must be image or video.");
+  // Several pictures arrive either as a list, or as one picture with the rest under "more".
+  const list = Array.isArray(m) ? m : m ? [m, ...(Array.isArray((m as { more?: unknown }).more) ? (m as { more: unknown[] }).more : [])] : [];
+  const images: Image[] = [];
+  list.forEach((item, i) => {
+    // Inside "more", a bare URL is enough.
+    const raw = (typeof item === "string" ? { url: item } : (item ?? {})) as { type?: string; url?: unknown; title?: unknown; source?: unknown; poster?: unknown };
+    const type = raw.type ?? (i > 0 ? "image" : "");
+    if (!["image", "video", "link"].includes(type)) throw bad("media.type must be image or video.");
     if (typeof raw.url !== "string" || !/^(https:\/\/|\/api\/media\/)/.test(raw.url)) throw bad("media.url must be an https URL.");
+    if (list.length > 1 && type !== "image") throw bad("Several pictures must all be images. A video stands alone.");
+    const title = raw.title ? { title: String(raw.title).slice(0, 140) } : {};
     // An article link is a source, not a picture.
-    if (raw.type === "link") source ??= { name: String(raw.source ?? "").trim().slice(0, 40) || hostOf(raw.url), url: raw.url };
-    else
-      media = {
-        type: raw.type as Media["type"],
-        url: raw.url,
-        ...(raw.title ? { title: String(raw.title).slice(0, 140) } : {}),
-        ...(typeof raw.poster === "string" && /^https:\/\//.test(raw.poster) ? { poster: raw.poster } : {}),
-      };
-  }
+    if (type === "link") source ??= { name: String(raw.source ?? "").trim().slice(0, 40) || hostOf(raw.url), url: raw.url };
+    else if (type === "video") media = { type: "video", url: raw.url, ...title, ...(typeof raw.poster === "string" && /^https:\/\//.test(raw.poster) ? { poster: raw.poster } : {}) };
+    else if (!images.some((x) => x.url === raw.url)) images.push({ url: raw.url, ...title });
+  });
+  if (images.length > IMAGES_MAX)
+    throw bad(`A post carries at most ${IMAGES_MAX} pictures; this has ${images.length}. Keep only the ones that each show something different the owner needs to see.`);
+  if (images.length) media = { type: "image", ...images[0], ...(images.length > 1 ? { images } : {}) };
   return { media, source };
 }
 

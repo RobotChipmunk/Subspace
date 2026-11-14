@@ -22,6 +22,8 @@
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.04), 0 24px 60px rgba(30, 20, 60, 0.14);
   --glow: 0.55;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Room the feed gives up when comments are open beside it. */
+  --comments-w: clamp(324px, 36vw, 408px);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -613,6 +615,49 @@ html[data-typing] .art-mesh {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* ---------- Feed: several pictures on one post, swiped sideways ---------- */
+.slides {
+  display: flex;
+  height: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.slides::-webkit-scrollbar {
+  display: none;
+}
+.slides > * {
+  flex: none;
+  width: 100%;
+  height: 100%;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+}
+.slide-arrow {
+  background: color-mix(in srgb, var(--surface-solid) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+/* ---------- Feed: comments, beside the feed on a wide screen and over it on a narrow one ---------- */
+.comments {
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
+}
+@media (min-width: 768px) {
+  .comments {
+    background: var(--surface);
+    backdrop-filter: blur(28px) saturate(170%);
+    -webkit-backdrop-filter: blur(28px) saturate(170%);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
 }
 
 /* ---------- Saved links: quiet rows, no dividers ---------- */

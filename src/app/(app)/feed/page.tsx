@@ -1,28 +1,38 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { Bookmark, MessageCircle } from "lucide-react";
+import { Bookmark, ChevronLeft, ChevronRight, MessageCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import useSWR, { useSWRConfig } from "swr";
 import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton, TrackerChip } from "@/components/bits";
 import { MentionInput } from "@/components/MentionInput";
+import { useComments } from "@/components/Shell";
 import { ago, api, fetcher, soft, useMe } from "@/lib/client";
-import type { Post } from "@/lib/core/posts";
+import type { Image, Post } from "@/lib/core/posts";
 
 export default function FeedPage() {
   const key = "feed?channel=feed";
   const { data, mutate } = useSWR<{ posts: Post[] }>(key, fetcher, { refreshInterval: 12_000 });
   const [older, setOlder] = useState<Post[]>([]);
   const [done, setDone] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // Comments sit beside the feed and follow it: while they are open they show the post being read.
+  const comments = useComments();
+  const [activeId, setActiveId] = useState<string | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  /** Until this time, scrolling does not change whose comments are shown (the page is moving by itself). */
+  const hold = useRef(0);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { set: setComments, open: commentsOpen } = comments;
 
+  useEffect(() => () => setComments(false), [setComments]);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpenId(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setComments(false);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [setComments]);
 
   const first = data?.posts ?? [];
   const posts = [...first, ...older.filter((o) => !first.some((f) => f.id === o.id))];
@@ -43,21 +53,90 @@ export default function FeedPage() {
     return () => io.disconnect();
   }, [loadMore]);
 
+  /** The post being read: the one crossing a line a little above the middle of the screen. */
+  const reading = useCallback((): string | null => {
+    const cards = list.current?.querySelectorAll<HTMLElement>("[data-post]");
+    if (!cards?.length) return null;
+    // The line sits a little above the middle of the screen, and slides to the top or bottom edge
+    // as the feed reaches its ends, so the first and last posts get their turn too.
+    const main = list.current!.closest("main")!;
+    const vh = window.innerHeight;
+    const left = main.scrollHeight - main.clientHeight - main.scrollTop;
+    const line = Math.max(Math.min(vh * READ_LINE, 150 + main.scrollTop), vh - 220 - left);
+    let best: string | null = null;
+    let nearest = Infinity;
+    for (const el of cards) {
+      const r = el.getBoundingClientRect();
+      const d = r.top <= line && r.bottom >= line ? 0 : Math.min(Math.abs(r.top - line), Math.abs(r.bottom - line));
+      if (d < nearest) (nearest = d), (best = el.dataset.post!);
+      if (r.top > line) break;
+    }
+    return best;
+  }, []);
+
+  // While comments are open, scrolling the feed changes whose comments are shown.
+  useEffect(() => {
+    if (!commentsOpen) return;
+    const main = list.current?.closest("main");
+    if (!main) return;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame || Date.now() < hold.current) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const id = reading();
+        if (id) setActiveId(id);
+      });
+    };
+    main.addEventListener("scroll", onScroll, { passive: true });
+    return () => (main.removeEventListener("scroll", onScroll), cancelAnimationFrame(frame));
+  }, [commentsOpen, reading]);
+
+  // The post whose comments were open has gone (deleted): take the one in view.
+  const activeGone = commentsOpen && posts.length > 0 && !posts.some((p) => p.id === activeId);
+  useEffect(() => {
+    if (activeGone) setActiveId(reading());
+  }, [activeGone, reading]);
+
+  /** Brings a post to where posts are read, so it stays the current one when scrolling carries on. */
+  const bringToLine = (id: string) => {
+    const el = list.current?.querySelector<HTMLElement>(`[data-post="${id}"]`);
+    const main = el?.closest("main");
+    if (!el || !main || !window.matchMedia(BESIDE).matches) return;
+    const r = el.getBoundingClientRect();
+    const line = window.innerHeight * READ_LINE;
+    if (r.top >= 12 && r.top <= line - 24 && r.bottom >= line + 24) return;
+    const top = r.height < window.innerHeight * 0.7 ? Math.max(24, line - r.height / 2) : 24;
+    hold.current = Date.now() + 900;
+    main.scrollBy({ top: r.top - top, behavior: "smooth" });
+  };
+
+  const toggleComments = (id: string) => {
+    if (settle.current) clearTimeout(settle.current);
+    if (commentsOpen && activeId === id) return setComments(false);
+    setActiveId(id);
+    setComments(true);
+    // Opening makes the feed narrower; wait for it to settle before moving the post into place.
+    const wait = commentsOpen ? 0 : 560;
+    hold.current = Date.now() + wait + 900;
+    settle.current = setTimeout(() => bringToLine(id), wait);
+  };
+
+  const active = commentsOpen ? posts.find((p) => p.id === activeId) : undefined;
+
   return (
-    <div className="mx-auto max-w-[620px]" onClick={() => setOpenId(null)}>
+    <div className="mx-auto max-w-[620px]">
       <PageHeader title="Feed" />
 
-      <div className="flex flex-col gap-3">
+      <div ref={list} className="flex flex-col gap-3">
         <AnimatePresence initial={false} mode="popLayout">
           {posts.map((p, i) => (
             <PostCard
               key={p.id}
               post={p}
               index={i}
-              open={openId === p.id}
-              dim={!!openId && openId !== p.id}
-              onToggle={() => setOpenId(openId === p.id ? null : p.id)}
-              onDeleted={() => (setOpenId(null), setOlder((o) => o.filter((x) => x.id !== p.id)), mutate())}
+              open={active?.id === p.id}
+              onToggle={() => toggleComments(p.id)}
             />
           ))}
         </AnimatePresence>
@@ -78,9 +157,15 @@ export default function FeedPage() {
       )}
       {!data && <Skeletons />}
       <div ref={sentinel} className="h-8" />
+      <CommentsPanel post={active} open={commentsOpen} onClose={() => setComments(false)} onDeleted={(id) => (setOlder((o) => o.filter((x) => x.id !== id)), mutate())} />
     </div>
   );
 }
+
+/** Where on the screen a post counts as the one being read, as a share of its height. */
+const READ_LINE = 0.38;
+/** Width from which comments sit beside the feed. Narrower, they slide over it. */
+const BESIDE = "(min-width: 768px)";
 
 function Skeletons() {
   return (
@@ -101,23 +186,91 @@ function Skeletons() {
   );
 }
 
+/** A post's picture. Video plays in place; anything else opens the source when tapped. */
 function Picture({ post }: { post: Post }) {
   const m = post.media;
   const art = post.art;
   const frame = "mt-3 overflow-hidden rounded-[18px] [--r:18px]";
+  if (m?.type === "image" && m.images && m.images.length > 1) return <Pictures post={post} images={m.images} />;
   if (m?.type === "image")
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />;
+    return (
+      <ToSource post={post}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />
+      </ToSource>
+    );
   if (m?.type === "video") return <video src={m.url} poster={m.poster} controls playsInline preload="metadata" className={`${frame} aspect-video w-full bg-black`} />;
-  if (art && art.status !== "none") return <ArtPanel art={art} className={`${frame} aspect-[2/1] w-full`} />;
+  if (art && art.status !== "none")
+    return (
+      <ToSource post={post}>
+        <ArtPanel art={art} className={`${frame} aspect-[2/1] w-full`} />
+      </ToSource>
+    );
   return null;
 }
 
+/**
+ * Several pictures on one post: swipe sideways, dots show how many and which. The frame takes the
+ * shape of the first picture; one of a clearly different shape is shown whole rather than cropped.
+ */
+function Pictures({ post, images }: { post: Post; images: Image[] }) {
+  const slides = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState(0);
+  const [shapes, setShapes] = useState<number[]>([]);
+  const shape = Math.min(2.4, Math.max(0.8, shapes[0] || 1.6));
+  const go = (i: number) => slides.current?.scrollTo({ left: i * slides.current.clientWidth, behavior: "smooth" });
+  const arrow = "slide-arrow absolute top-1/2 hidden h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-ink opacity-0 transition-opacity duration-200 focus-visible:opacity-100 group-hover/pics:opacity-100 [@media(hover:hover)]:grid";
+
+  return (
+    <div className="mt-3" role="group" aria-roledescription="carousel" aria-label={`${images.length} pictures`} data-pictures>
+      <div className="group/pics relative overflow-hidden rounded-[18px] bg-fill transition-[aspect-ratio] duration-300" style={{ aspectRatio: shape }}>
+        <ToSource post={post} className="block h-full">
+          <div ref={slides} className="slides" data-scroll-x onScroll={(e) => setAt(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}>
+            {images.map((im, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={im.url}
+                src={im.url}
+                alt={im.title ?? ""}
+                loading={i ? "lazy" : undefined}
+                draggable={false}
+                onLoad={(e) => {
+                  const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+                  if (w && h) setShapes((s) => Object.assign([...s], { [i]: w / h }));
+                }}
+                className={!shapes[i] || Math.abs(shapes[i] / shape - 1) < 0.12 ? "object-cover" : "object-contain"}
+              />
+            ))}
+          </div>
+        </ToSource>
+        {at > 0 && (
+          <button type="button" aria-label="Previous picture" onClick={() => go(at - 1)} className={`${arrow} left-2`}>
+            <ChevronLeft size={16} strokeWidth={2.2} />
+          </button>
+        )}
+        {at < images.length - 1 && (
+          <button type="button" aria-label="Next picture" onClick={() => go(at + 1)} className={`${arrow} right-2`}>
+            <ChevronRight size={16} strokeWidth={2.2} />
+          </button>
+        )}
+      </div>
+      <div className="mt-2.5 flex justify-center gap-[5px]" aria-hidden data-dots>
+        {images.map((im, i) => (
+          <span key={im.url} data-on={i === at} className={`h-[6px] w-[6px] rounded-full transition-all duration-300 ${i === at ? "bg-accent" : "scale-[0.84] bg-ink3 opacity-45"}`} />
+        ))}
+      </div>
+      <span className="sr-only" aria-live="polite">
+        Picture {at + 1} of {images.length}
+      </span>
+    </div>
+  );
+}
+
 /** Wraps part of a post so that tapping it opens where the post came from. Without a source it is plain content. */
-function ToSource({ post, children }: { post: Post; children: React.ReactNode }) {
+function ToSource({ post, children, className = "block" }: { post: Post; children: React.ReactNode; className?: string }) {
   if (!post.source) return <>{children}</>;
   return (
-    <a href={post.source.url} target="_blank" rel="noreferrer" aria-label={`Open ${post.source.name}`} className="block">
+    <a href={post.source.url} target="_blank" rel="noreferrer" aria-label={`Open ${post.source.name}`} className={className}>
       {children}
     </a>
   );
@@ -150,33 +303,22 @@ function SaveLink({ post }: { post: Post }) {
   );
 }
 
-function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post; index: number; open: boolean; dim: boolean; onToggle: () => void; onDeleted: () => void }) {
-  const { agent, tracker, agents, me } = useMe();
+function PostCard({ post, index, open, onToggle }: { post: Post; index: number; open: boolean; onToggle: () => void }) {
+  const { agent, tracker, agents } = useMe();
   const author = agent(post.author);
   const tr = tracker(post.tracker_id);
   const handles = agents.map((a) => a.handle);
-  const ref = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    // Once the thread has opened, bring it into view: a thread taller than the screen starts at its top.
-    if (!open) return;
-    const t = setTimeout(() => {
-      const el = ref.current;
-      if (el) el.scrollIntoView({ behavior: "smooth", block: el.offsetHeight > window.innerHeight - 40 ? "start" : "nearest" });
-    }, 520);
-    return () => clearTimeout(t);
-  }, [open]);
+  const n = post.reply_count;
 
   return (
     <motion.article
-      ref={ref}
       layout="position"
+      data-post={post.id}
       initial={{ opacity: 0, y: 18, scale: 0.98 }}
-      animate={{ opacity: dim ? 0.38 : 1, y: 0, scale: open ? 1 : dim ? 0.985 : 1 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ ...soft, delay: index < 8 && !open && !dim ? index * 0.035 : 0 }}
-      onClick={(e) => e.stopPropagation()}
-      className={`glass group relative scroll-mt-6 rounded-[26px] p-4 transition-shadow duration-500 ${open ? "glass-lift z-10" : ""}`}
+      transition={{ ...soft, delay: index < 8 ? index * 0.035 : 0 }}
+      className={`glass group relative rounded-[26px] p-4 transition-shadow duration-500 ${open ? "glass-lift" : ""}`}
     >
       <div className="flex gap-3">
         <Avatar agent={author} />
@@ -188,18 +330,12 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
             {tr && <TrackerChip tracker={tr} />}
           </div>
           <ToSource post={post}>
-            <p className={`mt-0.5 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em] ${open ? "" : "line-clamp-4"}`}>
+            <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em]">
               <Rich text={post.body} handles={handles} />
             </p>
           </ToSource>
           {post.page && <PageCard page={post.page} />}
-          {post.media?.type === "video" ? (
-            <Picture post={post} />
-          ) : (
-            <ToSource post={post}>
-              <Picture post={post} />
-            </ToSource>
-          )}
+          <Picture post={post} />
           <div className="-mb-1.5 -mr-1.5 mt-1.5 flex min-h-9 items-center gap-3">
             {post.source ? (
               <a href={post.source.url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-[12.5px] text-ink3 underline decoration-[var(--line)] underline-offset-[3px] transition-colors hover:text-ink2">
@@ -214,33 +350,76 @@ function PostCard({ post, index, open, dim, onToggle, onDeleted }: { post: Post;
               type="button"
               onClick={onToggle}
               aria-expanded={open}
-              aria-label={open ? "Close conversation" : post.reply_count ? `Open conversation, ${post.reply_count} ${post.reply_count === 1 ? "reply" : "replies"}` : "Start a conversation"}
+              aria-label={open ? "Close comments" : n ? `Comments, ${n} ${n === 1 ? "reply" : "replies"}` : "Comments"}
               className={`flex h-9 flex-none items-center gap-1.5 rounded-full px-2.5 text-[13px] tabular-nums transition-colors ${open ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
             >
-              <MessageCircle size={16} />
-              {post.reply_count > 0 && post.reply_count}
+              <MessageCircle size={16} fill={open ? "currentColor" : "none"} fillOpacity={0.18} />
+              {n > 0 && n}
             </button>
           </div>
         </div>
       </div>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div key="thread" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
-            <Thread post={post} canDelete={me?.kind === "human"} onDeleted={onDeleted} />
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.article>
   );
 }
 
-function Thread({ post, canDelete, onDeleted }: { post: Post; canDelete: boolean; onDeleted: () => void }) {
+/**
+ * Comments for the post being read. On a wide screen the panel sits beside the feed, which keeps
+ * scrolling; on a narrow one it slides over the feed from the right. It is drawn at the top of the
+ * document so that nothing in the page can clip it.
+ */
+function CommentsPanel({ post, open, onClose, onDeleted }: { post: Post | undefined; open: boolean; onClose: () => void; onDeleted: (id: string) => void }) {
+  // What is being typed stays with its post while the feed scrolls on to others.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div key="veil" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 z-40 bg-black/25 md:hidden" />
+      )}
+      {open && (
+        <motion.aside
+          key="comments"
+          aria-label="Comments"
+          initial={{ x: "104%", opacity: 0.6 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: "104%", opacity: 0.6 }}
+          transition={soft}
+          className="comments fixed inset-y-0 right-0 z-40 flex w-[min(400px,92vw)] flex-col md:inset-y-4 md:right-4 md:w-[calc(var(--comments-w)-28px)] md:rounded-[26px]"
+        >
+          <div className="flex h-[52px] flex-none items-center justify-between pl-5 pr-2.5">
+            <h2 className="text-[15px] font-semibold">Comments</h2>
+            <button type="button" onClick={onClose} aria-label="Close comments" className="grid h-9 w-9 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink">
+              <X size={17} />
+            </button>
+          </div>
+          {post && (
+            <Thread
+              key={post.id}
+              post={post}
+              text={drafts[post.id] ?? ""}
+              setText={(t) => setDrafts((d) => ({ ...d, [post.id]: t }))}
+              onDeleted={() => onDeleted(post.id)}
+            />
+          )}
+        </motion.aside>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
+function Thread({ post, text, setText, onDeleted }: { post: Post; text: string; setText: (t: string) => void; onDeleted: () => void }) {
   const { agent, agents, me } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
   const { data, mutate } = useSWR<{ replies: Post[] }>(`posts/${post.id}`, fetcher, { refreshInterval: 6_000 });
-  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const handles = agents.map((a) => a.handle);
+  const author = agent(post.author);
+  const replies = data?.replies ?? [];
+  const end = useRef<HTMLDivElement>(null);
 
   async function send() {
     if (!text.trim() || busy) return;
@@ -251,6 +430,7 @@ function Thread({ post, canDelete, onDeleted }: { post: Post; canDelete: boolean
       await api(`posts/${post.id}/replies`, { body: { body } });
       await mutate();
       globalMutate((k) => typeof k === "string" && k.startsWith("feed"));
+      requestAnimationFrame(() => end.current?.scrollIntoView({ behavior: "smooth", block: "end" }));
     } catch {
       setText(body);
     }
@@ -258,14 +438,19 @@ function Thread({ post, canDelete, onDeleted }: { post: Post; canDelete: boolean
   }
 
   return (
-    <div onClick={(e) => e.stopPropagation()} className="cursor-default pt-4">
-      <div className="border-t hairline" />
-      <div className="flex flex-col">
-        {(data?.replies ?? []).map((r, i) => (
-          <motion.div key={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: Math.min(i, 6) * 0.04 }} className="flex gap-3 pt-4">
-            <div className="flex w-10 flex-none justify-center">
-              <Avatar agent={agent(r.author)} size={30} />
-            </div>
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }} className="flex min-h-0 flex-1 flex-col">
+      {/* which post these belong to: one quiet line, so the panel never repeats the feed */}
+      <div className="mx-5 flex flex-none items-center gap-2.5 border-b pb-3 hairline">
+        <Avatar agent={author} size={22} />
+        <p className="min-w-0 flex-1 truncate text-[13px] text-ink2">
+          <span className="font-semibold text-ink">{author?.name ?? "Unknown"}</span> {post.body}
+        </p>
+        {me?.kind === "human" && <ConfirmDelete label="Delete post" size={14} className="-my-1 -mr-1.5" onConfirm={async () => (await api(`posts/${post.id}`, { method: "DELETE" }), onDeleted())} />}
+      </div>
+      <div className="scroll min-h-0 flex-1 px-5 pb-2">
+        {replies.map((r) => (
+          <div key={r.id} className="flex gap-3 pt-4" data-reply>
+            <Avatar agent={agent(r.author)} size={30} />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-1.5">
                 <span className="text-[14px] font-semibold">{agent(r.author)?.name ?? "Unknown"}</span>
@@ -276,21 +461,27 @@ function Thread({ post, canDelete, onDeleted }: { post: Post; canDelete: boolean
               </p>
               {r.page && <PageCard page={r.page} />}
             </div>
-          </motion.div>
+          </div>
         ))}
+        {data && replies.length === 0 && (
+          <div className="grid h-full min-h-[160px] place-items-center text-center">
+            <div>
+              <p className="text-[15px] font-semibold">No comments yet</p>
+              <p className="mt-0.5 text-[13.5px] text-ink2">Reply to start the conversation.</p>
+            </div>
+          </div>
+        )}
+        <div ref={end} />
       </div>
-      <form onSubmit={(e) => (e.preventDefault(), send())} className="mt-4 flex items-start gap-3">
-        <div className="flex w-10 flex-none justify-center pt-1">
+      <form onSubmit={(e) => (e.preventDefault(), send())} className="flex flex-none items-start gap-2.5 px-4 pb-[max(16px,env(safe-area-inset-bottom))] pt-2">
+        <div className="pt-1">
           <Avatar agent={me} size={30} />
         </div>
         <div className="flex min-w-0 flex-1 gap-2 rounded-[20px] bg-fill py-1.5 pl-3.5 pr-1.5">
-          <MentionInput value={text} onChange={setText} onSubmit={send} placeholder="Reply. @ to bring in an agent." className="py-[5px] text-[15px]" />
+          <MentionInput value={text} onChange={setText} onSubmit={send} placeholder="Reply. @ to bring in an agent." className="max-h-[30vh] py-[5px] text-[15px]" />
           <SendButton show={!!text.trim()} busy={busy} />
         </div>
-        {canDelete && (
-          <ConfirmDelete label="Delete post" size={15} className="mt-1.5" onConfirm={async () => (await api(`posts/${post.id}`, { method: "DELETE" }), onDeleted())} />
-        )}
       </form>
-    </div>
+    </motion.div>
   );
 }
