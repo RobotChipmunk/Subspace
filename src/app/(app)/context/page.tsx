@@ -1,5 +1,6 @@
 "use client";
-import { ArrowUpRight, ChevronRight, FileText, LayoutTemplate, Link2, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { ArrowUpRight, ChevronRight, FileText, LayoutTemplate, Link2, MoreHorizontal, Plus, Search, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -361,7 +362,6 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
   const { agent } = useMe();
   const [title, setTitle] = useState(node.title);
   const [summary, setSummary] = useState(node.summary);
-  const [confirm, setConfirm] = useState(false);
   const [body, setBody] = useState(node.body);
   const by = agent(node.updated_by);
 
@@ -392,17 +392,7 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
           ref={grow}
           className="min-w-0 flex-1 resize-none overflow-hidden text-[26px] font-bold leading-[1.2] tracking-[-0.025em]"
         />
-        <AnimatePresence mode="wait" initial={false}>
-          {confirm ? (
-            <motion.button key="c" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} onClick={async () => (await api(`context/${node.id}`, { method: "DELETE" }), onDeleted())} onBlur={() => setConfirm(false)} autoFocus className="mt-1 h-8 rounded-full bg-danger px-3 text-[13px] font-medium text-white">
-              Remove
-            </motion.button>
-          ) : (
-            <motion.button key="t" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} aria-label="Remove" onClick={() => setConfirm(true)} className="mt-1 grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-              <Trash2 size={16} />
-            </motion.button>
-          )}
-        </AnimatePresence>
+        <ConfirmDelete label="Remove" confirm="Remove" className="mt-1" onConfirm={async () => (await api(`context/${node.id}`, { method: "DELETE" }), onDeleted())} />
       </div>
       <textarea
         value={summary}

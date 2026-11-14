@@ -591,6 +591,23 @@ html[data-typing] .art-mesh {
   text-decoration-color: var(--accent-soft);
   text-underline-offset: 3px;
 }
+/* Removing something: a quiet bin that turns into a red pill when armed (see ConfirmDelete). */
+.confirm-delete {
+  color: var(--ink-3);
+  transition: background-color 0.3s var(--ease), color 0.3s var(--ease), box-shadow 0.3s var(--ease);
+}
+@media (hover: hover) {
+  .confirm-delete:not([data-armed="true"]):hover {
+    background: var(--fill);
+    color: var(--danger);
+  }
+}
+.confirm-delete[data-armed="true"] {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--danger) 32%, transparent);
+}
+
 /* A task row can be held and dragged: holding must not select its text or raise the system menu. */
 .todo-row {
   -webkit-user-select: none;
