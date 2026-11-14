@@ -117,10 +117,11 @@ async function run(profile) {
   const wide = profile.viewport.width >= 1100;
   await step("rail", async () => {
     const toggle = page.getByRole("button", { name: /^Now/ });
-    await reachable(toggle, "rail button");
     const hotel = page.locator('[data-rail-module="portland-hotel"]');
     if (wide) {
       await hotel.waitFor({ timeout: 6000 });
+      // with something in it the rail is simply there: no button to show or hide it
+      if (await toggle.count()) fail("rail: a wide screen still shows a rail toggle");
       // docked: the content must make room for it rather than sit underneath
       const overlap = await page.evaluate(() => {
         const rail = document.querySelector('aside[aria-label="Now"]').getBoundingClientRect();
@@ -129,6 +130,7 @@ async function run(profile) {
       if (overlap) fail("rail: page content runs underneath the docked rail");
     } else {
       if (await hotel.count()) fail("rail: modules are showing before the rail is opened on a narrow screen");
+      await reachable(toggle, "rail button");
       await press(toggle);
       await hotel.waitFor({ timeout: 6000 });
       await settle(700);
@@ -160,12 +162,10 @@ async function run(profile) {
     await press(page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
     await settle(900);
     if ((await page.locator("[data-rail-module]").count()) !== 2) fail("rail: dismissing a module did not remove it");
-    await press(page.getByRole("button", { name: "Hide the rail" }));
-    await settle(900);
-    if (await hotel.count()) fail("rail: hiding the rail left its modules on screen");
-    if (wide) {
-      await press(toggle);
-      await hotel.waitFor({ timeout: 4000 });
+    if (!wide) {
+      await press(page.locator('aside[aria-label="Now"]').getByRole("button", { name: "Close" }));
+      await settle(900);
+      if (await hotel.count()) fail("rail: closing the sheet left its modules on screen");
     }
   });
 
