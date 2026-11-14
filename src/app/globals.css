@@ -582,6 +582,13 @@ textarea:focus-visible,
   text-decoration-color: var(--accent-soft);
   text-underline-offset: 3px;
 }
+/* A task row can be held and dragged: holding must not select its text or raise the system menu. */
+.todo-row {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /* ---------- Saved links: quiet rows, no dividers ---------- */
 .link-row {
   transition: background 0.25s ease;

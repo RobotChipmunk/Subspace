@@ -256,6 +256,46 @@ async function run(profile) {
     }
     await shot("todos-backlog");
   });
+  await step("todos reorder", async () => {
+    // Dragging a task must be able to carry it past several rows, by finger (after a short hold) and by mouse.
+    await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
+    await settle(900);
+    const rows = page.locator("main ul li");
+    const titles = () => rows.evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
+    const before = await titles();
+    if (before.length < 4) return fail(`todos reorder: only ${before.length} tasks to test with`);
+    const at = await rows.evaluateAll((els) => els.map((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height }))(e.getBoundingClientRect())));
+    const end = at[3].y + at[3].h * 0.4;
+    if (profile.touch) {
+      const cdp = await page.context().newCDPSession(page);
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      // a quick swipe is a scroll, never a drag
+      await touch("touchStart", at[1].x, at[1].y);
+      for (let i = 1; i <= 8; i++) (await touch("touchMove", at[1].x, at[1].y - i * 12), await page.waitForTimeout(12));
+      await touch("touchEnd", 0, 0);
+      await settle(600);
+      if ((await titles()).join("|") !== before.join("|")) fail("todos reorder: a quick swipe over a task moved it");
+      await page.locator("main").evaluate((el) => el.scrollTo(0, 0));
+      await settle(300);
+      // hold, then carry the first task past three others
+      await touch("touchStart", at[0].x, at[0].y);
+      await page.waitForTimeout(450);
+      for (let i = 1; i <= 24; i++) (await touch("touchMove", at[0].x, at[0].y + ((end - at[0].y) * i) / 24), await page.waitForTimeout(25));
+      await page.waitForTimeout(200);
+      await touch("touchEnd", 0, 0);
+      await cdp.detach();
+    } else {
+      await page.mouse.move(at[0].x, at[0].y);
+      await page.mouse.down();
+      for (let i = 1; i <= 24; i++) (await page.mouse.move(at[0].x, at[0].y + ((end - at[0].y) * i) / 24), await page.waitForTimeout(20));
+      await page.mouse.up();
+    }
+    await settle(900);
+    const after = await titles();
+    if (after.indexOf(before[0]) !== 3) fail(`todos reorder: dragging the first task past three rows left it at position ${after.indexOf(before[0]) + 1}, expected 4`);
+    if (await page.getByLabel("Task name").count()) fail("todos reorder: letting go of a dragged task opened it");
+    await shot("todos-reordered");
+  });
   await step("todos add, tick, open", async () => {
     await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
     await settle(500);

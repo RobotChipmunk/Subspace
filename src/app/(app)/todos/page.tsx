@@ -1,6 +1,6 @@
 "use client";
 import { AlignLeft, ChevronLeft, Plus, Trash2 } from "lucide-react";
-import { AnimatePresence, motion, Reorder } from "motion/react";
+import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
@@ -63,6 +63,108 @@ export default function TodosPage() {
         </AnimatePresence>
       </section>
     </div>
+  );
+}
+
+
+/** How long a finger rests on a task before it lifts for reordering. Shorter than the system's own long-press. */
+const HOLD_MS = 260;
+
+/**
+ * One task in the list. With a mouse it drags straight away. With a finger, a quick swipe scrolls
+ * the page as usual; resting on the row for a moment lifts it, and from then on the page is held
+ * still so the row can travel any distance. (Safari hands a moving touch to scrolling and cancels
+ * the drag unless the page is told to stay put, which is why a row used to move only one place.)
+ */
+function TodoRow({ r, dragging, onToggle, onOpen, onDropped }: { r: Row; dragging: React.MutableRefObject<boolean>; onToggle: () => void; onOpen: () => void; onDropped: () => void }) {
+  const controls = useDragControls();
+  const el = useRef<HTMLLIElement>(null);
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  const lifted = useRef(false);
+  const [up, setUp] = useState(false);
+
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    // once a row is lifted, the touch belongs to the drag: no scrolling, no text selection, no callout
+    const still = (e: Event) => lifted.current && e.cancelable && e.preventDefault();
+    node.addEventListener("touchmove", still, { passive: false });
+    node.addEventListener("contextmenu", still);
+    return () => {
+      node.removeEventListener("touchmove", still);
+      node.removeEventListener("contextmenu", still);
+    };
+  }, []);
+
+  const cancelHold = () => {
+    if (hold.current) clearTimeout(hold.current.timer);
+    hold.current = null;
+  };
+  const release = () => {
+    cancelHold();
+    lifted.current = false;
+    setUp(false);
+  };
+
+  return (
+    <Reorder.Item
+      ref={el}
+      value={r}
+      as="li"
+      dragListener={false}
+      dragControls={controls}
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto", scale: up ? 1.02 : 1, boxShadow: up ? "var(--shadow-lift)" : "0 0 0 rgba(0,0,0,0)", backgroundColor: up ? "var(--surface-solid)" : "rgba(0,0,0,0)", zIndex: up ? 5 : 0 }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={soft}
+      whileDrag={{ scale: 1.02, boxShadow: "var(--shadow-lift)", backgroundColor: "var(--surface-solid)", zIndex: 5 }}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest("[role=checkbox]") || e.button > 0) return;
+        if (e.pointerType === "mouse") return controls.start(e);
+        const start = e.nativeEvent;
+        cancelHold();
+        hold.current = {
+          x: e.clientX,
+          y: e.clientY,
+          timer: setTimeout(() => {
+            hold.current = null;
+            lifted.current = true;
+            dragging.current = true;
+            setUp(true);
+            controls.start(start);
+          }, HOLD_MS),
+        };
+      }}
+      onPointerMove={(e) => hold.current && Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) > 8 && cancelHold()}
+      onPointerUp={() => {
+        const was = lifted.current;
+        release();
+        // lifted but never moved: nothing was dragged, so drag-end will not fire
+        if (was) setTimeout(() => (dragging.current = false), 50);
+      }}
+      onPointerCancel={release}
+      onDragStart={() => (dragging.current = true)}
+      onDragEnd={() => {
+        release();
+        setTimeout(() => (dragging.current = false), 50);
+        onDropped();
+      }}
+      className="todo-row relative -mx-2 flex cursor-grab touch-pan-y select-none items-start gap-3 rounded-2xl px-3 active:cursor-grabbing"
+    >
+      <button role="checkbox" aria-checked={r.done} aria-label={r.done ? "Mark not done" : "Mark done"} data-on={r.done} onClick={onToggle} onPointerDown={(e) => e.stopPropagation()} className="check mt-[9px]">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2.5 6.2l2.4 2.4 4.6-5" />
+        </svg>
+      </button>
+      <div onClick={() => !dragging.current && onOpen()} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 py-[9px]">
+        <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>
+          {r.title}
+          {/* an agent changed this task since you last opened it: the dot sits right after the words */}
+          {r.ai_unseen && <span title="An agent made changes" aria-label="An agent made changes" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
+        </span>
+        {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
+      </div>
+    </Reorder.Item>
   );
 }
 
@@ -142,36 +244,14 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
           <Reorder.Group axis="y" values={items} onReorder={(o) => reorder(key, o)} as="ul">
             <AnimatePresence initial={false}>
               {items.map((r) => (
-                <Reorder.Item
+                <TodoRow
                   key={r.id}
-                  value={r}
-                  as="li"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={soft}
-                  whileDrag={{ scale: 1.02, boxShadow: "var(--shadow-lift)", backgroundColor: "var(--surface-solid)", zIndex: 5 }}
-                  onDragStart={() => (dragging.current = true)}
-                  onDragEnd={() => {
-                    setTimeout(() => (dragging.current = false), 50);
-                    setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id) } }), rs));
-                  }}
-                  className="relative -mx-2 flex cursor-grab touch-pan-y items-start gap-3 rounded-2xl px-3 active:cursor-grabbing"
-                >
-                  <button role="checkbox" aria-checked={r.done} aria-label={r.done ? "Mark not done" : "Mark done"} data-on={r.done} onClick={() => toggle(r)} onPointerDown={(e) => e.stopPropagation()} className="check mt-[9px]">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M2.5 6.2l2.4 2.4 4.6-5" />
-                    </svg>
-                  </button>
-                  <div onClick={() => !dragging.current && onOpen(r.id)} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 py-[9px]">
-                    <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>
-                      {r.title}
-                      {/* an agent changed this task since you last opened it: the dot sits right after the words */}
-                      {r.ai_unseen && <span title="An agent made changes" aria-label="An agent made changes" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
-                    </span>
-                    {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
-                  </div>
-                </Reorder.Item>
+                  r={r}
+                  dragging={dragging}
+                  onToggle={() => toggle(r)}
+                  onOpen={() => onOpen(r.id)}
+                  onDropped={() => setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id) } }), rs))}
+                />
               ))}
             </AnimatePresence>
           </Reorder.Group>
