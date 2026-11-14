@@ -1,5 +1,6 @@
 "use client";
-import { AlignLeft, ChevronLeft, Plus, Trash2 } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { AlignLeft, ChevronLeft, Plus } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
@@ -361,9 +362,7 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
               </option>
             ))}
           </select>
-          <button aria-label="Delete task" onClick={async () => (await api(`todos/${id}`, { method: "DELETE" }), globalMutate((k) => typeof k === "string" && k.startsWith("todos")), onBack())} className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-            <Trash2 size={16} />
-          </button>
+          <ConfirmDelete label="Delete task" onConfirm={async () => (await api(`todos/${id}`, { method: "DELETE" }), globalMutate((k) => typeof k === "string" && k.startsWith("todos")), onBack())} />
         </div>
       </div>
 

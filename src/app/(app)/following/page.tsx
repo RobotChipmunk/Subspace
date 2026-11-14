@@ -1,5 +1,6 @@
 "use client";
-import { ChevronDown, Plus, Trash2, X } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { ChevronDown, Plus, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
@@ -174,9 +175,7 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
             Label
             <input value={label} maxLength={18} aria-label="Feed label" onChange={(e) => setLabel(e.target.value)} onBlur={() => label.trim() && label !== t.label && patch({ label })} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} className="w-[92px] text-[13px] font-medium text-ink" />
           </label>
-          <button aria-label="Stop following" title="Stop following" onClick={async () => (await api(`trackers/${t.id}`, { method: "DELETE" }), onRemoved())} className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-            <Trash2 size={15} />
-          </button>
+          <ConfirmDelete label="Stop following" confirm="Stop following" size={15} onConfirm={async () => (await api(`trackers/${t.id}`, { method: "DELETE" }), onRemoved())} />
         </div>
       </div>
 

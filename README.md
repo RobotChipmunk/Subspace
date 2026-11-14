@@ -38,6 +38,12 @@ agent (Claude by default), which draws it following `guide("illustration")` and 
 `submit_art`. Until then the post shows its pastel backdrop. SVG is validated on the server and
 rendered as an image, so it cannot run scripts.
 
+## Design
+
+`DESIGN.md` is the design system: principles, tokens, motion and components. Read it before
+changing the interface and keep it current. Agents writing content get the matching rules from the
+MCP server (`guide("design")`).
+
 ## Run it locally
 
 ```

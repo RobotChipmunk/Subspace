@@ -266,7 +266,14 @@ async function run(profile) {
     await settle(900);
     const rows = page.locator("main ul li");
     const titles = () => rows.evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
-    const before = await titles();
+    // wait until the list has stopped changing (it may still be loading or refreshing after the view switch)
+    let before = await titles();
+    for (let i = 0; i < 10; i++) {
+      await settle(500);
+      const again = await titles();
+      if (again.join("|") === before.join("|")) break;
+      before = again;
+    }
     if (before.length < 4) return fail(`todos reorder: only ${before.length} tasks to test with`);
     const at = await rows.evaluateAll((els) => els.map((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height }))(e.getBoundingClientRect())));
     const end = at[3].y + at[3].h * 0.4;
@@ -357,7 +364,24 @@ async function run(profile) {
     await settle(1200);
     const saved = await page.locator(".ProseMirror").innerText();
     if (!saved.includes("Plan") || !saved.includes("@claude")) fail(`editor: notes were not saved (got "${saved.slice(0, 60)}")`);
+    // deleting asks first, in place: one tap arms it, nothing is removed yet
+    const bin = page.locator(".confirm-delete");
     await press(page.getByLabel("Delete task"));
+    await settle(600);
+    if ((await bin.getAttribute("data-armed")) !== "true") fail("todos: the delete control did not ask for confirmation");
+    await reachable(bin.getByText("Delete", { exact: true }), "delete confirmation");
+    await noSidewaysScroll("delete confirmation");
+    await shot("todo-delete-confirm");
+    if (!(await page.getByLabel("Task name").count())) fail("todos: the task was deleted on the first tap");
+    // a tap elsewhere stands it down
+    await press(page.getByLabel("Task name"));
+    await settle(500);
+    if ((await bin.getAttribute("data-armed")) === "true") fail("todos: tapping elsewhere did not cancel the delete");
+    await page.keyboard.press("Escape");
+    // arm again and confirm
+    await press(page.getByLabel("Delete task"));
+    await settle(500);
+    await press(bin);
     await settle(1800);
     if (await page.getByText("UI check task").count()) fail("todos: deleted task is still listed");
   });
@@ -629,6 +653,9 @@ async function run(profile) {
     const stop = page.getByLabel("Stop following");
     await stop.last().scrollIntoViewIfNeeded();
     await press(stop.last());
+    await settle(500);
+    if (!(await page.getByText("UI check topic").count())) fail("following: a topic was removed without asking");
+    await press(page.locator('.confirm-delete[data-armed="true"]'));
     await settle(2000);
     if (await page.getByText("UI check topic").count()) fail("following: removed topic is still listed");
   });
@@ -646,12 +673,14 @@ async function run(profile) {
     await page.getByText("Connector address").waitFor({ timeout: 5000 });
     await settle(700);
     await reachable(page.locator("code").first(), "connector address");
-    await page.getByRole("button", { name: "Done" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Done", exact: true }).scrollIntoViewIfNeeded();
     await settle(300);
-    await reachable(page.getByRole("button", { name: "Done" }), "connect panel Done");
+    await reachable(page.getByRole("button", { name: "Done", exact: true }), "connect panel Done");
     await noSidewaysScroll("agents connect panel");
     await shot("agents-connect");
-    await press(page.getByRole("button", { name: "Remove agent" }));
+    await press(page.getByRole("button", { name: "Remove agent", exact: true }));
+    await settle(500);
+    await press(page.locator('.confirm-delete[data-armed="true"]'));
     await settle(800);
   });
   await step("agents realtime", async () => {

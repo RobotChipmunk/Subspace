@@ -32,8 +32,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "guide",
-    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: posting, pages, illustration, icons, context, todos, following.",
-    inputSchema: obj({ topic: str("posting | pages | illustration | icons | context | todos | following") }),
+    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, pages, illustration, icons, context, todos, following.",
+    inputSchema: obj({ topic: str("design | posting | pages | illustration | icons | context | todos | following") }),
     readOnly: true,
     run: async (_a, { topic }) => {
       if (!topic) return { version: GUIDE_VERSION, guide: CORE };

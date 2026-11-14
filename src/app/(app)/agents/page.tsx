@@ -1,4 +1,5 @@
 "use client";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { Check, Copy, LogOut, Plus, Wand2, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useId, useState } from "react";
@@ -170,9 +171,7 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
                 )}
                 <div className="flex gap-2">
                   {a.id !== "a_claude" && (
-                    <button onClick={() => (onToken(null), patch({ archived: true }))} className="h-8 rounded-full px-3 text-[13px] text-ink3 hover:bg-fill hover:text-danger">
-                      Remove agent
-                    </button>
+                    <ConfirmDelete label="Remove agent" confirm="Remove agent" size={15} onConfirm={() => (onToken(null), patch({ archived: true }))} />
                   )}
                   <button onClick={() => onToken(null)} className="h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-bg">
                     Done

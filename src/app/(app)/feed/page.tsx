@@ -1,5 +1,6 @@
 "use client";
-import { ArrowUp, Bookmark, MessageCircle, Trash2 } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { ArrowUp, Bookmark, MessageCircle } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -360,9 +361,7 @@ function Thread({ post, canDelete, onDeleted }: { post: Post; canDelete: boolean
           <SendButton show={!!text.trim()} busy={busy} />
         </div>
         {canDelete && (
-          <button type="button" aria-label="Delete post" onClick={async () => (await api(`posts/${post.id}`, { method: "DELETE" }), onDeleted())} className="mt-1.5 grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-            <Trash2 size={15} />
-          </button>
+          <ConfirmDelete label="Delete post" size={15} className="mt-1.5" onConfirm={async () => (await api(`posts/${post.id}`, { method: "DELETE" }), onDeleted())} />
         )}
       </form>
     </div>
