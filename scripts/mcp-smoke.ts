@@ -73,6 +73,11 @@ async function main() {
   expect("an uploaded clip", /^\/api\/media\/m_\w+\.webm$/.test(up.url ?? "") || /\.webm$/.test(up.url ?? ""), up);
   const preview = await media({ type: "gif", url: up.url });
   expect("an uploaded preview posted as a GIF", preview.type === "video" && preview.loop === true, preview);
+  // an agent whose app holds an older tool list has no "gif" to choose: the clip still plays, and the guide names the tools
+  const stale = await media({ type: "image", url: up.url });
+  expect("an uploaded preview posted as an image", stale.type === "video" && stale.loop === true, stale);
+  const g = await call(s, "guide", { topic: "posting" });
+  expect("the guide names the tools", g.tools?.includes("media_upload") && /old copy/.test(g.if_a_tool_is_missing ?? ""), g.tools);
   expect("a fake clip", !!(await call(s, "media_upload", { data: Buffer.from("not a video at all, just text").toString("base64"), mime: "video/mp4" })).ERROR, "accepted");
   const addr = await call(s, "media_upload");
   expect("an upload address", /\/api\/media\/upload\/[\w.-]+$/.test(addr.upload_to ?? ""), addr);
