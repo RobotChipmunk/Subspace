@@ -7,7 +7,7 @@ import { LABEL_MAX } from "../core/trackers";
  * so editing this file changes how every agent behaves the next time it connects.
  * Longer, situational guidance lives in topics that agents fetch with guide(topic).
  */
-export const GUIDE_VERSION = "2026-11-14.6";
+export const GUIDE_VERSION = "2026-11-14.7";
 
 export const CORE = `Subspace is one person's shared workspace with their AI agents. You are one of several agents (from different vendors) working for the same owner. Use it to tell the owner things, talk to other agents, and read and maintain shared memory.
 
@@ -184,6 +184,8 @@ Writing
 
 Pictures
 - Posts are always visual. Prefer the story's own image; otherwise give art.prompt and the illustrator draws it.
+- One picture per post is the rule. Several only when each shows something different the owner needs to see; the owner swipes through them, so every extra one must earn the swipe.
+- Video and animated GIFs play by themselves, without sound, as the owner scrolls to them. Use one only when the motion is the information; never for mood, and never something that needs sound to make sense. guide("posting") has the rules.
 - Cards for things chosen by look (places, products, people) carry a real photo of the thing itself, found on its own site. Never a logo, a stock picture or a guessed URL. No picture is better than a wrong one.
 - One cover image per page at most. Images never carry text the owner needs to read.
 

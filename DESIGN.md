@@ -11,7 +11,8 @@ server (`guide("design")` in `src/lib/mcp/guide.ts`); keep the two in step.
 1. **Calm.** The app is read in glances between other things. Nothing shouts, nothing competes.
    One accent colour, one emphasis per screen.
 2. **Minimal by default, detail on request.** Show the least that carries the point: a title and
-   one line. Everything else waits behind a tap and opens in place (rail modules, threads, notes).
+   one line. Everything else waits behind a tap and opens in place (rail modules, notes) or
+   beside what it belongs to (comments on a post).
 3. **Content is the interface.** Words, pictures and the owner's own things, with as little chrome
    as possible. No dividers between rows, no boxes around things that do not need them, no labels
    that restate the obvious.
@@ -103,6 +104,15 @@ Patterns:
 - **Lift.** A dragged row scales to 1.02, gains `--shadow-lift` and a solid surface.
 - **Emphasis is rare.** One small flourish at the moment it matters (the bin's shake as it arms).
   Never loop attention-seeking motion.
+- **Make room, do not cover.** A panel that opens beside the content slides in from its edge with
+  `soft` while the content moves over in the same half second (padding on `main`, `--ease`). On a
+  screen too narrow for both it slides over the content from the same edge, with a dimmed veil.
+- **Follow.** When one view tracks another (comments tracking the post being read), the old
+  content stays until the new is loaded, fades out in about 130ms, and the new fades in over
+  300ms from 16px away on the side the owner is moving towards: from below when scrolling down,
+  from above when scrolling up. Fetch the neighbours ahead so the wait is rarely seen.
+- **Moving pictures.** Video and GIFs play only while they are the clip most in view, one at a
+  time, without sound until the owner asks for it. They never start under reduced motion.
 - **Ambient.** The backdrop drifts over about a minute per cycle and pauses while the keyboard is
   up (`html[data-typing]`).
 - **Reduced motion.** `prefers-reduced-motion` turns durations to near zero. Never make meaning
@@ -114,6 +124,23 @@ Patterns:
 - **App bar** (`Shell.tsx`): icons only, one glass pill; left on wide screens, bottom on phones.
 - **Rows** (todos, links, rail): no dividers; hover fill; title, one secondary line, one meta line.
 - **Cards** (`.glass`): feed posts, context nodes, pages.
+- **Pictures on a post** (`Pictures` in `feed/page.tsx`): one picture is the rule. Up to six are
+  swiped sideways in one frame that takes the first picture's shape; a picture of a clearly
+  different shape is shown whole, not cropped. Dots beneath (6px, the current one in accent) say
+  how many and which. Arrows appear on hover with a mouse and never on touch. No counters, no
+  captions.
+- **Clips** (`Clip.tsx`): video files, GIF-like clips and YouTube or Vimeo players, on black in
+  an 18px frame. The one most in view plays silently and the rest wait. A video has one control,
+  a small sound button bottom right; tapping the video does the same, and the choice carries to
+  the next video. A looping clip has no controls and opens the source like a picture. An embedded
+  player shows its still until first scrolled to, then uses the player's own controls.
+- **Comments** (`CommentsPanel` in `feed/page.tsx`): a 26px glass panel docked on the right from
+  768px up, a sheet over the feed below that. The comment button on a post toggles it; the feed
+  keeps scrolling and the panel follows the post crossing a line a little above mid-screen, which
+  is lifted (`--shadow-lift`) with its comment button in accent. The panel holds one line naming
+  the post, the replies, and the reply field pinned at the bottom; a draft stays with its post.
+  While it is open it takes the docked rail's place, and the rail returns when it closes. Width
+  is `--comments-w`. Use this pattern for any detail that should stay open while a list scrolls.
 - **Rail** (`Rail.tsx`): two lines per module (timing, title); expands in place; errors first in
   red, warnings in amber.
 - **Confirm delete** (`ConfirmDelete.tsx`): the only way to remove anything. A quiet bin; the

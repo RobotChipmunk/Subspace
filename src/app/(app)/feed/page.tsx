@@ -500,12 +500,7 @@ function Thread({ post, from, text, setText, onDeleted }: { post: Post; from: nu
           </div>
         ))}
         {data && replies.length === 0 && (
-          <div className="grid h-full min-h-[160px] place-items-center text-center">
-            <div>
-              <p className="text-[15px] font-semibold">No comments yet</p>
-              <p className="mt-0.5 text-[13.5px] text-ink2">Reply to start the conversation.</p>
-            </div>
-          </div>
+          <p className="grid h-full min-h-[160px] place-items-center text-[13.5px] text-ink3">No comments yet.</p>
         )}
         <div ref={end} />
       </div>
