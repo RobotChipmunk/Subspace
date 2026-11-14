@@ -33,10 +33,14 @@ export async function getNode(ref: string): Promise<ContextNode> {
   return n;
 }
 
+/**
+ * A node's notes, folders and pages. Saved links are left out: an area can hold thousands of
+ * them, so they are always listed a page at a time (see listLinks).
+ */
 export async function children(parentId: string | null): Promise<ContextLite[]> {
   return q<ContextLite>(
     `SELECT ${LITE}, (SELECT count(*)::int FROM context_nodes c WHERE c.parent_id = n.id AND NOT c.archived) AS child_count
-     FROM context_nodes n WHERE parent_id IS NOT DISTINCT FROM $1 AND NOT archived ORDER BY title`,
+     FROM context_nodes n WHERE parent_id IS NOT DISTINCT FROM $1 AND NOT archived AND kind <> 'link' ORDER BY title`,
     [parentId],
   );
 }
@@ -54,7 +58,8 @@ async function uniquePath(parentPath: string | null, title: string, ignoreId?: s
   for (let i = 2; ; i++) {
     const hit = await q1<{ id: string }>("SELECT id FROM context_nodes WHERE path = $1", [path]);
     if (!hit || hit.id === ignoreId) return path;
-    path = `${base}-${i}`;
+    // After a few tries stop counting: among thousands of same-named items a random tail finds a free address at once.
+    path = i <= 4 ? `${base}-${i}` : `${base}-${newId("x").slice(-6)}`;
   }
 }
 
@@ -67,7 +72,11 @@ function guard(actor: Agent, body: string) {
 
 /** What search looks through: for a link that includes its address, site and description. */
 const docText = (n: { summary: string; body: string; url?: string | null; site?: string | null; blurb?: string | null }) =>
-  [n.summary, n.blurb, n.site, n.url, n.body].filter(Boolean).join("\n");
+  // the address is added as plain words too, so "ablaj" finds ablaj.com/products/...
+  [n.summary, n.blurb, n.site, n.url, n.url?.replace(/^https?:\/\//, "").replace(/[^\p{L}\p{N}]+/gu, " "), n.body].filter(Boolean).join("\n");
+
+/** Links are indexed as their own kind so a search can ask for links only. */
+const docType = (kind: string) => (kind === "link" ? "link" : "context");
 
 const okCover = (c: unknown) => (typeof c === "string" && /^https:\/\//.test(c) && c.length < 2000 ? c : null);
 
@@ -87,7 +96,7 @@ export async function createNode(actor: Agent, input: { parent?: string | null; 
     id, parent?.id ?? null, path, title.slice(0, 120), (input.summary ?? "").slice(0, 400), body, actor.id, kind, okCover(input.cover),
     link?.url ?? null, link?.key ?? null, link?.site ?? null, link?.blurb ?? null,
   ]);
-  await indexDoc("context", id, title, docText({ summary: input.summary ?? "", body, url: link?.url, site: link?.site, blurb: link?.blurb }));
+  await indexDoc(docType(kind), id, title, docText({ summary: input.summary ?? "", body, url: link?.url, site: link?.site, blurb: link?.blurb }));
   await logEvent({ actor: actor.id, type: kind === "link" ? "link.saved" : kind === "page" ? "page.created" : "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
   return getNode(id);
 }
@@ -142,7 +151,7 @@ export async function updateNode(
     // Keep every descendant's address in step with its ancestor.
     await q("UPDATE context_nodes SET path = $2 || substr(path, $3) WHERE path LIKE $1", [before.path.replace(/[%_\\]/g, "\\$&") + "/%", path, before.path.length + 1]);
   }
-  await indexDoc("context", before.id, title, docText({ summary, body, url: before.url, site: before.site, blurb }));
+  await indexDoc(docType(kind), before.id, title, docText({ summary, body, url: before.url, site: before.site, blurb }));
   const was = new Set(await findMentions(before.body));
   const mentions = (await findMentions(body)).filter((h) => !was.has(h));
   await logEvent({
@@ -162,7 +171,7 @@ export async function archiveNode(actor: Agent, ref: string) {
   const ids = await q<{ id: string }>("UPDATE context_nodes SET archived = true, path = path || '~' || id WHERE id = $1 OR path LIKE $2 RETURNING id", [
     n.id, n.path.replace(/[%_\\]/g, "\\$&") + "/%",
   ]);
-  for (const r of ids) await unindexDoc("context", r.id);
+  for (const r of ids) await Promise.all([unindexDoc("context", r.id), unindexDoc("link", r.id)]);
   await logEvent({ actor: actor.id, type: "context.archived", entity_type: "context", entity_id: n.id, summary: `${n.path} archived`, data: { path: n.path } });
 }
 

@@ -246,6 +246,14 @@ const MIGRATIONS: string[] = [
    ALTER TABLE context_nodes ADD COLUMN blurb text;
    CREATE UNIQUE INDEX context_link_key ON context_nodes (url_key) WHERE url_key IS NOT NULL AND NOT archived;
    CREATE INDEX context_links ON context_nodes (created_at DESC) WHERE kind = 'link' AND NOT archived`,
+  // Links at scale: page through them newest-first (everywhere, or within one area) by index alone,
+  // and index them for search as their own kind, with the address broken into plain words.
+  `CREATE INDEX context_links_id ON context_nodes (id DESC) WHERE kind = 'link' AND NOT archived;
+   CREATE INDEX context_links_parent ON context_nodes (parent_id, id DESC) WHERE kind = 'link' AND NOT archived;
+   DROP INDEX context_links;
+   UPDATE search_docs d SET entity_type = 'link',
+          body = d.body || E'\\n' || regexp_replace(regexp_replace(n.url, '^https?://', ''), '[^[:alnum:]]+', ' ', 'g')
+     FROM context_nodes n WHERE n.id = d.entity_id AND d.entity_type = 'context' AND n.kind = 'link'`,
 ];
 
 async function migrate() {

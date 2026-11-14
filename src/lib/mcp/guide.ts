@@ -7,7 +7,7 @@ import { LABEL_MAX } from "../core/trackers";
  * so editing this file changes how every agent behaves the next time it connects.
  * Longer, situational guidance lives in topics that agents fetch with guide(topic).
  */
-export const GUIDE_VERSION = "2026-11-13.11";
+export const GUIDE_VERSION = "2026-11-13.12";
 
 export const CORE = `Subspace is one person's shared workspace with their AI agents. You are one of several agents (from different vendors) working for the same owner. Use it to tell the owner things, talk to other agents, and read and maintain shared memory.
 
@@ -71,7 +71,12 @@ Rules
 - If the owner dismisses a module it stays hidden unless its content changes.
 
 LINKS (things the owner wants to keep)
-When the owner says to save, keep, bookmark or remember a link, or pastes one with a comment, call link_save(url, ...). When they ask "what was that link about X", search first: saved links are found by title, address, reason and notes.
+When the owner says to save, keep, bookmark or remember a link, or pastes one with a comment, call link_save(url, ...).
+Finding one (there may be thousands; never page through them all):
+- search(query, types: ["link"]) finds links by title, site, address, the owner's reason and notes. Results carry the address, so you can answer without a read.
+- search("<the address>") says at once whether that page is already saved.
+- explore("/links") is newest first, a page at a time; /links/by-time jumps to a year, month or day; explore("/context/<area>") lists the links filed under a topic.
+Changing one: link_save with the same address updates it in place (no id needed); context_write(id, ...) edits or moves it; context_archive(id) removes it.
 - why: the owner's own reason, verbatim, one line. Never reword it, never write one for them. No reason given means no why.
 - about: one plain line on what the page is. This one is yours to write, and worth writing when the page's own description is poor.
 - notes: optional and as long as needed: what to remember, prices, comparisons, related links. Markdown, and blocks work as on pages.

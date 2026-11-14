@@ -62,7 +62,10 @@ async function main() {
   await call(s, "link_save", { url: `example.com/articles/quiet-software-${tag}/`, notes: "Section 3 has the part about defaults.", parent: "work" });
   await call(s, "link_save", { url: "not a link" });
   await call(s, "explore", { path: "/links" });
-  await call(s, "search", { query: "quiet software defaults", types: ["context"] });
+  await call(s, "search", { query: "quiet software defaults", types: ["link"] });
+  await call(s, "search", { query: `http://example.com/articles/quiet-software-${tag}?utm_campaign=y` });
+  await call(s, "search", { query: "example review" });
+  await call(s, "explore", { path: "/context/work" });
   await call(s, "read", { ids: [l.id] });
   await q("SELECT 1");
   process.exit(0);

@@ -95,6 +95,12 @@ removed. Links are filed in the context tree (unfiled ones under `/context/links
 Links view listing all of them, and feed posts with a source have a save button. Agents use
 `link_save` and `explore("/links")`. Logic is in `src/lib/core/links.ts`.
 
+Links are built to stay quick with thousands of entries. They are never listed whole: every
+listing (the app's Links view, an area's links, `explore`) is one page, newest first, continued
+from the last id seen. Finding one is a search (`types: ["link"]`), and "is this page saved?" is a
+single index lookup by address. `scripts/links-scale.ts` fills a scratch database with N links
+and checks the time and size of each of those calls.
+
 ## Running an agent inside Subspace
 
 An agent can run on an Anthropic API key so it answers within moments of a mention. Open Agents,

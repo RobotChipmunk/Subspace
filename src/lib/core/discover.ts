@@ -12,7 +12,7 @@
 import { q, q1 } from "../db";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
-import { listLinks } from "./links";
+import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule } from "./rail";
 import { calendar, folders, getTodo, listTodos } from "./todos";
@@ -31,6 +31,8 @@ export type ExploreResult = {
   children?: Child[];
   items?: Item[];
   next_cursor?: string | null;
+  /** Saved links filed under this context node, a page at a time. */
+  links?: { count: number; items: Item[]; next_cursor: string | null };
   hint?: string;
 };
 
@@ -257,14 +259,20 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       };
     }
     const node = await getNode(sub);
+    const linkPage = node.kind === "link" ? null : await listLinks({ parent: node.id, limit: PAGE, before: cursor });
+    const links = linkPage?.total ? { count: linkPage.total, items: linkPage.links.map((l) => linkItem(l as unknown as Record<string, unknown>)), next_cursor: linkPage.next } : undefined;
+    if (cursor) return { path: `/context/${node.path}`, title: node.title, links };
     const kids = await contextChildren(node.id);
     return {
       path: `/context/${node.path}`,
       title: node.title,
       about: node.summary,
       children: kids.map(contextChild),
-      items: [{ id: node.id, version: node.version, body_chars: node.body.length, updated_at: node.updated_at }],
-      hint: node.body.length ? `read(["${node.id}"]) returns the body.` : "This node has no body yet, only children.",
+      items: [{ id: node.id, version: node.version, body_chars: node.body.length, updated_at: node.updated_at, ...(node.kind === "link" ? { url: node.url } : {}) }],
+      ...(links ? { links } : {}),
+      hint:
+        (node.body.length ? `read(["${node.id}"]) returns the body.` : "This node has no body yet.") +
+        (links?.next_cursor ? ` Its saved links are newest first; pass links.next_cursor as cursor for the next page, or use search(query, types: ["link"]).` : ""),
     };
   }
 
@@ -312,35 +320,30 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   }
 
   if (space === "links") {
-    const linkItem = (r: Record<string, unknown>): Item => ({
-      id: r.id,
-      path: "/context/" + r.path,
-      title: r.title,
-      url: r.url,
-      site: r.site || undefined,
-      why: r.summary || undefined,
-      about: r.blurb || undefined,
-      ...(Number(r.body_chars) ? { has_notes: true } : {}),
-      saved: r.created_at,
-    });
     if (a === "by-time")
       return timeTree(
         { path: "/links/by-time", title: "Links" },
-        { from: "context_nodes", where: "kind = 'link' AND NOT archived", params: [], ts: "created_at", order: "id", select: "id, path, title, url, site, summary, blurb, length(body) AS body_chars, created_at", item: linkItem },
+        { from: "context_nodes", where: "kind = 'link' AND NOT archived", params: [], ts: "created_at", order: "id", select: "id, title, url, site, summary, blurb, length(body) AS body_chars, created_at", item: (r) => linkItem(r) },
         b,
         cursor,
       );
-    const recent = await listLinks(20);
+    const page = await listLinks({ limit: PAGE, before: cursor });
     return {
       path: "/links",
       title: "Links",
-      about: "The links the owner saved most recently. why is their own reason for keeping it; about says what the page is.",
-      items: recent.map((r) => linkItem(r as unknown as Record<string, unknown>)),
-      children: [
-        { path: "/links/by-time", title: "All links by time", about: "Every saved link, split by year, month and day as needed." },
-        { path: "/context", title: "Links by topic", about: "Links sit in the context tree under the area they belong to; unfiled ones are in /context/links." },
-      ],
-      hint: 'search(query, types: ["context"]) finds a link by title, address, reason or notes. read([id]) returns its notes. link_save(url, ...) saves one.',
+      about: "Links the owner saved, newest first. why is their own reason for keeping one; about says what the page is.",
+      count: page.total,
+      items: page.links.map((l) => linkItem(l as unknown as Record<string, unknown>, true)),
+      next_cursor: page.next,
+      ...(cursor
+        ? {}
+        : {
+            children: [
+              { path: "/links/by-time", title: "All links by time", about: "Every saved link, split by year, month and day as needed." },
+              { path: "/context", title: "Links by topic", about: "Links sit in the context tree under the area they belong to; unfiled ones are in /context/links." },
+            ],
+          }),
+      hint: 'Do not page through everything to find one link. search(query, types: ["link"]) finds it by title, site, address, reason or notes; search("<the address>") tells you whether a page is already saved. read([id]) returns notes.',
     };
   }
 
@@ -401,6 +404,18 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   throw notFound(`Nothing at "${rawPath}". Start from explore("/").`);
 }
 
+/** One saved link in a listing: enough to recognise it and open it, nothing a model has to read twice. */
+const linkItem = (r: Record<string, unknown>, where = false): Item => ({
+  id: r.id,
+  title: r.title,
+  url: r.url,
+  ...(r.site ? { site: r.site } : {}),
+  ...(r.summary ? { why: r.summary } : r.blurb ? { about: oneLine(String(r.blurb), 140) } : {}),
+  ...(Number(r.body_chars) ? { notes: true } : {}),
+  ...(where && r.parent_path && r.parent_path !== "links" ? { in: "/context/" + r.parent_path } : {}),
+  saved: new Date(r.created_at as string).toISOString().slice(0, 10),
+});
+
 const contextChild = (k: { path: string; title: string; summary: string; kind?: string; blurb?: string | null; child_count?: number; body_chars: number; updated_at: string }): Child => ({
   path: `/context/${k.path}`,
   title: k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.title,
@@ -452,7 +467,7 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
 
 // ---------- Search ----------
 
-const TYPES = ["post", "todo", "context", "tracker"];
+const TYPES = ["post", "todo", "context", "link", "tracker"];
 
 export async function search(opts: { query: string; types?: string[]; since?: string; limit?: number; offset?: number }) {
   const query = (opts.query ?? "").trim();
@@ -483,9 +498,14 @@ export async function search(opts: { query: string; types?: string[]; since?: st
     );
   };
 
-  let rows = await run("websearch_to_tsquery('english', $1)", query);
+  // An address is looked up directly: "is this page saved?" is one index probe, not a text search.
+  const wantsLinks = !types.length || types.includes("link");
+  const exact = wantsLinks && offset === 0 && !opts.since && /^\S+\.\S+$/.test(query) ? await findByUrl(query) : null;
+
+  // when the address itself is saved, that is the answer: no text search needed
+  let rows = exact ? [] : await run("websearch_to_tsquery('english', $1)", query);
   let loose = false;
-  if (!rows.length && offset === 0) {
+  if (!rows.length && offset === 0 && !exact) {
     // Nothing matched every word: fall back to any word, matching prefixes.
     const words = query.toLowerCase().match(/[a-z0-9]{2,}/g) ?? [];
     if (words.length) {
@@ -496,19 +516,25 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   const more = rows.length > limit;
   if (more) rows.pop();
 
-  const ctxIds = rows.filter((r) => r.entity_type === "context").map((r) => r.entity_id);
-  const paths = ctxIds.length ? await q<{ id: string; path: string }>("SELECT id, path FROM context_nodes WHERE id = ANY($1)", [ctxIds]) : [];
+  if (exact) rows = rows.filter((r) => r.entity_id !== exact.id);
+  const ctxIds = rows.filter((r) => r.entity_type === "context" || r.entity_type === "link").map((r) => r.entity_id);
+  const nodes = ctxIds.length ? await q<{ id: string; path: string; url: string | null; site: string | null; summary: string }>("SELECT id, path, url, site, summary FROM context_nodes WHERE id = ANY($1)", [ctxIds]) : [];
+  const node = (id: string) => nodes.find((p) => p.id === id);
   return {
     query,
-    ...(loose ? { note: "No exact match; showing partial matches." } : {}),
-    results: rows.map((r) => ({
-      id: r.entity_id,
-      type: r.entity_type,
-      ...(r.title ? { title: r.title } : {}),
-      ...(r.entity_type === "context" ? { path: "/context/" + paths.find((p) => p.id === r.entity_id)?.path } : {}),
-      snippet: oneLine(r.snippet, 220),
-      at: r.ts,
-    })),
+    ...(exact ? { note: "This address is already saved (first result)." } : loose ? { note: "No exact match; showing partial matches." } : {}),
+    results: [
+      ...(exact ? [{ id: exact.id, type: "link", title: exact.title, path: "/context/" + exact.path, url: exact.url, ...(exact.site ? { site: exact.site } : {}), ...(exact.summary ? { why: exact.summary } : {}), snippet: oneLine(exact.blurb || exact.summary || "", 220), at: exact.updated_at }] : []),
+      ...rows.map((r) => ({
+        id: r.entity_id,
+        type: r.entity_type,
+        ...(r.title ? { title: r.title } : {}),
+        ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
+        ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
+        snippet: oneLine(r.snippet, 220),
+        at: r.ts,
+      })),
+    ],
     next_offset: more ? offset + limit : null,
   };
 }
@@ -569,6 +595,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         const n = await getNode(id);
         const crumbs = await breadcrumb(n);
         const kids = await contextChildren(n.id);
+        const saved = n.kind === "link" ? 0 : (await listLinks({ parent: n.id, limit: 1 })).total;
         out.push({
           type: n.kind === "page" ? "page" : n.kind === "link" ? "link" : "context",
           id: n.id,
@@ -582,7 +609,9 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
           version: n.version,
           updated_by: "@" + (handles.get(n.updated_by) ?? n.updated_by),
           updated_at: n.updated_at,
-          ...(kids.length ? { children: kids.map((k) => ({ path: "/context/" + k.path, title: k.title, about: k.summary })) } : {}),
+          ...(kids.length ? { children: kids.slice(0, 40).map((k) => ({ path: "/context/" + k.path, title: k.title, about: k.summary })) } : {}),
+          ...(kids.length > 40 ? { more_children: kids.length - 40 } : {}),
+          ...(saved ? { saved_links: saved, saved_links_hint: `explore("/context/${n.path}") lists them a page at a time.` } : {}),
         });
       }
     } catch (e) {

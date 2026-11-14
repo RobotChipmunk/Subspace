@@ -4,11 +4,12 @@ import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
+import useSWRInfinite from "swr/infinite";
 import { Avatar, mesh } from "@/components/bits";
 import { Editor } from "@/components/Editor";
 import { ago, api, fetcher, hash, soft, useMe } from "@/lib/client";
 import type { ContextLite, ContextNode } from "@/lib/core/context";
-import type { LinkLite } from "@/lib/core/links";
+import type { LinkPage } from "@/lib/core/links";
 import { PALETTES } from "@/lib/palettes";
 
 type View = { node: ContextNode | null; trail: { id: string; path: string; title: string }[]; children: ContextLite[] };
@@ -32,7 +33,7 @@ function Inner() {
   useEffect(() => setAdding(false), [nodeId]);
   const { data, mutate } = useSWR<View>(`context${nodeId ? `?node=${nodeId}` : ""}`, fetcher, { refreshInterval: 20_000, keepPreviousData: true });
   const [query, setQuery] = useState("");
-  const { data: hits } = useSWR<{ results: Hit[] }>(query.trim().length > 1 ? `search?types=context&q=${encodeURIComponent(query.trim())}` : null, fetcher, { keepPreviousData: true });
+  const { data: hits } = useSWR<{ results: Hit[] }>(query.trim().length > 1 ? `search?types=context,link&q=${encodeURIComponent(query.trim())}` : null, fetcher, { keepPreviousData: true });
   const searching = query.trim().length > 1;
 
   async function addChild() {
@@ -116,18 +117,7 @@ function Inner() {
                 </motion.button>
               )}
             </div>
-            {adding && data.node && (
-              <div className="mt-4">
-                <QuickAdd parent={data.node.id} autoFocus onSaved={() => (setAdding(false), mutate())} />
-              </div>
-            )}
-            {data.children.some((c) => c.kind === "link") && (
-              <div className="mt-4 flex flex-col">
-                {data.children.filter((c) => c.kind === "link").map((c, i) => (
-                  <LinkRow key={c.id} link={c} index={i} onOpen={() => go(c.id)} />
-                ))}
-              </div>
-            )}
+            {data.node && data.node.kind !== "link" && <NodeLinks parent={data.node.id} adding={adding} onDone={() => setAdding(false)} onOpen={go} />}
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -138,19 +128,91 @@ function Inner() {
 /** Shows an address the way people say it: no scheme, no www, no trailing slash. */
 const bare = (url: string) => url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
 
-/** Every saved link, newest first, with a box to add one. */
-function LinksView({ onOpen }: { onOpen: (id: string) => void }) {
-  const { data, mutate } = useSWR<{ links: LinkLite[] }>("links", fetcher, { refreshInterval: 30_000 });
+/**
+ * Saved links a page at a time, newest first: everywhere, or inside one area. Only the pages that
+ * have been scrolled to are ever fetched, so the list stays quick with thousands of links.
+ */
+function useLinkPages(parent?: string) {
+  const { data, size, setSize, mutate, isValidating } = useSWRInfinite<LinkPage>(
+    (_i, prev: LinkPage | null) => (prev && !prev.next ? null : `links?${parent ? `parent=${parent}&` : ""}${prev?.next ? `before=${prev.next}` : ""}`),
+    fetcher,
+    { refreshInterval: 30_000, revalidateFirstPage: true },
+  );
+  const last = data?.[data.length - 1];
+  return {
+    loaded: !!data,
+    links: data?.flatMap((d) => d.links) ?? [],
+    total: data?.[0]?.total ?? 0,
+    more: !!last?.next,
+    busy: isValidating,
+    loadMore: () => !isValidating && last?.next && setSize(size + 1),
+    refresh: () => mutate(),
+  };
+}
+
+/** The rows, and a marker at the end that fetches the next page as it scrolls into view. */
+function LinkList({ pages, showArea, onOpen }: { pages: ReturnType<typeof useLinkPages>; showArea?: boolean; onOpen: (id: string) => void }) {
+  const end = useRef<HTMLDivElement>(null);
+  const loadMore = useRef(pages.loadMore);
+  loadMore.current = pages.loadMore;
+  useEffect(() => {
+    const el = end.current;
+    if (!el) return;
+    const seen = new IntersectionObserver((e) => e[0].isIntersecting && loadMore.current(), { rootMargin: "600px" });
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, [pages.more]);
+  // rows that arrive with a later page should not replay the staggered entrance of the first screen
+  const first = useRef(0);
+  if (!first.current && pages.links.length) first.current = pages.links.length;
   return (
-    <div>
-      <QuickAdd onSaved={() => mutate()} />
-      <div className="mt-4 flex flex-col">
-        {data?.links.map((l, i) => (
-          <LinkRow key={l.id} link={l} index={i} area={l.parent_path && l.parent_path !== "links" ? l.parent_title : null} onOpen={() => onOpen(l.id)} />
+    <>
+      <div className="flex flex-col">
+        {pages.links.map((l, i) => (
+          <LinkRow key={l.id} link={l} index={i < first.current ? i : 0} area={showArea && l.parent_path && l.parent_path !== "links" ? l.parent_title : null} onOpen={() => onOpen(l.id)} />
         ))}
       </div>
-      {data && !data.links.length && <p className="py-14 text-center text-[14.5px] text-ink3">No links yet. Paste one above, or tell an agent to save one.</p>}
+      {pages.more && (
+        <div ref={end} className="flex justify-center py-4">
+          <button onClick={() => pages.loadMore()} className="h-9 rounded-full px-4 text-[13.5px] text-ink3 transition-colors hover:bg-fill hover:text-ink2">
+            {pages.busy ? "Loading" : `Show more · ${pages.links.length} of ${pages.total.toLocaleString()}`}
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Every saved link, newest first, with a box to add one. */
+function LinksView({ onOpen }: { onOpen: (id: string) => void }) {
+  const pages = useLinkPages();
+  return (
+    <div>
+      <QuickAdd onSaved={pages.refresh} />
+      <div className="mt-4">
+        <LinkList pages={pages} showArea onOpen={onOpen} />
+      </div>
+      {pages.loaded && !pages.links.length && <p className="py-14 text-center text-[14.5px] text-ink3">No links yet. Paste one above, or tell an agent to save one.</p>}
     </div>
+  );
+}
+
+/** The links filed under one area, with the box to add one there. */
+function NodeLinks({ parent, adding, onDone, onOpen }: { parent: string; adding: boolean; onDone: () => void; onOpen: (id: string) => void }) {
+  const pages = useLinkPages(parent);
+  return (
+    <>
+      {adding && (
+        <div className="mt-4">
+          <QuickAdd parent={parent} autoFocus onSaved={() => (onDone(), pages.refresh())} />
+        </div>
+      )}
+      {pages.links.length > 0 && (
+        <div className="mt-4">
+          <LinkList pages={pages} onOpen={onOpen} />
+        </div>
+      )}
+    </>
   );
 }
 

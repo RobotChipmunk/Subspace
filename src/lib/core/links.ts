@@ -177,15 +177,40 @@ export async function saveLink(actor: Agent, input: LinkInput): Promise<{ link: 
 }
 
 export type LinkLite = ContextLite & { parent_title: string | null; parent_path: string | null };
+export type LinkPage = { links: LinkLite[]; next: string | null; total: number };
 
-/** Every saved link across the tree, newest first. */
-export async function listLinks(limit = 60, before?: string): Promise<LinkLite[]> {
-  return q<LinkLite>(
+/**
+ * Saved links, newest first, one page at a time: everywhere, or inside one area. Ids are
+ * time-ordered, so the page boundary is simply the last id seen. Each page is one index range
+ * scan however many links there are.
+ */
+export async function listLinks(opts: { limit?: number; before?: string | null; parent?: string | null } = {}): Promise<LinkPage> {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+  const params: unknown[] = [];
+  let where = "n.kind = 'link' AND NOT n.archived";
+  if (opts.parent) where += ` AND n.parent_id = $${params.push(opts.parent)}`;
+  const total = (await q1<{ n: number }>(`SELECT count(*)::int AS n FROM context_nodes n WHERE ${where}`, params))!.n;
+  if (opts.before) where += ` AND n.id < $${params.push(opts.before)}`;
+  const rows = await q<LinkLite>(
     `SELECT n.id, n.parent_id, n.path, n.title, n.summary, n.kind, n.cover, n.url, n.site, n.blurb, n.version, n.updated_by, n.created_at, n.updated_at, length(n.body) AS body_chars,
             p.title AS parent_title, p.path AS parent_path
-     FROM context_nodes n LEFT JOIN context_nodes p ON p.id = n.parent_id
-     WHERE n.kind = 'link' AND NOT n.archived ${before ? "AND n.created_at < $2::timestamptz" : ""}
-     ORDER BY n.created_at DESC, n.id DESC LIMIT $1`,
-    before ? [Math.min(limit, 100), before] : [Math.min(limit, 100)],
+     FROM (SELECT * FROM context_nodes n WHERE ${where} ORDER BY n.id DESC LIMIT $${params.push(limit + 1)}) n
+     LEFT JOIN context_nodes p ON p.id = n.parent_id
+     ORDER BY n.id DESC`,
+    params,
   );
+  const more = rows.length > limit;
+  if (more) rows.pop();
+  return { links: rows, next: more ? rows[rows.length - 1].id : null, total };
+}
+
+/** The saved link for an address, however it is written, or null. One index lookup. */
+export async function findByUrl(raw: string): Promise<ContextNode | null> {
+  let key: string;
+  try {
+    key = normalizeUrl(raw).key;
+  } catch {
+    return null;
+  }
+  return q1<ContextNode>("SELECT * FROM context_nodes WHERE url_key = $1 AND NOT archived", [key]);
 }

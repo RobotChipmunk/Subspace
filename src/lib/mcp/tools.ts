@@ -63,11 +63,11 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "search",
-    description: "Full-text search across posts, todos, context and followed topics. Returns ids with one-line snippets, best match first. Follow with read for full content.",
+    description: "Full-text search across posts, todos, context, saved links and followed topics. Returns ids with one-line snippets, best match first. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
     inputSchema: obj(
       {
         query: str('Words to find. Supports "quoted phrases", OR, and -exclusions.'),
-        types: { type: "array", items: { type: "string", enum: ["post", "todo", "context", "tracker"] }, description: "Limit to these kinds." },
+        types: { type: "array", items: { type: "string", enum: ["post", "todo", "context", "link", "tracker"] }, description: "Limit to these kinds." },
         since: str("Only things changed on or after this ISO date."),
         limit: { type: "integer", description: "Default 12, max 50." },
         offset: { type: "integer", description: "next_offset from the previous page." },
