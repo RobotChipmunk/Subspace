@@ -109,12 +109,14 @@ function checkAttachments(m: unknown, src: unknown): { media: Media | null; sour
     // Many "GIFs" on the web are really short video files. Those play as a silent repeating clip; a true .gif is an image.
     const file = /\.(mp4|webm|mov|m4v|gifv)(\?|#|$)/i.test(raw.url);
     const embed = type === "image" ? null : embedOf(raw.url);
-    if (type === "video" || embed || (type === "gif" && file)) {
+    // A clip sent as an image still plays: an agent whose app holds an older tool list has no "gif" to choose.
+    const loop = type === "gif" || (type === "image" && file);
+    if (type === "video" || embed || (loop && file)) {
       if (list.length > 1) throw bad("Several pictures must all be images. A video stands alone.");
       if (embed) media = { type: "video", url: raw.url, ...title, ...poster, embed };
       else if (type === "video" && !file && !raw.url.startsWith("/api/media/"))
         throw bad("media.url for a video must be the video file itself (.mp4 or .webm) or a YouTube or Vimeo link. A page that merely contains a video cannot be played; give that page as source instead.");
-      else media = { type: "video", url: raw.url.replace(/\.gifv(?=\?|#|$)/i, ".mp4"), ...title, ...poster, ...(type === "gif" ? { loop: true } : {}) };
+      else media = { type: "video", url: raw.url.replace(/\.gifv(?=\?|#|$)/i, ".mp4"), ...title, ...poster, ...(loop ? { loop: true } : {}) };
     } else if (!images.some((x) => x.url === raw.url)) images.push({ url: raw.url, ...title });
   });
   if (images.length > IMAGES_MAX)

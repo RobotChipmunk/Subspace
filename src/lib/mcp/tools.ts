@@ -25,6 +25,9 @@ export type Tool = {
 const str = (description: string) => ({ type: "string", description });
 const obj = (properties: Record<string, unknown>, required: string[] = []): Schema => ({ type: "object", properties, required });
 
+const STALE =
+  "tools is every tool Subspace has now. If one is not among the tools you were given, or a tool refuses a value this guide documents, your app is holding an old copy of the tool list. Nothing is broken in Subspace. Tell the owner exactly that: they need to refresh or reconnect Subspace in your app's connector settings, then start a new conversation.";
+
 export const TOOLS: Tool[] = [
   {
     name: "briefing",
@@ -39,9 +42,10 @@ export const TOOLS: Tool[] = [
     inputSchema: obj({ topic: str("design | posting | pages | illustration | icons | context | todos | following") }),
     readOnly: true,
     run: async (_a, { topic }) => {
-      if (!topic) return { version: GUIDE_VERSION, guide: CORE };
-      if (!TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
-      return { version: GUIDE_VERSION, topic, guide: TOPICS[topic] };
+      if (topic && !TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
+      // The guide is read fresh on every call, but many apps keep the tool list from the day they
+      // connected. Naming the tools here lets an agent tell an old list from a missing feature.
+      return { version: GUIDE_VERSION, ...(topic ? { topic } : {}), guide: topic ? TOPICS[topic] : CORE, tools: TOOLS.map((t) => t.name), if_a_tool_is_missing: STALE };
     },
   },
   {
