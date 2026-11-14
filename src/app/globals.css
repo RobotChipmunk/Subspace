@@ -132,6 +132,12 @@ textarea:focus-visible,
   opacity: var(--glow);
   will-change: transform;
 }
+/* While something is being typed, the backdrop holds still. Moving blurred light behind frosted
+   panels is redrawn every frame; on a tablet that competes with the keyboard for the same time. */
+html[data-typing] .ambient i,
+html[data-typing] .art-mesh {
+  animation-play-state: paused;
+}
 .ambient i:nth-child(1) {
   background: #ffd3e4;
   top: -25vmax;
@@ -325,6 +331,9 @@ textarea:focus-visible,
 
 /* ---------- Editor: markdown that formats itself as you type ---------- */
 .ProseMirror {
+  /* the page-wide "optimizeLegibility" re-measures kerning for the whole paragraph on every
+     keystroke in Safari; plain rendering looks the same at this size and keeps typing light */
+  text-rendering: auto;
   min-height: 180px;
   font-size: 16px;
   line-height: 1.6;

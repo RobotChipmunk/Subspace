@@ -1,5 +1,5 @@
 "use client";
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import type { Agent } from "./core/util";
 import type { Tracker } from "./core/trackers";
@@ -60,4 +60,42 @@ export function useDark(): boolean {
     () => darkQuery().matches,
     () => false,
   );
+}
+
+/**
+ * Saves what is being typed a moment after typing stops. Saves never overlap: while one is on its
+ * way the next waits, so a slow connection cannot deliver an older version after a newer one.
+ * `dirty()` says whether something typed here is still waiting to be saved.
+ */
+export function useSaver(save: (text: string) => Promise<unknown>, delay = 700) {
+  const latest = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const running = useRef<Promise<void> | null>(null);
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  const flush = (): Promise<void> => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    return (running.current ??= (async () => {
+      try {
+        while (latest.current !== null) {
+          const text = latest.current;
+          await saveRef.current(text);
+          if (latest.current === text) latest.current = null;
+        }
+      } catch {
+        // left dirty: the next keystroke, or leaving the page, tries again
+      } finally {
+        running.current = null;
+      }
+    })());
+  };
+  const push = (text: string) => {
+    latest.current = text;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, delay);
+  };
+  useEffect(() => () => void flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  return { push, flush, dirty: () => latest.current !== null };
 }

@@ -21,6 +21,21 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const rail = useRail();
 
   // Todos follow the owner's local calendar, so keep the server in step with this device.
+  // Mark the page as "typing" while a text field or the editor has the keyboard, so heavy
+  // decoration can pause (see html[data-typing] in globals.css).
+  useEffect(() => {
+    const editable = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !["checkbox", "radio", "button"].includes((t as HTMLInputElement).type)));
+    const on = (e: FocusEvent) => editable(e.target) && document.documentElement.setAttribute("data-typing", "");
+    const off = (e: FocusEvent) => !editable(e.relatedTarget) && document.documentElement.removeAttribute("data-typing");
+    document.addEventListener("focusin", on);
+    document.addEventListener("focusout", off);
+    return () => {
+      document.removeEventListener("focusin", on);
+      document.removeEventListener("focusout", off);
+      document.documentElement.removeAttribute("data-typing");
+    };
+  }, []);
+
   useEffect(() => {
     if (!me) return;
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;

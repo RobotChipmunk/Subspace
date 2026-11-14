@@ -7,7 +7,7 @@ import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
 import { Avatar, mesh } from "@/components/bits";
 import { Editor } from "@/components/Editor";
-import { ago, api, fetcher, hash, soft, useMe } from "@/lib/client";
+import { ago, api, fetcher, hash, soft, useMe, useSaver } from "@/lib/client";
 import type { ContextLite, ContextNode } from "@/lib/core/context";
 import type { LinkPage } from "@/lib/core/links";
 import { PALETTES } from "@/lib/palettes";
@@ -362,27 +362,16 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
   const [title, setTitle] = useState(node.title);
   const [summary, setSummary] = useState(node.summary);
   const [confirm, setConfirm] = useState(false);
-  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef<string | null>(null);
   const [body, setBody] = useState(node.body);
   const by = agent(node.updated_by);
 
+  const patch = async (b: Record<string, unknown>) => (await api(`context/${node.id}`, { method: "PATCH", body: b }), onChanged());
+  const saver = useSaver((md) => patch({ body: md }), 700);
+
   // Fresh content from agents flows in unless something typed here is still unsaved.
   useEffect(() => {
-    if (latest.current === null) setBody(node.body);
-  }, [node.body]);
-
-  const patch = async (b: Record<string, unknown>) => (await api(`context/${node.id}`, { method: "PATCH", body: b }), onChanged());
-
-  async function flush() {
-    if (pending.current) clearTimeout(pending.current);
-    pending.current = null;
-    if (latest.current === null) return;
-    const md = latest.current;
-    await patch({ body: md });
-    if (latest.current === md) latest.current = null;
-  }
-  useEffect(() => () => void flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!saver.dirty()) setBody(node.body);
+  }, [node.body]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="glass mb-5 overflow-hidden rounded-[26px] p-6 max-md:p-5">
@@ -443,11 +432,7 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
         <Editor
           value={body}
           placeholder={node.kind === "link" ? "Notes, if you want them." : "Write what is worth remembering. Agents read this before they ask you."}
-          onChange={(md) => {
-            latest.current = md;
-            if (pending.current) clearTimeout(pending.current);
-            pending.current = setTimeout(flush, 700);
-          }}
+          onChange={saver.push}
         />
       </div>
     </div>

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
 import { Editor } from "@/components/Editor";
-import { api, fetcher, soft, spring, useMe } from "@/lib/client";
+import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
 import type { Folder, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
@@ -66,6 +66,14 @@ export default function TodosPage() {
   );
 }
 
+
+/** Where a task added to "Weekend" goes: Saturday, or today when it is already Sunday. */
+function weekendDay(today: string): string {
+  const d = new Date(today + "T12:00:00Z");
+  const dow = d.getUTCDay();
+  if (dow !== 0) d.setUTCDate(d.getUTCDate() + (6 - dow));
+  return d.toISOString().slice(0, 10);
+}
 
 /** How long a finger rests on a task before it lifts for reordering. Shorter than the system's own long-press. */
 const HOLD_MS = 260;
@@ -176,8 +184,13 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
   const [draft, setDraft] = useState("");
   const dragging = useRef(false);
 
+  // Tasks typed here that the server has not answered for yet. They show at once and stay put.
+  const unsaved = useRef<Row[]>([]);
+  // A task keeps the key it was first drawn with, so it does not redraw when its real id arrives.
+  const keys = useRef(new Map<string, string>());
+
   useEffect(() => {
-    if (data && !dragging.current) setRows(data.todos);
+    if (data && !dragging.current) setRows([...data.todos, ...unsaved.current.filter((u) => !data.todos.some((r) => r.id === u.id))]);
   }, [data]);
 
   const refreshCounts = () => globalMutate("todos/folders");
@@ -204,10 +217,28 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
     const title = draft.trim();
     if (!title) return setAdding(false);
     setDraft("");
-    const t = await api<Row>("todos", { body: { title, view } });
-    setRows((rs) => [...(rs ?? []), { ...t, has_notes: false }]);
-    mutate();
-    refreshCounts();
+    // Show it straight away, exactly where it will live; the server's copy replaces it silently.
+    // the same place the server will file it, so it does not jump between groups when saved
+    const day = /^\d{4}-/.test(view) ? view : view === "today" ? today : view === "weekend" && today ? weekendDay(today) : null;
+    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, scope: view === "backlog" ? "backlog" : day ? "day" : "week", date: day ?? null } as unknown as Row;
+    unsaved.current.push(temp);
+    setRows((rs) => [...(rs ?? []), temp]);
+    try {
+      const t = await api<Row>("todos", { body: { title, view } });
+      const row = { ...t, has_notes: false };
+      keys.current.set(row.id, temp.id);
+      unsaved.current = unsaved.current.filter((u) => u !== temp);
+      setRows((rs) => (rs ?? []).map((r) => (r.id === temp.id ? row : r)));
+      // Put it in the cached list too; this also discards any refresh already on its way from before the task existed.
+      mutate((cur) => (cur ? { ...cur, todos: cur.todos.some((r) => r.id === row.id) ? cur.todos : [...cur.todos, row] } : cur), { revalidate: true });
+      refreshCounts();
+    } catch {
+      // could not be saved: take it back out and give the words back to the box
+      unsaved.current = unsaved.current.filter((u) => u !== temp);
+      setRows((rs) => (rs ?? []).filter((r) => r.id !== temp.id));
+      setDraft(title);
+      setAdding(true);
+    }
   }
 
   function reorder(groupKey: string, ordered: Row[]) {
@@ -245,12 +276,12 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
             <AnimatePresence initial={false}>
               {items.map((r) => (
                 <TodoRow
-                  key={r.id}
+                  key={keys.current.get(r.id) ?? r.id}
                   r={r}
                   dragging={dragging}
-                  onToggle={() => toggle(r)}
-                  onOpen={() => onOpen(r.id)}
-                  onDropped={() => setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id) } }), rs))}
+                  onToggle={() => !r.id.startsWith("new_") && toggle(r)}
+                  onOpen={() => !r.id.startsWith("new_") && onOpen(r.id)}
+                  onDropped={() => setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id).filter((x) => !x.startsWith("new_")) } }), rs))}
                 />
               ))}
             </AnimatePresence>
@@ -279,43 +310,32 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
 function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: string; folders: Folder[]; onBack: () => void }) {
   const { agent } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
-  const { data: todo, mutate } = useSWR<Todo>(`todos/${id}`, fetcher, { refreshInterval: 8_000 });
+  // While notes typed here are waiting to be saved, background refreshes are held back: nothing
+  // re-renders the page under the keyboard, and an older copy can never arrive mid-sentence.
+  const saver = useSaver((md) => patch({ notes: md }, true), 600);
+  const { data: todo, mutate } = useSWR<Todo>(`todos/${id}`, fetcher, { refreshInterval: 8_000, isPaused: () => saver.dirty() });
   const [title, setTitle] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
-  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef<string | null>(null);
 
   // Take the server's notes only when nothing typed here is waiting to be saved.
   useEffect(() => {
     if (!todo) return;
     if (title === null) setTitle(todo.title);
-    if (latest.current === null) setNotes(todo.notes);
+    if (!saver.dirty()) setNotes(todo.notes);
     if (todo.ai_unseen && !todo.notes.includes("<ins ")) api(`todos/${id}`, { method: "PATCH", body: { seen: true } }).then(() => globalMutate((k) => typeof k === "string" && k.startsWith("todos?")));
   }, [todo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const patch = async (body: Record<string, unknown>) => {
+  const refreshLists = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== `todos/${id}`);
+  /** quiet: a notes save while typing. It changes nothing the lists show except the notes mark, so they are refreshed on leaving instead. */
+  async function patch(body: Record<string, unknown>, quiet = false) {
     const t = await api<Todo>(`todos/${id}`, { method: "PATCH", body });
     mutate(t, false);
-    globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== `todos/${id}`);
+    if (!quiet) refreshLists();
     return t;
-  };
-
-  async function flush() {
-    if (pending.current) clearTimeout(pending.current);
-    pending.current = null;
-    if (latest.current === null) return;
-    const md = latest.current;
-    await patch({ notes: md });
-    if (latest.current === md) latest.current = null;
   }
-
-  function onNotes(md: string) {
-    latest.current = md;
-    if (pending.current) clearTimeout(pending.current);
-    pending.current = setTimeout(flush, 600);
-  }
-
-  useEffect(() => () => void flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const flush = saver.flush;
+  const onNotes = saver.push;
+  useEffect(() => () => void refreshLists(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!todo || notes === null) return <div className="shimmer mt-16 h-8 w-2/3 rounded-full" />;
   const creator = agent(todo.created_by);
