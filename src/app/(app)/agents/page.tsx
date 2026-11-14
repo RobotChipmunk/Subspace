@@ -1,33 +1,20 @@
 "use client";
-import { Check, Copy, LogOut, Plus, Wand2, Zap } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { Check, Copy, LogOut, MessageCircle, Plus, ShieldAlert, Wand2, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import useSWR from "swr";
-import { Avatar, PageHeader } from "@/components/bits";
-import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
+import { Avatar, PageCard, PageHeader, Rich, SendButton } from "@/components/bits";
+import { MentionInput } from "@/components/MentionInput";
+import { ago, api, fetcher, soft, spring, useDirectUnread, useMe } from "@/lib/client";
+import type { Grant } from "@/lib/core/oauth";
+import type { Post } from "@/lib/core/posts";
 import type { Agent } from "@/lib/core/util";
 
 export default function AgentsPage() {
-  const { agents, refresh } = useMe();
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [fresh, setFresh] = useState<{ id: string; token: string } | null>(null);
-
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    try {
-      const a = await api<Agent>("agents", { body: { name } });
-      const { token } = await api<{ token: string }>(`agents/${a.id}/token`, { method: "POST" });
-      setFresh({ id: a.id, token });
-      setName("");
-      setAdding(false);
-      refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
+  const { agents, guests, refresh } = useMe();
+  const [openId, setOpenId] = useState<string | null>(null);
+  const toggle = (id: string) => setOpenId((cur) => (cur === id ? null : id));
 
   return (
     <div className="mx-auto max-w-[680px]">
@@ -42,33 +29,64 @@ export default function AgentsPage() {
       />
       <div className="flex flex-col gap-2.5">
         {agents.map((a, i) => (
-          <AgentRow key={a.id} agent={a} index={i} token={fresh?.id === a.id ? fresh.token : null} onToken={(token) => setFresh(token ? { id: a.id, token } : null)} onChanged={refresh} />
+          <AgentRow key={a.id} agent={a} index={i} open={openId === a.id} onToggle={() => toggle(a.id)} onChanged={refresh} />
         ))}
-        <AnimatePresence mode="wait" initial={false}>
-          {adding ? (
-            <motion.form key="f" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={soft} onSubmit={add} className="glass glass-lift flex items-center gap-3 rounded-[24px] p-3.5">
-              <div className="grid h-10 w-10 flex-none place-items-center rounded-full bg-fill text-ink3">
-                <Plus size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setAdding(false)} placeholder="Agent name, e.g. Scout" aria-label="Agent name" className="w-full text-[16px] font-semibold" />
-                <p className="text-[13px] text-ink3">{error ? <span className="text-danger">{error}</span> : name.trim() ? `@${name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24)}` : "Its @handle comes from the name."}</p>
-              </div>
-              <button disabled={!name.trim()} className="h-9 rounded-full bg-ink px-4 text-[14px] font-medium text-bg transition-all active:scale-95 disabled:opacity-30">
-                Add
-              </button>
-            </motion.form>
-          ) : (
-            <motion.button key="b" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} whileTap={{ scale: 0.985 }} onClick={() => setAdding(true)} className="flex h-[68px] items-center justify-center gap-2 rounded-[24px] border border-dashed border-[var(--fill-strong)] text-[14.5px] text-ink2 transition-colors hover:border-accent hover:text-accent">
-              <Plus size={17} /> Add an agent
-            </motion.button>
-          )}
-        </AnimatePresence>
+        <AddRow label="Add an agent" placeholder="Agent name, e.g. Scout" hint="Its @handle comes from the name." preview={(n) => `@${n.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24)}`} onAdd={async (name) => (setOpenId((await api<Agent>("agents", { body: { name } })).id), void refresh())} />
       </div>
       <p className="mx-auto mt-8 max-w-[520px] text-center text-[13px] leading-relaxed text-ink3">
-        Each agent connects over MCP with its own private address. On connecting it receives the current instructions for posting, illustrating and keeping your context, so every agent follows the same rules.
+        Each agent has its own address. Its app signs in there and you approve it once; after that it renews its access by itself. On connecting it receives the current instructions for posting, illustrating and keeping your context, so every agent follows the same rules.
       </p>
+
+      <header className="mb-4 mt-14 px-1">
+        <h2 className="text-[22px] font-bold tracking-[-0.02em]">People</h2>
+        <p className="mt-0.5 text-[14px] text-ink2">Someone else whose agents may add tasks for you. They reach only their own tasks, nothing else.</p>
+      </header>
+      <div className="flex flex-col gap-2.5">
+        {guests.map((g, i) => (
+          <GuestRow key={g.id} guest={g} index={i} open={openId === g.id} onToggle={() => toggle(g.id)} onChanged={refresh} />
+        ))}
+        <AddRow label="Add a person" placeholder="Their name, e.g. Meredith" hint={'Their tasks appear in your todos under "From" and their name.'} preview={(n) => `From ${n.trim()}`} onAdd={async (name) => (setOpenId((await api<Agent>("guests", { body: { name } })).id), void refresh())} />
+      </div>
     </div>
+  );
+}
+
+function AddRow({ label, placeholder, hint, preview, onAdd }: { label: string; placeholder: string; hint: string; preview: (name: string) => string; onAdd: (name: string) => Promise<void> }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    try {
+      await onAdd(name);
+      setName("");
+      setAdding(false);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      {adding ? (
+        <motion.form key="f" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={soft} onSubmit={add} className="glass glass-lift flex items-center gap-3 rounded-[24px] p-3.5">
+          <div className="grid h-10 w-10 flex-none place-items-center rounded-full bg-fill text-ink3">
+            <Plus size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setAdding(false)} placeholder={placeholder} aria-label={placeholder} className="w-full text-[16px] font-semibold" />
+            <p className="text-[13px] text-ink3">{error ? <span className="text-danger">{error}</span> : name.trim() ? preview(name) : hint}</p>
+          </div>
+          <button disabled={!name.trim()} className="h-9 rounded-full bg-ink px-4 text-[14px] font-medium text-bg transition-all active:scale-95 disabled:opacity-30">
+            Add
+          </button>
+        </motion.form>
+      ) : (
+        <motion.button key="b" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} whileTap={{ scale: 0.985 }} onClick={() => setAdding(true)} className="flex h-[68px] items-center justify-center gap-2 rounded-[24px] border border-dashed border-[var(--fill-strong)] text-[14.5px] text-ink2 transition-colors hover:border-accent hover:text-accent">
+          <Plus size={17} /> {label}
+        </motion.button>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -89,18 +107,69 @@ function CopyField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent; index: number; token: string | null; onToken: (t: string | null) => void; onChanged: () => void }) {
+/** A button that asks once more before doing something that cannot be undone. */
+function Confirm({ label, sure, onConfirm, className = "" }: { label: string; sure: string; onConfirm: () => void; className?: string }) {
+  const [asking, setAsking] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        if (!asking) return setAsking(true), void setTimeout(() => setAsking(false), 3000);
+        setAsking(false);
+        onConfirm();
+      }}
+      className={`h-8 whitespace-nowrap rounded-full px-3 text-[13px] transition-colors ${asking ? "bg-danger font-medium text-white" : className || "text-ink3 hover:bg-fill hover:text-danger"}`}
+    >
+      {asking ? sure : label}
+    </button>
+  );
+}
+
+/** The apps that have signed in for this agent or person. Each can be cut off on its own. */
+function Connections({ id, empty }: { id: string; empty: string }) {
+  const { data, mutate } = useSWR<{ connections: Grant[] }>(`agents/${id}/connections`, fetcher, { refreshInterval: 20_000 });
+  const list = data?.connections ?? [];
+  return (
+    <div>
+      <div className="mb-1 text-[12px] font-medium uppercase tracking-[0.05em] text-ink3">Connected apps</div>
+      {list.length === 0 ? (
+        <p className="rounded-[14px] bg-fill px-3 py-2.5 text-[13px] text-ink3">{data ? empty : "…"}</p>
+      ) : (
+        <ul className="divide-y divide-[var(--line)] rounded-[14px] bg-fill">
+          {list.map((c) => (
+            <li key={c.id} className="flex items-center gap-2 py-1.5 pl-3 pr-1.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13.5px] font-medium">
+                  {c.client_name || c.client_host}
+                  {c.read_only && <span className="ml-2 rounded-full bg-fill2 px-1.5 py-px text-[11px] font-medium text-ink2">Read only</span>}
+                </div>
+                <div className="truncate text-[12px] text-ink3">
+                  {c.client_host} · approved {ago(c.created_at)}{ago(c.created_at) === "now" ? "" : " ago"} · {c.last_used_at ? `last used ${ago(c.last_used_at)}${ago(c.last_used_at) === "now" ? "" : " ago"}` : "not used yet"}
+                </div>
+              </div>
+              <ConfirmDelete label={`Disconnect ${c.client_name || c.client_host}`} confirm="Disconnect" size={15} onConfirm={async () => (await api(`connections/${c.id}`, { method: "DELETE" }), void mutate())} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent; index: number; open: boolean; onToggle: () => void; onChanged: () => void }) {
   const [bio, setBio] = useState(a.bio);
-  const [confirm, setConfirm] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
   const [realtime, setRealtime] = useState(false);
+  const [chat, setChat] = useState(false);
+  const unread = useDirectUnread().unread(a.id);
   const live = !!a.runtime?.enabled;
   const human = a.kind === "human";
   const illustrator = a.roles.includes("illustrator");
   const origin = typeof window !== "undefined" ? location.origin : "";
   const patch = async (body: Record<string, unknown>) => (await api(`agents/${a.id}`, { method: "PATCH", body }), onChanged());
+  const oldAddress = !!a.has_token && !!a.url_token;
 
   return (
-    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: index * 0.04 }} className={`glass rounded-[24px] p-3.5 ${token || realtime ? "glass-lift" : ""}`}>
+    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: index * 0.04 }} className={`glass rounded-[24px] p-3.5 ${open || realtime || chat ? "glass-lift" : ""}`}>
       <div className="flex items-center gap-x-3.5 gap-y-2.5 max-sm:flex-wrap">
         <Avatar agent={a} />
         <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-54px)]">
@@ -117,6 +186,11 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
                 <Wand2 size={11} /> Illustrator
               </span>
             )}
+            {oldAddress && (
+              <span title="The old secret address still works" className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--warn)_16%,transparent)] px-2 py-0.5 text-[11.5px] font-medium text-[var(--warn)]">
+                <ShieldAlert size={11} /> Old address on
+              </span>
+            )}
           </div>
           {human ? (
             <p className="text-[14px] text-ink2">You</p>
@@ -126,24 +200,27 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
         </div>
         {!human && (
           <div className="flex flex-none items-center gap-2 max-sm:w-full max-sm:justify-end">
-            <button onClick={() => setRealtime(!realtime)} aria-expanded={realtime} aria-label="Realtime settings" title="Realtime settings" className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${realtime || live ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
+            <button onClick={() => (setChat(!chat), setRealtime(false))} aria-expanded={chat} aria-label={unread ? `Message ${a.name}, new reply` : `Message ${a.name}`} title={`Message ${a.name}`} className={`relative grid h-8 w-8 place-items-center rounded-full transition-colors ${chat ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
+              <MessageCircle size={15} />
+              {unread && !chat && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--bg)] bg-accent" />}
+            </button>
+            <button onClick={() => (setRealtime(!realtime), setChat(false))} aria-expanded={realtime} aria-label="Realtime settings" title="Realtime settings" className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${realtime || live ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
               <Zap size={15} />
             </button>
-            <span className="text-[12.5px] text-ink3 max-sm:hidden">{a.last_seen_at ? `Active ${ago(a.last_seen_at)}` : a.has_token ? "Not seen yet" : ""}</span>
-            <button
-              onClick={async () => {
-                if (a.has_token && !confirm) return setConfirm(true), void setTimeout(() => setConfirm(false), 3000);
-                setConfirm(false);
-                onToken((await api<{ token: string }>(`agents/${a.id}/token`, { method: "POST" })).token);
-                onChanged();
-              }}
-              className={`h-8 rounded-full px-3.5 text-[13px] font-medium transition-all active:scale-95 ${confirm ? "bg-danger text-white" : a.has_token ? "bg-fill text-ink2 hover:bg-fill2" : "bg-accent text-white"}`}
-            >
-              {confirm ? "Replace address?" : a.has_token ? "New address" : "Connect"}
+            <span className="text-[12.5px] text-ink3 max-sm:hidden">{a.last_seen_at ? `Active ${ago(a.last_seen_at)}` : ""}</span>
+            <button onClick={onToggle} aria-expanded={open} className={`h-8 rounded-full px-3.5 text-[13px] font-medium transition-all active:scale-95 ${open ? "bg-ink text-bg" : a.last_seen_at ? "bg-fill text-ink2 hover:bg-fill2" : "bg-accent text-white"}`}>
+              {open ? "Done" : "Connect"}
             </button>
           </div>
         )}
       </div>
+      <AnimatePresence initial={false}>
+        {chat && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
+            <Messages agent={a} />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence initial={false}>
         {realtime && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
@@ -152,14 +229,48 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
         )}
       </AnimatePresence>
       <AnimatePresence initial={false}>
-        {token && (
+        {open && !human && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
-            <div className="mt-3.5 space-y-3 border-t hairline pt-3.5">
+            <div className="mt-3.5 space-y-3.5 border-t hairline pt-3.5">
               <p className="text-[13.5px] leading-relaxed text-ink2">
-                Add this as a custom connector (MCP server) in {a.name}. It is shown once and works like a password, so keep it private. In Claude: Settings → Connectors → Add custom connector.
+                Add this address as a custom connector (MCP server) in {a.name}. The app will open a Subspace page where you approve it. The address is not a secret: nothing works until you approve. In Claude: Settings → Connectors → Add custom connector.
               </p>
-              <CopyField label="Connector address" value={`${origin}/api/mcp/${token}`} />
-              <CopyField label="Or, for clients that send a header" value={`${origin}/api/mcp  ·  Authorization: Bearer ${token}`} />
+              <CopyField label="Connector address" value={`${origin}/api/mcp/${a.handle}`} />
+              <Connections id={a.id} empty="No app has signed in yet." />
+
+              {oldAddress && (
+                <div className="rounded-[14px] bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] px-3 py-2.5">
+                  <p className="text-[13px] leading-relaxed text-[var(--warn)]">
+                    {a.name} can still connect with its old address, the one with a secret in it. Anyone who has seen that address can use it. Once {a.name} appears under Connected apps, switch the old address off.
+                  </p>
+                  <div className="mt-2 flex justify-end">
+                    <Confirm label="Switch off the old address" sure="Switch it off for good?" className="bg-[var(--warn)] font-medium text-white" onConfirm={() => patch({ url_token: false })} />
+                  </div>
+                </div>
+              )}
+
+              <details className="group rounded-[14px] bg-fill px-3 py-2.5 text-[13px] text-ink2">
+                <summary className="cursor-pointer list-none font-medium marker:hidden">For scripts: a token sent as a header</summary>
+                <div className="mt-2 space-y-2.5">
+                  <p className="leading-relaxed">
+                    A script or a client that cannot sign in can send a fixed token in an Authorization header instead. It does not expire, so keep it out of anything shared. {a.has_token ? "Making a new one replaces the current token." : ""}
+                  </p>
+                  {token ? (
+                    <>
+                      <CopyField label="Address" value={`${origin}/api/mcp`} />
+                      <CopyField label="Header (shown once)" value={`Authorization: Bearer ${token}`} />
+                    </>
+                  ) : (
+                    <Confirm
+                      label={a.has_token ? "Replace the token" : "Make a token"}
+                      sure={a.has_token ? "Replace it? The old one stops working" : "Make a token?"}
+                      className="bg-fill2 text-ink hover:bg-[var(--fill-strong)]"
+                      onConfirm={async () => (setToken((await api<{ token: string }>(`agents/${a.id}/token`, { method: "POST" })).token), onChanged())}
+                    />
+                  )}
+                </div>
+              </details>
+
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 [&_button]:whitespace-nowrap">
                 {!illustrator ? (
                   <button onClick={() => patch({ illustrator: true })} className="text-[13px] text-ink2 hover:text-accent">
@@ -168,22 +279,142 @@ function AgentRow({ agent: a, index, token, onToken, onChanged }: { agent: Agent
                 ) : (
                   <span />
                 )}
-                <div className="flex gap-2">
-                  {a.id !== "a_claude" && (
-                    <button onClick={() => (onToken(null), patch({ archived: true }))} className="h-8 rounded-full px-3 text-[13px] text-ink3 hover:bg-fill hover:text-danger">
-                      Remove agent
-                    </button>
-                  )}
-                  <button onClick={() => onToken(null)} className="h-8 rounded-full bg-ink px-3.5 text-[13px] font-medium text-bg">
-                    Done
-                  </button>
-                </div>
+                {a.id !== "a_claude" && <ConfirmDelete label="Remove agent" confirm="Remove and disconnect" size={15} onConfirm={() => patch({ archived: true })} />}
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+function GuestRow({ guest: g, index, open, onToggle, onChanged }: { guest: Agent; index: number; open: boolean; onToggle: () => void; onChanged: () => void }) {
+  const [pass, setPass] = useState<string | null>(null);
+  const origin = typeof window !== "undefined" ? location.origin : "";
+  return (
+    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: index * 0.04 }} className={`glass rounded-[24px] p-3.5 ${open ? "glass-lift" : ""}`}>
+      <div className="flex items-center gap-x-3.5 gap-y-2.5 max-sm:flex-wrap">
+        <Avatar agent={g} />
+        <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-54px)]">
+          <div className="truncate text-[16px] font-semibold">{g.name}</div>
+          <p className="truncate text-[14px] text-ink2">Adds tasks for you. Sees only the tasks marked From {g.name}.</p>
+        </div>
+        <div className="flex flex-none items-center gap-2 max-sm:w-full max-sm:justify-end">
+          <span className="text-[12.5px] text-ink3 max-sm:hidden">{g.last_seen_at ? `Active ${ago(g.last_seen_at)}` : ""}</span>
+          <button onClick={onToggle} aria-expanded={open} className={`h-8 rounded-full px-3.5 text-[13px] font-medium transition-all active:scale-95 ${open ? "bg-ink text-bg" : g.has_passcode ? "bg-fill text-ink2 hover:bg-fill2" : "bg-accent text-white"}`}>
+            {open ? "Done" : "Connect"}
+          </button>
+        </div>
+      </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
+            <div className="mt-3.5 space-y-3.5 border-t hairline pt-3.5">
+              <p className="text-[13.5px] leading-relaxed text-ink2">
+                Send {g.name} two things: this address, to add as a custom connector (MCP server) in their own agents, and the passcode. When an agent connects, a Subspace page asks {g.name} for the passcode. Through this address an agent can add tasks for you and see, edit and delete the tasks marked From {g.name}, with their notes, status and day. It cannot reach anything else.
+              </p>
+              <CopyField label={`${g.name}'s connector address`} value={`${origin}/api/mcp/guest/${g.handle}`} />
+              <div>
+                {pass ? (
+                  <>
+                    <CopyField label="Passcode (shown once)" value={pass} />
+                    <p className="mt-1.5 text-[12.5px] text-ink3">Give it to {g.name} privately. It is asked for each time one of their agents connects.</p>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-[14px] bg-fill py-1.5 pl-3 pr-1.5">
+                    <span className="min-w-0 flex-1 text-[13px] text-ink2">{g.has_passcode ? "A passcode is set. It cannot be shown again." : "No passcode yet. Nothing can connect until there is one."}</span>
+                    {g.has_passcode ? (
+                      <Confirm label="New passcode" sure="Replace the passcode?" className="bg-fill2 text-ink hover:bg-[var(--fill-strong)]" onConfirm={async () => (setPass((await api<{ passcode: string }>(`guests/${g.id}/passcode`, { method: "POST" })).passcode), onChanged())} />
+                    ) : (
+                      <button onClick={async () => (setPass((await api<{ passcode: string }>(`guests/${g.id}/passcode`, { method: "POST" })).passcode), onChanged())} className="h-8 rounded-full bg-accent px-3.5 text-[13px] font-medium text-white">
+                        Make a passcode
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <Connections id={g.id} empty={`None of ${g.name}'s agents has signed in yet.`} />
+              <div className="flex justify-end pt-1">
+                <ConfirmDelete label={`Remove ${g.name}`} confirm="Remove and disconnect" size={15} onConfirm={async () => (await api(`guests/${g.id}`, { method: "DELETE" }), onChanged())} />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+/** A private conversation with one agent: ask it for something that belongs to nothing else in the app. */
+function Messages({ agent: a }: { agent: Agent }) {
+  const { agents, me, direct, refresh } = useMe();
+  const { markRead } = useDirectUnread();
+  const { data, mutate } = useSWR<{ messages: Post[] }>(`agents/${a.id}/messages`, fetcher, { refreshInterval: 5_000 });
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const list = useRef<HTMLDivElement>(null);
+  const handles = agents.map((x) => x.handle);
+  const messages = data?.messages ?? [];
+  const lastId = messages[messages.length - 1]?.id;
+
+  // Keep the newest message in view, and count the conversation as read while it is open.
+  useEffect(() => {
+    const el = list.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    if (lastId) refresh();
+  }, [lastId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const moved = direct[a.id];
+  useEffect(() => {
+    if (moved) markRead(a.id, moved);
+  }, [moved, a.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function send() {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    setError("");
+    setText("");
+    try {
+      const sent = await api<Post>(`agents/${a.id}/messages`, { body: { body } });
+      await mutate((cur) => ({ messages: [...(cur?.messages ?? []).filter((m) => m.id !== sent.id), sent] }), { revalidate: true });
+    } catch (e) {
+      setText(body);
+      setError((e as Error).message);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="mt-3.5 border-t hairline pt-3.5">
+      {messages.length > 0 ? (
+        <div ref={list} data-messages className="scroll -mr-2 flex max-h-[380px] flex-col gap-1.5 overflow-y-auto pb-1 pr-2">
+          {messages.map((m, i) => {
+            const mine = m.author === me?.id;
+            const prev = messages[i - 1];
+            // A new request starts a new conversation; show when, as a quiet divider.
+            const gap = !prev || (!m.parent_id && new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() > 3_600_000);
+            return (
+              <div key={m.id} className="flex flex-col">
+                {gap && <div className="py-1.5 text-center text-[12px] text-ink3">{ago(m.created_at) === "now" ? "Now" : /^\d+[mhd]$/.test(ago(m.created_at)) ? `${ago(m.created_at)} ago` : ago(m.created_at)}</div>}
+                <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2 text-[15px] leading-[1.42] ${mine ? "self-end bg-accent-soft" : "self-start bg-fill"}`}>
+                  <Rich text={m.body} handles={handles} />
+                  {m.page && <PageCard page={m.page} />}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        data && <p className="pb-1 text-[13.5px] leading-relaxed text-ink2">Ask {a.name} for something directly. Its answer appears here, not in the feed.</p>
+      )}
+      <form onSubmit={(e) => (e.preventDefault(), send())} className="mt-2.5 flex gap-2 rounded-[20px] bg-fill py-1.5 pl-3.5 pr-1.5">
+        <MentionInput value={text} onChange={setText} onSubmit={send} placeholder={`Message ${a.name}`} className="py-[5px] text-[15px]" />
+        <SendButton show={!!text.trim()} busy={busy} />
+      </form>
+      {error && <p className="mt-1.5 text-[12.5px] text-danger">{error}</p>}
+    </div>
   );
 }
 

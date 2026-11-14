@@ -1,15 +1,17 @@
 import { actorFromRequest, SESSION_COOKIE, signIn } from "@/lib/auth";
 import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
+import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
+import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
 import { listLinks, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { activeModules, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
-import { createPost, createReply, deletePost, getThread, listFeed } from "@/lib/core/posts";
-import { createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, updateTodo } from "@/lib/core/todos";
+import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect } from "@/lib/core/posts";
+import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
-import { ApiError, listAgents, setSetting, timezone, type Agent } from "@/lib/core/util";
+import { ApiError, listAgents, listGuests, setSetting, timezone, type Agent } from "@/lib/core/util";
 
 /**
  * The REST API used by the web app, and by the iOS app later. Everything goes through the same
@@ -23,7 +25,7 @@ type Ctx = { actor: Agent; url: URL; body: any; req: Request };
 type Handler = (c: Ctx, ...args: string[]) => Promise<unknown>;
 
 const routes: [string, RegExp, Handler][] = [
-  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), trackers: await listTrackers(), timezone: await timezone() })],
+  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), guests: await listGuests(), trackers: await listTrackers(), timezone: await timezone(), ...(actor.kind === "human" ? { direct: await directActivity() } : {}) })],
   ["PATCH", /^me$/, async ({ body }) => {
     if (typeof body.timezone === "string") {
       new Intl.DateTimeFormat("en", { timeZone: body.timezone }); // throws on an invalid zone
@@ -44,9 +46,12 @@ const routes: [string, RegExp, Handler][] = [
   ["GET", /^todos$/, ({ url }) => listTodos(url.searchParams.get("view") || "today")],
   ["POST", /^todos$/, ({ actor, body }) => createTodo(actor, body)],
   ["POST", /^todos\/reorder$/, async ({ actor, body }) => (await reorderTodos(actor, body.ids ?? []), { ok: true })],
+  ["GET", /^todos\/bin$/, async () => ({ todos: await binnedTodos(), keep_days: BIN_DAYS })],
+  ["POST", /^todos\/([^/]+)\/restore$/, ({ actor }, id) => restoreTodo(actor, id)],
   ["GET", /^todos\/([^/]+)$/, (_c, id) => getTodo(id)],
   ["PATCH", /^todos\/([^/]+)$/, ({ actor, body }, id) => updateTodo(actor, id, body)],
-  ["DELETE", /^todos\/([^/]+)$/, async ({ actor }, id) => (await deleteTodo(actor, id), { ok: true })],
+  // deleting moves a task to the bin; ?forever=1 removes one that is already there
+  ["DELETE", /^todos\/([^/]+)$/, async ({ actor, url }, id) => (await deleteTodo(actor, id, url.searchParams.get("forever") === "1"), { ok: true })],
 
   ["GET", /^context$/, async ({ url }) => {
     const ref = url.searchParams.get("node");
@@ -80,8 +85,19 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^agents$/, ({ actor, body }) => ownerOnly(actor, () => createAgent(actor, body))],
   ["PATCH", /^agents\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => updateAgent(actor, id, body))],
   ["PATCH", /^agents\/([^/]+)\/runtime$/, ({ actor, body }, id) => ownerOnly(actor, () => configureRuntime(id, body))],
+  ["GET", /^agents\/([^/]+)\/messages$/, ({ actor }, id) => ownerOnly(actor, async () => ({ messages: await listDirect(id) }))],
+  ["POST", /^agents\/([^/]+)\/messages$/, ({ actor, body }, id) => sendDirect(actor, id, body.body)],
   ["GET", /^runtime\/options$/, async () => ({ models: MODELS, efforts: EFFORTS, contexts: CONTEXTS, env_key: !!process.env.ANTHROPIC_API_KEY })],
   ["POST", /^agents\/([^/]+)\/token$/, ({ actor }, id) => ownerOnly(actor, async () => ({ token: await issueToken(id) }))],
+
+  // Connections approved by signing in (OAuth), for an agent or a guest. Revoking one cuts that app off at once.
+  ["GET", /^agents\/([^/]+)\/connections$/, ({ actor }, id) => ownerOnly(actor, async () => ({ connections: await listGrants(id) }))],
+  ["DELETE", /^connections\/([^/]+)$/, ({ actor }, id) => ownerOnly(actor, async () => (await revokeGrant(id), { ok: true }))],
+
+  // Guests: other people whose agents may add tasks for the owner.
+  ["POST", /^guests$/, ({ actor, body }) => ownerOnly(actor, () => createGuest(actor, body))],
+  ["POST", /^guests\/([^/]+)\/passcode$/, ({ actor }, id) => ownerOnly(actor, async () => ({ passcode: await issuePasscode(id) }))],
+  ["DELETE", /^guests\/([^/]+)$/, ({ actor }, id) => ownerOnly(actor, () => removeGuest(actor, id))],
 
   ["POST", /^media$/, async ({ actor, req }) => {
     const form = await req.formData();
@@ -102,7 +118,7 @@ async function handle(req: Request, ctx: { params: Promise<{ path: string[] }> }
   try {
     if (path === "auth/login" && req.method === "POST") {
       const { password } = await req.json();
-      const s = await signIn(password);
+      const s = await signIn(password, req);
       const res = Response.json({ ok: true, token: s.token });
       res.headers.append("Set-Cookie", `${SESSION_COOKIE}=${s.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${s.maxAge}${process.env.NODE_ENV === "production" ? "; Secure" : ""}`);
       return res;

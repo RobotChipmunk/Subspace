@@ -29,6 +29,8 @@ export type RailModule = {
   actions: RailAction[];
   page_id: string | null;
   page?: { id: string; title: string } | null;
+  /** Set on a module that stands for a task waiting for a day (one a guest added): it shows until the owner places it. */
+  todo?: { id: string; guest: string };
   priority: number;
   show_from: string;
   show_until: string;
@@ -137,8 +139,15 @@ export async function setModule(
   return (await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1", [id]))!;
 }
 
-/** What the owner sees now. */
+/** What the owner sees now: warnings and errors, then tasks a guest added that still need a day, then the rest. */
 export async function activeModules(): Promise<RailModule[]> {
+  const { waitingModules } = await import("./guests");
+  const [stored, waiting] = await Promise.all([storedModules(), waitingModules()]);
+  const urgent = stored.filter((m) => m.level !== "info");
+  return [...urgent, ...waiting, ...stored.filter((m) => m.level === "info")];
+}
+
+async function storedModules(): Promise<RailModule[]> {
   const rows = await q<RailModule>("SELECT * FROM rail_modules WHERE dismissed_at IS NULL AND show_from <= now() AND show_until > now() ORDER BY CASE level WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, priority DESC, show_until, created_at");
   const ids = [...new Set(rows.map((r) => r.page_id).filter(Boolean))] as string[];
   const pages = ids.length ? await q<{ id: string; title: string }>("SELECT id, title FROM context_nodes WHERE id = ANY($1) AND NOT archived", [ids]) : [];

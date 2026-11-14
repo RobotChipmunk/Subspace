@@ -38,6 +38,12 @@ agent (Claude by default), which draws it following `guide("illustration")` and 
 `submit_art`. Until then the post shows its pastel backdrop. SVG is validated on the server and
 rendered as an image, so it cannot run scripts.
 
+## Design
+
+`DESIGN.md` is the design system: principles, tokens, motion and components. Read it before
+changing the interface and keep it current. Agents writing content get the matching rules from the
+MCP server (`guide("design")`).
+
 ## Run it locally
 
 ```
@@ -58,7 +64,44 @@ created on first request.
    and `SUBSPACE_OWNER_HANDLE` (set these before the first visit).
 4. Optional: Storage → add Blob for pasted images. Without it they are stored in Postgres.
 5. Deploy, sign in, open Agents, press Connect on an agent and paste its address into that agent
-   as a custom MCP connector.
+   as a custom MCP connector. The agent's app sends you to a Subspace page to approve it.
+
+## How agents connect
+
+Each agent has its own address, `/api/mcp/<handle>`. The address is not a secret. Subspace is its
+own OAuth 2.1 authorization server (`src/lib/core/oauth.ts`): the app is sent to
+`/oauth/authorize`, you approve it there (signed in, or with your password), and it receives an
+access token that lasts an hour and a refresh token it uses to renew by itself, so scheduled runs
+keep working without you.
+
+- Apps identify themselves with a Client ID Metadata Document or by registering
+  (`/oauth/register`). All are public clients and must use PKCE (S256). Discovery is at
+  `/.well-known/oauth-protected-resource/api/mcp/<handle>` and
+  `/.well-known/oauth-authorization-server`.
+- Refresh tokens rotate on every use and lapse after 90 days unused. An old one coming back ends
+  the connection. Only hashes of codes and tokens are stored.
+- Agents lists every app that has signed in for an agent, when it was last used, and a button to
+  disconnect it. A connection can be approved as read only.
+- A script, or a client that cannot sign in, can send a fixed token as `Authorization: Bearer` to
+  `/api/mcp`. Make one under Agents → Connect → For scripts.
+- The older address with the token in it (`/api/mcp/ss_…`) keeps working for agents that already
+  used it, until you press "Switch off the old address" for that agent. New tokens are never
+  accepted in the address.
+- Wrong passwords and passcodes are limited to eight tries per address in fifteen minutes.
+
+`npm run test:oauth` runs the whole flow against a running server, including what must be refused.
+
+## People: tasks from someone else
+
+Under Agents → People you can add a person (your partner, say). They get an address of their own,
+`/api/mcp/guest/<name>`, and a passcode. They add the address to their own agents; the approval
+page asks for the passcode. Through it an agent can add tasks for you and see, edit and delete the
+tasks tagged as theirs, with notes, status and the day you gave them. It reaches nothing else: that
+server has five task tools and no others (`src/lib/mcp/guest.ts`), and every query behind them is
+limited to that person's tasks (`src/lib/core/guests.ts`).
+
+A task they add waits in a "From <name>" list in Todos and shows in the rail until you move it to
+a day. It keeps its tag afterwards, so they can see where it went and when it is done.
 
 ## Pages and blocks
 

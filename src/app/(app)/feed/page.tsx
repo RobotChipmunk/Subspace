@@ -1,19 +1,19 @@
 "use client";
-import { ArrowUp, Bookmark, ChevronLeft, ChevronRight, MessageCircle, Trash2, X } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { Bookmark, ChevronLeft, ChevronRight, MessageCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { useSWRConfig } from "swr";
-import { ArtPanel, Avatar, PageCard, PageHeader, Rich, TrackerChip } from "@/components/bits";
+import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton, TrackerChip } from "@/components/bits";
 import { MentionInput } from "@/components/MentionInput";
 import { useComments } from "@/components/Shell";
-import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
+import { ago, api, fetcher, soft, useMe } from "@/lib/client";
 import type { Image, Post } from "@/lib/core/posts";
 
 export default function FeedPage() {
-  const [channel, setChannel] = useState<"feed" | "agents">("feed");
-  const key = `feed?channel=${channel}`;
+  const key = "feed?channel=feed";
   const { data, mutate } = useSWR<{ posts: Post[] }>(key, fetcher, { refreshInterval: 12_000 });
   const [older, setOlder] = useState<Post[]>([]);
   const [done, setDone] = useState(false);
@@ -27,7 +27,6 @@ export default function FeedPage() {
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { set: setComments, open: commentsOpen } = comments;
 
-  useEffect(() => (setOlder([]), setDone(false), setActiveId(null)), [channel]);
   useEffect(() => () => setComments(false), [setComments]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setComments(false);
@@ -93,7 +92,7 @@ export default function FeedPage() {
     return () => (main.removeEventListener("scroll", onScroll), cancelAnimationFrame(frame));
   }, [commentsOpen, reading]);
 
-  // The post whose comments were open has gone (deleted, or the other channel is showing): take the one in view.
+  // The post whose comments were open has gone (deleted): take the one in view.
   const activeGone = commentsOpen && posts.length > 0 && !posts.some((p) => p.id === activeId);
   useEffect(() => {
     if (activeGone) setActiveId(reading());
@@ -127,23 +126,9 @@ export default function FeedPage() {
 
   return (
     <div className="mx-auto max-w-[620px]">
-      <PageHeader
-        title="Feed"
-        right={
-          <div className="glass flex rounded-full p-1 text-[13px] font-medium">
-            {(["feed", "agents"] as const).map((c) => (
-              <button key={c} onClick={() => setChannel(c)} className={`relative rounded-full px-3.5 py-1 transition-colors ${channel === c ? "text-ink" : "text-ink2"}`}>
-                {channel === c && <motion.span layoutId="channel" transition={spring} className="pill absolute inset-0 rounded-full" />}
-                <span className="relative">{c === "feed" ? "For you" : "Between agents"}</span>
-              </button>
-            ))}
-          </div>
-        }
-      />
+      <PageHeader title="Feed" />
 
-      <Composer channel={channel} onPosted={() => mutate()} />
-
-      <div ref={list} className="mt-4 flex flex-col gap-3">
+      <div ref={list} className="flex flex-col gap-3">
         <AnimatePresence initial={false} mode="popLayout">
           {posts.map((p, i) => (
             <PostCard
@@ -184,7 +169,7 @@ const BESIDE = "(min-width: 768px)";
 
 function Skeletons() {
   return (
-    <div className="mt-4 flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       {[0, 1].map((i) => (
         <div key={i} className="glass rounded-[26px] p-4">
           <div className="flex gap-3">
@@ -198,61 +183,6 @@ function Skeletons() {
         </div>
       ))}
     </div>
-  );
-}
-
-function SendButton({ show, busy }: { show: boolean; busy?: boolean }) {
-  return (
-    <AnimatePresence>
-      {show && (
-        <motion.button
-          type="submit"
-          aria-label="Send"
-          disabled={busy}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0, opacity: 0 }}
-          whileTap={{ scale: 0.85 }}
-          transition={spring}
-          className="grid h-8 w-8 flex-none place-items-center self-end rounded-full bg-accent text-white shadow-[0_4px_14px_var(--accent-soft)]"
-        >
-          <ArrowUp size={17} strokeWidth={2.4} />
-        </motion.button>
-      )}
-    </AnimatePresence>
-  );
-}
-
-function Composer({ channel, onPosted }: { channel: string; onPosted: () => void }) {
-  const { me } = useMe();
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function send() {
-    if (!text.trim() || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api("posts", { body: { body: text, channel } });
-      setText("");
-      onPosted();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-    setBusy(false);
-  }
-
-  return (
-    <form
-      onSubmit={(e) => (e.preventDefault(), send())}
-      className="glass relative z-20 flex gap-3 rounded-[26px] py-2.5 pl-3 pr-2.5"
-    >
-      <Avatar agent={me} size={34} />
-      <MentionInput value={text} onChange={setText} onSubmit={send} placeholder="Tell your agents something. @ to address one." className="py-[6px] text-[15.5px]" />
-      <SendButton show={!!text.trim()} busy={busy} />
-      {error && <p className="absolute -bottom-6 left-4 text-[12.5px] text-danger">{error}</p>}
-    </form>
   );
 }
 
@@ -515,11 +445,7 @@ function Thread({ post, text, setText, onDeleted }: { post: Post; text: string; 
         <p className="min-w-0 flex-1 truncate text-[13px] text-ink2">
           <span className="font-semibold text-ink">{author?.name ?? "Unknown"}</span> {post.body}
         </p>
-        {me?.kind === "human" && (
-          <button type="button" aria-label="Delete post" title="Delete post" onClick={async () => (await api(`posts/${post.id}`, { method: "DELETE" }), onDeleted())} className="-my-1 -mr-1.5 grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-            <Trash2 size={14} />
-          </button>
-        )}
+        {me?.kind === "human" && <ConfirmDelete label="Delete post" size={14} className="-my-1 -mr-1.5" onConfirm={async () => (await api(`posts/${post.id}`, { method: "DELETE" }), onDeleted())} />}
       </div>
       <div className="scroll min-h-0 flex-1 px-5 pb-2">
         {replies.map((r) => (

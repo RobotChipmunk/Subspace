@@ -1,29 +1,47 @@
 "use client";
-import { AlignLeft, ChevronLeft, Plus, Trash2 } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { AlignLeft, ChevronLeft, Plus, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
 import { Editor } from "@/components/Editor";
 import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
-import type { Folder, Todo } from "@/lib/core/todos";
+import type { BinnedTodo, Folder, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
-type Folders = { today: string; folders: Folder[] };
+type Folders = { today: string; folders: Folder[]; bin: number };
+const BIN = "bin";
 
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
+/** The small tag on a task that came from a guest ("From Meredith"). */
+function FromTag({ id }: { id: string | null }) {
+  const { agent } = useMe();
+  const g = agent(id);
+  if (!g) return null;
+  return <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-accent-soft px-2 py-[1px] align-middle text-[11.5px] font-medium text-accent">From {g.name}</span>;
+}
+
 export default function TodosPage() {
   const [view, setView] = useState("today");
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // The rail links here with ?open=<task id> to show one task.
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get("open");
+    if (id) (setOpenId(id), history.replaceState(null, "", location.pathname));
+  }, []);
   const { data: f } = useSWR<Folders>("todos/folders", fetcher, { refreshInterval: 30_000 });
   const folder = f?.folders.find((x) => x.key === view);
 
   // If the day rolls over while the app is open, a dated folder may no longer exist.
   useEffect(() => {
-    if (f && !folder) setView("today");
-  }, [f, folder]);
+    if (f && !folder && view !== BIN) setView("today");
+    // the bin's entry goes away once it is empty; do not strand the owner on a list with no way back
+    if (f && view === BIN && !f.bin) setView("today");
+  }, [f, folder, view]);
 
   return (
     <div className="mx-auto flex max-w-[920px] gap-8 max-md:flex-col max-md:gap-4">
@@ -31,7 +49,7 @@ export default function TodosPage() {
         <nav className="flex gap-0.5 max-md:-mx-4 max-md:overflow-x-auto max-md:px-4 md:flex-col" aria-label="Lists">
           {f?.folders.map((x, i) => {
             const on = x.key === view;
-            const gap = x.key === "next_week" || (i === 2 && x.key !== "weekend");
+            const gap = x.key === "next_week" || (i === 2 && x.key !== "weekend") || (!!x.guest && !f.folders[i - 1]?.guest);
             return (
               <button
                 key={x.key}
@@ -46,6 +64,23 @@ export default function TodosPage() {
               </button>
             );
           })}
+          {/* appears only while there is something to bring back */}
+          <AnimatePresence initial={false}>
+            {(f?.bin ?? 0) > 0 && (
+              <motion.button
+                key="bin"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => (setView(BIN), setOpenId(null))}
+                className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors md:mt-3 ${view === BIN ? "font-semibold text-ink" : "text-ink3 hover:text-ink2"}`}
+              >
+                {view === BIN && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
+                <span className="relative flex-1 whitespace-nowrap">Recently deleted</span>
+                <span className={`relative text-[12.5px] tabular-nums ${view === BIN ? "text-accent" : "text-ink3"}`}>{f?.bin}</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
         </nav>
       </aside>
 
@@ -57,7 +92,7 @@ export default function TodosPage() {
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
-              <List view={view} folder={folder} today={f?.today} onOpen={setOpenId} />
+              {view === BIN ? <Bin /> : <List view={view} folder={folder} today={f?.today} onOpen={setOpenId} />}
             </motion.div>
           )}
         </AnimatePresence>
@@ -66,6 +101,47 @@ export default function TodosPage() {
   );
 }
 
+
+/** Deleted tasks, kept for a while so a slip can be undone. Each can be put back or removed for good. */
+function Bin() {
+  const { data, mutate } = useSWR<{ todos: BinnedTodo[]; keep_days: number }>("todos/bin", fetcher, { refreshInterval: 30_000 });
+  const { mutate: globalMutate } = useSWRConfig();
+  const after = () => (mutate(), globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== "todos/bin"));
+  const leave = (id: string) => mutate((cur) => (cur ? { ...cur, todos: cur.todos.filter((t) => t.id !== id) } : cur), false);
+  return (
+    <div>
+      <header className="mb-5 px-1">
+        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Recently deleted</h1>
+        <p className="mt-0.5 text-[14px] text-ink2">Kept for {data?.keep_days ?? 15} days, then removed for good.</p>
+      </header>
+      <ul>
+        <AnimatePresence initial={false}>
+          {data?.todos.map((t) => (
+            <motion.li key={t.id} layout="position" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={soft} className="overflow-hidden" data-binned={t.id}>
+              <div className="-mx-2 flex items-center gap-2 rounded-2xl px-3 py-[7px]">
+                <div className="min-w-0 flex-1">
+                  <div className={`break-words text-[16px] text-ink2 ${t.done ? "line-through decoration-[var(--line)]" : ""}`}>{t.title}</div>
+                  <div className="text-[12px] text-ink3">{t.days_left === 1 ? "Last day" : `${t.days_left} days left`}</div>
+                </div>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  transition={spring}
+                  aria-label={`Restore ${t.title}`}
+                  onClick={async () => (leave(t.id), await api(`todos/${t.id}/restore`, { method: "POST" }), after())}
+                  className="flex h-8 flex-none items-center gap-1.5 rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 transition-colors hover:bg-fill2 hover:text-ink"
+                >
+                  <Undo2 size={14} /> Restore
+                </motion.button>
+                <ConfirmDelete label={`Delete ${t.title} for good`} confirm="Delete for good" size={15} onConfirm={async () => (leave(t.id), await api(`todos/${t.id}?forever=1`, { method: "DELETE" }), after())} />
+              </div>
+            </motion.li>
+          ))}
+        </AnimatePresence>
+      </ul>
+      {data && !data.todos.length && <p className="px-1 py-10 text-[14.5px] text-ink3">Nothing here.</p>}
+    </div>
+  );
+}
 
 /** Where a task added to "Weekend" goes: Saturday, or today when it is already Sunday. */
 function weekendDay(today: string): string {
@@ -84,7 +160,7 @@ const HOLD_MS = 260;
  * still so the row can travel any distance. (Safari hands a moving touch to scrolling and cancels
  * the drag unless the page is told to stay put, which is why a row used to move only one place.)
  */
-function TodoRow({ r, dragging, onToggle, onOpen, onDropped }: { r: Row; dragging: React.MutableRefObject<boolean>; onToggle: () => void; onOpen: () => void; onDropped: () => void }) {
+function TodoRow({ r, tag, dragging, onToggle, onOpen, onDropped }: { r: Row; tag: boolean; dragging: React.MutableRefObject<boolean>; onToggle: () => void; onOpen: () => void; onDropped: () => void }) {
   const controls = useDragControls();
   const el = useRef<HTMLLIElement>(null);
   const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
@@ -167,8 +243,9 @@ function TodoRow({ r, dragging, onToggle, onOpen, onDropped }: { r: Row; draggin
       <div onClick={() => !dragging.current && onOpen()} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 py-[9px]">
         <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>
           {r.title}
-          {/* an agent changed this task since you last opened it: the dot sits right after the words */}
-          {r.ai_unseen && <span title="An agent made changes" aria-label="An agent made changes" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
+          {tag && <FromTag id={r.guest_id} />}
+          {/* someone else changed this task since you last opened it: the dot sits right after the words */}
+          {r.ai_unseen && <span title="Changed since you last looked" aria-label="Changed since you last looked" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
         </span>
         {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
       </div>
@@ -255,7 +332,7 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
   }
 
   const title = folder?.label ?? "";
-  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : undefined;
+  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : folder?.guest ? "Waiting for a day. Open one and move it when you are ready." : undefined;
   const openCount = rows?.filter((r) => !r.done).length ?? 0;
 
   return (
@@ -278,6 +355,7 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
                 <TodoRow
                   key={keys.current.get(r.id) ?? r.id}
                   r={r}
+                  tag={!!r.guest_id && !folder?.guest}
                   dragging={dragging}
                   onToggle={() => !r.id.startsWith("new_") && toggle(r)}
                   onOpen={() => !r.id.startsWith("new_") && onOpen(r.id)}
@@ -355,15 +433,13 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
             className="h-8 cursor-pointer appearance-none rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 outline-none transition-colors hover:bg-fill2"
           >
             <option value="">Move to…</option>
-            {folders.filter((x) => x.key !== "week").map((x) => (
+            {folders.filter((x) => x.key !== "week" && (!x.guest || x.guest === todo.guest_id)).map((x) => (
               <option key={x.key} value={x.key}>
                 {x.label}
               </option>
             ))}
           </select>
-          <button aria-label="Delete task" onClick={async () => (await api(`todos/${id}`, { method: "DELETE" }), globalMutate((k) => typeof k === "string" && k.startsWith("todos")), onBack())} className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-            <Trash2 size={16} />
-          </button>
+          <ConfirmDelete label="Delete task" onConfirm={async () => (await api(`todos/${id}`, { method: "DELETE" }), globalMutate((k) => typeof k === "string" && k.startsWith("todos")), onBack())} />
         </div>
       </div>
 
@@ -386,9 +462,15 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
           className={`min-w-0 flex-1 resize-none overflow-hidden text-[26px] font-bold leading-[1.25] tracking-[-0.025em] ${todo.done ? "text-ink3" : ""}`}
         />
       </div>
-      {creator && creator.kind === "agent" && (
+      {creator && creator.kind !== "human" && (
         <div className="ml-[40px] mt-1.5 flex items-center gap-1.5 text-[13px] text-ink2">
           <Avatar agent={creator} size={16} /> Added by {creator.name}
+        </div>
+      )}
+      {todo.guest_id && (
+        <div className="ml-[40px] mt-1.5 text-[13px] text-ink2 [&>span]:ml-0">
+          <FromTag id={todo.guest_id} />
+          <span className="ml-2">{todo.scope === "guest" ? `Not on a day yet. ${agent(todo.guest_id)?.name ?? "They"} can see where you put it.` : `${agent(todo.guest_id)?.name ?? "They"} can see this task, its notes and its day.`}</span>
         </div>
       )}
 

@@ -1,19 +1,23 @@
-import { actorFromRequest } from "@/lib/auth";
+import { challengeFor, mcpCaller } from "@/lib/auth";
+import type { Target } from "@/lib/core/oauth";
 import { handleMcp } from "@/lib/mcp/server";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, GET, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID",
+  "Access-Control-Expose-Headers": "WWW-Authenticate",
 };
 
-export async function mcpPost(req: Request, pathToken?: string) {
-  const agent = await actorFromRequest(req, pathToken);
-  if (!agent) {
-    return Response.json(
-      { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unknown or missing agent token. Create one in Subspace under Agents." } },
-      { status: 401, headers: { ...CORS, "WWW-Authenticate": "Bearer" } },
-    );
+/**
+ * One MCP request. `at` says which address was called: a named agent or guest (signs in with
+ * OAuth), the bare /api/mcp (static token in a header), or the older address with the token in it.
+ */
+export async function mcpPost(req: Request, at: { target?: Target; pathToken?: string } = {}) {
+  const who = await mcpCaller(req, at);
+  if ("deny" in who) {
+    // The 401 names where to sign in; clients that speak OAuth start the flow from it.
+    return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: who.deny } }, { status: 401, headers: { ...CORS, "WWW-Authenticate": challengeFor(req, who.target) } });
   }
   let body: unknown;
   try {
@@ -21,7 +25,7 @@ export async function mcpPost(req: Request, pathToken?: string) {
   } catch {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, { status: 400, headers: CORS });
   }
-  const out = await handleMcp(agent, body);
+  const out = await handleMcp(who.agent, body, { readOnly: who.grant?.read_only });
   if (out.json === undefined) return new Response(null, { status: out.status, headers: CORS });
   return Response.json(out.json, { status: out.status, headers: CORS });
 }

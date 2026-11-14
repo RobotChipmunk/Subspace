@@ -1,6 +1,6 @@
 import { q, q1 } from "../db";
 import { cleanSvg, createJob, newArt, type Art } from "./art";
-import { bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
+import { agentById, bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
 
 export type Image = { url: string; title?: string };
 /**
@@ -171,7 +171,7 @@ async function withPages<T extends Post>(posts: T[]): Promise<T[]> {
   return posts.map((p) => ({ ...p, page: pages.find((x) => x.id === p.page_id) ?? null }));
 }
 
-export async function createReply(actor: Agent, postId: string, bodyIn: string, page?: string | null): Promise<Post> {
+export async function createReply(actor: Agent, postId: string, bodyIn: string, page?: string | null, alsoTell: string[] = []): Promise<Post> {
   const body = (bodyIn ?? "").trim();
   if (!body) throw bad("Reply is empty.");
   if (body.length > REPLY_MAX) throw bad(`Reply is ${body.length} characters; the limit is ${REPLY_MAX}.`);
@@ -197,7 +197,7 @@ export async function createReply(actor: Agent, postId: string, bodyIn: string, 
     entity_type: "post",
     entity_id: id,
     summary: body,
-    mentions: [...new Set([...mentions, ...participants.map((p) => p.handle)])],
+    mentions: [...new Set([...mentions, ...participants.map((p) => p.handle), ...alsoTell])],
     data: { root },
   });
   return (await getPost(id))!;
@@ -250,4 +250,48 @@ export async function deletePost(actor: Agent, id: string) {
   await q("DELETE FROM search_docs WHERE entity_type = 'post' AND entity_id = $1", [id]);
   if (p.root_id) await q("UPDATE posts SET reply_count = GREATEST(reply_count - 1, 0) WHERE id = $1", [p.root_id]);
   await logEvent({ actor: actor.id, type: "post.deleted", entity_type: "post", entity_id: id, summary: p.body });
+}
+
+// ---------- Direct messages ----------
+// The owner writes to one agent from the Agents screen. Messages are ordinary posts and replies in a
+// channel of their own ("dm:" + the agent's id), so they stay out of the feed, and the agent hears
+// about them and answers them exactly as it does a mention: under for_you, with reply.
+
+const directChannel = (agentId: string) => `dm:${agentId}`;
+/** A message sent this soon after the last one continues that conversation; later, it starts a new one. */
+const DIRECT_CONTINUES_MS = 60 * 60_000;
+
+export async function sendDirect(owner: Agent, agentId: string, bodyIn: string): Promise<Post> {
+  if (owner.kind !== "human") throw bad("Only the owner sends direct messages. To reach another agent, use post(channel: \"agents\") with an @mention.");
+  const to = await agentById(agentId);
+  if (!to || to.archived || to.kind !== "agent") throw notFound("No such agent");
+  const body = (bodyIn ?? "").trim();
+  if (!body) throw bad("Message is empty.");
+  if (body.length > REPLY_MAX) throw bad(`Message is ${body.length} characters; the limit is ${REPLY_MAX}.`);
+  const channel = directChannel(to.id);
+
+  const last = await q1<{ id: string; at: Date }>("SELECT id, COALESCE(last_reply_at, created_at) AS at FROM posts WHERE parent_id IS NULL AND channel = $1 ORDER BY id DESC LIMIT 1", [channel]);
+  if (last && Date.now() - new Date(last.at).getTime() < DIRECT_CONTINUES_MS) return createReply(owner, last.id, body, null, [to.handle]);
+
+  const id = newId("p");
+  const mentions = [...new Set([to.handle, ...(await findMentions(body))])];
+  await q("INSERT INTO posts (id, author, channel, body, mentions) VALUES ($1,$2,$3,$4,$5)", [id, owner.id, channel, body, mentions]);
+  await indexDoc("post", id, "", body);
+  await logEvent({ actor: owner.id, type: "post.created", entity_type: "post", entity_id: id, summary: body, mentions, data: { channel: "direct", to: to.handle } });
+  return (await getPost(id))!;
+}
+
+/** The recent conversation with one agent, oldest first. */
+export async function listDirect(agentId: string, limit = 80): Promise<Post[]> {
+  const roots = await q<{ id: string }>("SELECT id FROM posts WHERE parent_id IS NULL AND channel = $1 ORDER BY id DESC LIMIT 15", [directChannel(agentId)]);
+  if (!roots.length) return [];
+  const ids = roots.map((r) => r.id);
+  const rows = await q<Post>("SELECT * FROM posts WHERE id = ANY($1) OR root_id = ANY($1) ORDER BY id DESC LIMIT $2", [ids, limit]);
+  return withPages(rows.reverse());
+}
+
+/** For each agent that has answered a direct message: when it last said something there. */
+export async function directActivity(): Promise<Record<string, string>> {
+  const rows = await q<{ agent: string; at: Date }>("SELECT author AS agent, max(created_at) AS at FROM posts WHERE channel LIKE 'dm:%' AND channel = 'dm:' || author GROUP BY author");
+  return Object.fromEntries(rows.map((r) => [r.agent, new Date(r.at).toISOString()]));
 }
