@@ -64,6 +64,10 @@ System font stack (SF Pro on Apple devices), letter-spacing `-0.011em`.
 One or two lines per item in a list; truncate or clamp, never let a row grow tall. Sentence case
 everywhere. No all-caps except small section headings.
 
+Long free text inside an opened item (what a followed topic tracks) shows three lines with an
+ellipsis and a small accent "Show more" / "Show less" link beneath it. Tapping the text itself opens
+it in full for editing.
+
 ## Shape, space and surfaces
 
 - Radii: rows and small cards 16px; cards 20 to 22px; large panels 26px; buttons, chips and inputs

@@ -2,7 +2,7 @@
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Avatar, PageHeader, Rich, TrackerTile } from "@/components/bits";
 import { Floating } from "@/components/Floating";
@@ -110,11 +110,23 @@ function Row({ tracker: t, index, open, onToggle, onChanged, onRemoved }: { trac
   );
 }
 
+// Three lines of the 15px / relaxed description, the height past which it is clamped.
+const CLAMP_PX = 75;
+
 function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onChanged: () => void; onRemoved: () => void }) {
   const { agents, agent } = useMe();
   const { data } = useSWR<{ updates: Post[] }>(`trackers/${t.id}`, fetcher, { refreshInterval: 15_000 });
   const [description, setDescription] = useState(t.description);
   const [label, setLabel] = useState(t.label);
+  // The description shows three lines until asked for; an empty one opens straight into the editor.
+  const [full, setFull] = useState(!t.description);
+  const [over, setOver] = useState(false);
+  const clamp = useRef<HTMLSpanElement>(null);
+  const editing = useRef(false);
+  useLayoutEffect(() => {
+    const el = clamp.current;
+    if (el) setOver(el.scrollHeight > el.clientHeight + 1);
+  }, [full, description]);
   const [picking, setPicking] = useState(false);
   const pickerBtn = useRef<HTMLButtonElement>(null);
   const patch = async (body: Record<string, unknown>) => (await api(`trackers/${t.id}`, { method: "PATCH", body }).catch(() => setLabel(t.label)), onChanged());
@@ -124,17 +136,31 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
   return (
     <div className="px-5 pb-5">
       <div className="border-t hairline pt-4">
-        <textarea
-          value={description}
-          aria-label="What to track"
-          onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => description !== t.description && patch({ description })}
-          placeholder="Describe what to track in detail: what counts as news, sources, what to ignore."
-          ref={(el) => {
-            if (el) (el.style.height = "0px"), (el.style.height = el.scrollHeight + "px");
-          }}
-          className="w-full resize-none overflow-hidden text-[15px] leading-relaxed text-ink2 focus:text-ink"
-        />
+        {full ? (
+          <textarea
+            value={description}
+            aria-label="What to track"
+            autoFocus={editing.current}
+            onChange={(e) => (setDescription(e.target.value), setOver(e.target.scrollHeight > CLAMP_PX))}
+            onBlur={() => description !== t.description && patch({ description })}
+            placeholder="Describe what to track in detail: what counts as news, sources, what to ignore."
+            ref={(el) => {
+              if (el) (el.style.height = "0px"), (el.style.height = el.scrollHeight + "px");
+            }}
+            className="w-full resize-none overflow-hidden text-[15px] leading-relaxed text-ink2 focus:text-ink"
+          />
+        ) : (
+          <button type="button" aria-label={`What to track: ${description}`} onClick={() => ((editing.current = true), setFull(true))} className="block w-full text-left">
+            <span ref={clamp} className="line-clamp-3 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-ink2">
+              {description}
+            </span>
+          </button>
+        )}
+        {over && (
+          <button type="button" aria-expanded={full} onClick={() => ((editing.current = false), setFull(!full))} className="mt-1 text-[13.5px] font-medium text-accent hover:underline">
+            {full ? "Show less" : "Show more"}
+          </button>
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {t.agents.map((id) => {
             const a = agent(id);
