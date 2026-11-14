@@ -256,6 +256,9 @@ const MIGRATIONS: string[] = [
      FROM context_nodes n WHERE n.id = d.entity_id AND d.entity_type = 'context' AND n.kind = 'link'`,
   // A rail module can be a warning or an error from an agent's work, shown first and marked as such.
   `ALTER TABLE rail_modules ADD COLUMN level text NOT NULL DEFAULT 'info'`,
+  // Deleted tasks wait in a bin (deleted_at set) and are removed for good 15 days later.
+  `ALTER TABLE todos ADD COLUMN deleted_at timestamptz;
+   CREATE INDEX todos_deleted ON todos (deleted_at) WHERE deleted_at IS NOT NULL`,
   // Signing in to connect (OAuth), and guests.
   // - url_token: whether an agent's static token may still be given in the address itself.
   // - A guest is a person other than the owner (agents.kind = 'guest') whose own agents may add and
@@ -264,11 +267,14 @@ const MIGRATIONS: string[] = [
   //   owner has not placed it on a day yet.
   // - oauth_*: registered client apps, approved connections, and their codes and tokens (hashed).
   // - auth_attempts: failed sign-ins, to slow guessing.
-  `ALTER TABLE agents ADD COLUMN url_token boolean NOT NULL DEFAULT true;
-   ALTER TABLE agents ADD COLUMN passcode_hash text;
-   ALTER TABLE todos ADD COLUMN guest_id text;
-   CREATE INDEX todos_guest ON todos (guest_id, id DESC) WHERE guest_id IS NOT NULL;
-   CREATE TABLE oauth_clients (
+  // Every statement is safe to repeat, and it also makes sure the bin's column exists: a preview
+  // of this change (which shares the production database) may have recorded it under an earlier
+  // number before the bin's migration was written, and this repairs either order.
+  `ALTER TABLE agents ADD COLUMN IF NOT EXISTS url_token boolean NOT NULL DEFAULT true;
+   ALTER TABLE agents ADD COLUMN IF NOT EXISTS passcode_hash text;
+   ALTER TABLE todos ADD COLUMN IF NOT EXISTS guest_id text;
+   CREATE INDEX IF NOT EXISTS todos_guest ON todos (guest_id, id DESC) WHERE guest_id IS NOT NULL;
+   CREATE TABLE IF NOT EXISTS oauth_clients (
      id text PRIMARY KEY,
      kind text NOT NULL,
      name text NOT NULL DEFAULT '',
@@ -276,7 +282,7 @@ const MIGRATIONS: string[] = [
      created_at timestamptz NOT NULL DEFAULT now(),
      fetched_at timestamptz NOT NULL DEFAULT now()
    );
-   CREATE TABLE oauth_grants (
+   CREATE TABLE IF NOT EXISTS oauth_grants (
      id text PRIMARY KEY,
      agent_id text NOT NULL,
      client_id text NOT NULL,
@@ -287,8 +293,8 @@ const MIGRATIONS: string[] = [
      last_used_at timestamptz,
      revoked_at timestamptz
    );
-   CREATE INDEX oauth_grants_agent ON oauth_grants (agent_id) WHERE revoked_at IS NULL;
-   CREATE TABLE oauth_tokens (
+   CREATE INDEX IF NOT EXISTS oauth_grants_agent ON oauth_grants (agent_id) WHERE revoked_at IS NULL;
+   CREATE TABLE IF NOT EXISTS oauth_tokens (
      hash text PRIMARY KEY,
      kind text NOT NULL,
      grant_id text,
@@ -296,10 +302,12 @@ const MIGRATIONS: string[] = [
      used_at timestamptz,
      data jsonb NOT NULL DEFAULT '{}'
    );
-   CREATE INDEX oauth_tokens_grant ON oauth_tokens (grant_id);
-   CREATE INDEX oauth_tokens_expires ON oauth_tokens (expires_at);
-   CREATE TABLE auth_attempts (key text NOT NULL, ip text NOT NULL, ts timestamptz NOT NULL DEFAULT now());
-   CREATE INDEX auth_attempts_key ON auth_attempts (key, ts)`,
+   CREATE INDEX IF NOT EXISTS oauth_tokens_grant ON oauth_tokens (grant_id);
+   CREATE INDEX IF NOT EXISTS oauth_tokens_expires ON oauth_tokens (expires_at);
+   CREATE TABLE IF NOT EXISTS auth_attempts (key text NOT NULL, ip text NOT NULL, ts timestamptz NOT NULL DEFAULT now());
+   CREATE INDEX IF NOT EXISTS auth_attempts_key ON auth_attempts (key, ts);
+   ALTER TABLE todos ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+   CREATE INDEX IF NOT EXISTS todos_deleted ON todos (deleted_at) WHERE deleted_at IS NOT NULL`,
 ];
 
 async function migrate() {

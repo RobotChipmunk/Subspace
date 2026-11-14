@@ -1,5 +1,6 @@
 "use client";
-import { ArrowUpRight, ChevronRight, FileText, LayoutTemplate, Link2, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { ArrowUpRight, ChevronRight, FileText, LayoutTemplate, Link2, MoreHorizontal, Plus, Search, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -7,7 +8,7 @@ import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
 import { Avatar, mesh } from "@/components/bits";
 import { Editor } from "@/components/Editor";
-import { ago, api, fetcher, hash, soft, useMe } from "@/lib/client";
+import { ago, api, fetcher, hash, soft, useMe, useSaver } from "@/lib/client";
 import type { ContextLite, ContextNode } from "@/lib/core/context";
 import type { LinkPage } from "@/lib/core/links";
 import { PALETTES } from "@/lib/palettes";
@@ -361,28 +362,16 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
   const { agent } = useMe();
   const [title, setTitle] = useState(node.title);
   const [summary, setSummary] = useState(node.summary);
-  const [confirm, setConfirm] = useState(false);
-  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef<string | null>(null);
   const [body, setBody] = useState(node.body);
   const by = agent(node.updated_by);
 
+  const patch = async (b: Record<string, unknown>) => (await api(`context/${node.id}`, { method: "PATCH", body: b }), onChanged());
+  const saver = useSaver((md) => patch({ body: md }), 700);
+
   // Fresh content from agents flows in unless something typed here is still unsaved.
   useEffect(() => {
-    if (latest.current === null) setBody(node.body);
-  }, [node.body]);
-
-  const patch = async (b: Record<string, unknown>) => (await api(`context/${node.id}`, { method: "PATCH", body: b }), onChanged());
-
-  async function flush() {
-    if (pending.current) clearTimeout(pending.current);
-    pending.current = null;
-    if (latest.current === null) return;
-    const md = latest.current;
-    await patch({ body: md });
-    if (latest.current === md) latest.current = null;
-  }
-  useEffect(() => () => void flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!saver.dirty()) setBody(node.body);
+  }, [node.body]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="glass mb-5 overflow-hidden rounded-[26px] p-6 max-md:p-5">
@@ -403,17 +392,7 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
           ref={grow}
           className="min-w-0 flex-1 resize-none overflow-hidden text-[26px] font-bold leading-[1.2] tracking-[-0.025em]"
         />
-        <AnimatePresence mode="wait" initial={false}>
-          {confirm ? (
-            <motion.button key="c" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} onClick={async () => (await api(`context/${node.id}`, { method: "DELETE" }), onDeleted())} onBlur={() => setConfirm(false)} autoFocus className="mt-1 h-8 rounded-full bg-danger px-3 text-[13px] font-medium text-white">
-              Remove
-            </motion.button>
-          ) : (
-            <motion.button key="t" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} aria-label="Remove" onClick={() => setConfirm(true)} className="mt-1 grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-              <Trash2 size={16} />
-            </motion.button>
-          )}
-        </AnimatePresence>
+        <ConfirmDelete label="Remove" confirm="Remove" className="mt-1" onConfirm={async () => (await api(`context/${node.id}`, { method: "DELETE" }), onDeleted())} />
       </div>
       <textarea
         value={summary}
@@ -443,11 +422,7 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
         <Editor
           value={body}
           placeholder={node.kind === "link" ? "Notes, if you want them." : "Write what is worth remembering. Agents read this before they ask you."}
-          onChange={(md) => {
-            latest.current = md;
-            if (pending.current) clearTimeout(pending.current);
-            pending.current = setTimeout(flush, 700);
-          }}
+          onChange={saver.push}
         />
       </div>
     </div>

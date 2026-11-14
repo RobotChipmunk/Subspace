@@ -174,7 +174,11 @@ async function main() {
   await rest(`todos/${id}`, { method: "PATCH", body: { done: true } });
   ok((await tool(G, gt.access_token, "task", { id })).data.status === "done", "guest sees it done once the owner finishes it");
   ok((await tool(G, gt.access_token, "tasks", { show: "open" })).data.tasks.length === 0 && (await tool(G, gt.access_token, "tasks", { show: "recent" })).data.tasks.length === 1, "open and recent lists agree");
-  ok(!(await tool(G, gt.access_token, "task_delete", { id })).isError && (await rest(`todos/${id}`)).status === 404, "guest deletes it");
+  ok(!(await tool(G, gt.access_token, "task_delete", { id })).isError && (await tool(G, gt.access_token, "task", { id })).isError, "guest deletes it");
+  ok((await rest("todos/bin")).json.todos.some((x: any) => x.id === id), "it waits in the owner's bin");
+  const second = await tool(G, gt.access_token, "task_add", { title: "Water the plants " + tag });
+  await rest(`todos/${second.data.id}`, { method: "DELETE" });
+  ok(!(await tool(G, gt.access_token, "tasks")).data.tasks.some((x: any) => x.id === second.data.id) && !(await rest("rail")).json.modules.some((m: any) => m.todo?.id === second.data.id), "a task the owner deletes leaves the guest's list and the rail");
 
   console.log("\nRevoking");
   const conns = (await rest(`agents/${guest.id}/connections`)).json.connections;

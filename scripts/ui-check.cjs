@@ -174,21 +174,9 @@ async function run(profile) {
     await noSidewaysScroll("feed");
     await shot("feed");
   });
-  await step("feed composer mention", async () => {
-    const box = page.getByPlaceholder("Tell your agents something");
-    await typeIn(box, "Checking in @");
-    await settle(400);
-    await reachable(menu, "feed composer @ menu");
-    await reachable(menu.getByText("Claude", { exact: true }), "feed composer @ menu item");
-    await shot("feed-mention");
-    await press(menu.getByText("Scout", { exact: true }));
-    await settle(200);
-    const v = await box.inputValue();
-    if (!v.includes("@scout ")) fail(`feed composer: picking from the @ menu produced "${v}"`);
-    await page.keyboard.type("hello from the UI check");
-    await reachable(page.getByRole("button", { name: "Send" }), "feed send button");
-    await page.keyboard.press("Enter");
-    await page.getByText("hello from the UI check").first().waitFor({ timeout: 5000 });
+  await step("feed is read-only", async () => {
+    if (await page.getByPlaceholder("Tell your agents something").count()) fail("feed: the owner's composer is still there");
+    if (await page.getByRole("button", { name: "Between agents" }).count()) fail("feed: the channel switch is still there");
   });
   await step("feed thread", async () => {
     const card = page.locator("article", { hasText: "Figure raised" }).first();
@@ -209,6 +197,24 @@ async function run(profile) {
     await reachable(menu.getByText("Atlas", { exact: true }), "thread @ menu item");
     await shot("feed-thread-mention");
     await page.keyboard.press("Enter");
+    // a recognised @name takes the accent colour while it is still being typed, drawn exactly over the field's own text
+    await page.keyboard.type("and @nobody ");
+    const tag = page.locator("[data-mention]");
+    if ((await tag.allInnerTexts()).join() !== "@atlas") fail(`mention highlight: expected only @atlas to be marked, found "${(await tag.allInnerTexts()).join()}"`);
+    const look = await reply.evaluate((ta) => {
+      const mirror = ta.parentElement.querySelector("[data-mention-mirror]");
+      const a = getComputedStyle(ta), b = getComputedStyle(mirror), m = getComputedStyle(mirror.querySelector("[data-mention]"));
+      const probe = document.createElement("span");
+      probe.className = "mention";
+      document.body.append(probe);
+      const accent = getComputedStyle(probe).color;
+      probe.remove();
+      return { same: ["fontSize", "fontFamily", "fontWeight", "lineHeight", "letterSpacing", "paddingTop", "paddingLeft"].filter((k) => a[k] !== b[k]), size: Math.abs(ta.offsetHeight - mirror.offsetHeight), weight: m.fontWeight === b.fontWeight, colour: m.color === accent, hidden: a.color };
+    });
+    if (look.same.length || look.size > 1 || !look.weight) fail(`mention highlight: the coloured text does not sit exactly on the typed text (${JSON.stringify(look)})`);
+    if (!look.colour) fail("mention highlight: the @name is not in the colour a sent mention has");
+    await shot("feed-thread-mention-typed");
+    for (let i = 0; i < "and @nobody ".length; i++) await page.keyboard.press("Backspace");
     await page.keyboard.type("noted");
     await page.keyboard.press("Enter");
     await page.getByText("Thanks @atlas noted").first().waitFor({ timeout: 5000 });
@@ -226,16 +232,6 @@ async function run(profile) {
     await press(card.locator("p").first()).catch(() => {});
     await settle(700);
     if (await reply.count()) fail("feed post: tapping the text opened the conversation instead of the source");
-  });
-  await step("feed channel switch", async () => {
-    await page.locator("main").evaluate((m) => m.scrollTo(0, 0));
-    const tab = page.getByRole("button", { name: "Between agents" });
-    await reachable(tab, "feed channel switch");
-    await press(tab);
-    await page.getByText("flag me so I can shift the school run").waitFor({ timeout: 5000 });
-    await shot("feed-agents");
-    await press(page.getByRole("button", { name: "For you" }));
-    await settle();
   });
 
   // ---------- Todos ----------
@@ -266,7 +262,14 @@ async function run(profile) {
     await settle(900);
     const rows = page.locator("main ul li");
     const titles = () => rows.evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
-    const before = await titles();
+    // wait until the list has stopped changing (it may still be loading or refreshing after the view switch)
+    let before = await titles();
+    for (let i = 0; i < 10; i++) {
+      await settle(500);
+      const again = await titles();
+      if (again.join("|") === before.join("|")) break;
+      before = again;
+    }
     if (before.length < 4) return fail(`todos reorder: only ${before.length} tasks to test with`);
     const at = await rows.evaluateAll((els) => els.map((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height }))(e.getBoundingClientRect())));
     const end = at[3].y + at[3].h * 0.4;
@@ -357,9 +360,62 @@ async function run(profile) {
     await settle(1200);
     const saved = await page.locator(".ProseMirror").innerText();
     if (!saved.includes("Plan") || !saved.includes("@claude")) fail(`editor: notes were not saved (got "${saved.slice(0, 60)}")`);
+    // deleting asks first, in place: one tap arms it, nothing is removed yet
+    const bin = page.locator(".confirm-delete");
     await press(page.getByLabel("Delete task"));
+    await settle(600);
+    if ((await bin.getAttribute("data-armed")) !== "true") fail("todos: the delete control did not ask for confirmation");
+    await reachable(bin.getByText("Delete", { exact: true }), "delete confirmation");
+    await noSidewaysScroll("delete confirmation");
+    await shot("todo-delete-confirm");
+    if (!(await page.getByLabel("Task name").count())) fail("todos: the task was deleted on the first tap");
+    // a tap elsewhere stands it down
+    await press(page.getByLabel("Task name"));
+    await settle(500);
+    if ((await bin.getAttribute("data-armed")) === "true") fail("todos: tapping elsewhere did not cancel the delete");
+    await page.keyboard.press("Escape");
+    // arm again and confirm
+    await press(page.getByLabel("Delete task"));
+    await settle(500);
+    await press(bin);
     await settle(1800);
     if (await page.getByText("UI check task").count()) fail("todos: deleted task is still listed");
+    // it is not gone: it waits in Recently deleted, and can be put back
+    const binTab = page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Recently deleted/ });
+    await binTab.scrollIntoViewIfNeeded();
+    await reachable(binTab, "recently deleted entry");
+    await press(binTab);
+    const binned = page.locator("[data-binned]", { hasText: "UI check task" });
+    await binned.waitFor({ timeout: 5000 });
+    await settle(700);
+    await reachable(binned.getByText(/15 days left/), "days left in the bin");
+    await reachable(binned.getByRole("button", { name: /^Restore/ }), "restore button");
+    await reachable(binned.locator(".confirm-delete"), "delete for good button");
+    await noSidewaysScroll("recently deleted");
+    await shot("todos-bin");
+    await press(binned.getByRole("button", { name: /^Restore/ }));
+    await settle(1500);
+    await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
+    await page.locator("li", { hasText: "UI check task" }).waitFor({ timeout: 5000 }).catch(() => fail("todos: a restored task did not come back to its list"));
+    await settle(600);
+    // delete it again, then for good from the bin; the bin's entry disappears once it is empty
+    await press(page.locator("li", { hasText: "UI check task" }).getByText("UI check task"));
+    await page.getByLabel("Task name").waitFor({ timeout: 5000 });
+    await settle(600);
+    await press(page.getByLabel("Delete task"));
+    await settle(500);
+    await press(bin);
+    await settle(1500);
+    await binTab.scrollIntoViewIfNeeded();
+    await press(binTab);
+    await binned.waitFor({ timeout: 5000 });
+    await settle(600);
+    await press(binned.locator(".confirm-delete"));
+    await settle(500);
+    await press(binned.locator(".confirm-delete"));
+    await settle(1800);
+    if (await binned.count()) fail("todos: deleting for good left the task in the bin");
+    if (await binTab.count()) fail("todos: the empty bin is still listed");
   });
   await step("todo agent edits", async () => {
     await press(page.locator("li", { hasText: "Review robotics allocation" }).getByText("Review robotics allocation"));
@@ -629,6 +685,9 @@ async function run(profile) {
     const stop = page.getByLabel("Stop following");
     await stop.last().scrollIntoViewIfNeeded();
     await press(stop.last());
+    await settle(500);
+    if (!(await page.getByText("UI check topic").count())) fail("following: a topic was removed without asking");
+    await press(page.locator('.confirm-delete[data-armed="true"]'));
     await settle(2000);
     if (await page.getByText("UI check topic").count()) fail("following: removed topic is still listed");
   });
@@ -646,17 +705,18 @@ async function run(profile) {
     await page.getByText("Connector address").waitFor({ timeout: 5000 });
     await settle(700);
     await reachable(page.locator("code").first(), "connector address");
-    await page.getByRole("button", { name: "Done" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Done", exact: true }).scrollIntoViewIfNeeded();
     await settle(300);
-    await reachable(page.getByRole("button", { name: "Done" }), "connect panel Done");
+    await reachable(page.getByRole("button", { name: "Done", exact: true }), "connect panel Done");
     if (!(await page.locator("code").first().innerText()).match(/\/api\/mcp\/probe[a-z0-9]+$/)) fail("agents: the connector address should be the agent's own address, with no secret in it");
     await press(page.getByText("For scripts: a token sent as a header"));
     await reachable(page.getByRole("button", { name: "Make a token" }), "make a token");
     await noSidewaysScroll("agents connect panel");
     await shot("agents-connect");
     // removing asks once more
-    await press(page.getByRole("button", { name: "Remove agent" }));
-    await press(page.getByRole("button", { name: "Remove and disconnect?" }));
+    await press(page.getByRole("button", { name: "Remove agent", exact: true }));
+    await settle(500);
+    await press(page.locator('.confirm-delete[data-armed="true"]'));
     await settle(800);
   });
   await step("people", async () => {
@@ -691,9 +751,33 @@ async function run(profile) {
     await settle(600);
     await row.getByRole("button", { name: `Remove ${name}` }).scrollIntoViewIfNeeded();
     await press(row.getByRole("button", { name: `Remove ${name}` }));
-    await press(page.getByRole("button", { name: "Remove and disconnect?" }));
+    await settle(500);
+    await press(page.locator('.confirm-delete[data-armed="true"]'));
     await settle(800);
     if (await page.getByText(name, { exact: true }).count()) fail("people: removed person is still listed");
+  });
+  await step("agents message", async () => {
+    await page.locator("main").evaluate((m) => m.scrollTo(0, 0));
+    const open = page.getByRole("button", { name: /^Message Scout/ });
+    await reachable(open, "message button");
+    await press(open);
+    const box = page.getByPlaceholder("Message Scout");
+    await box.waitFor({ timeout: 5000 });
+    await settle(700);
+    await reachable(box, "message box");
+    const text = `Find three gift ideas ${Date.now().toString(36).slice(-5)}`;
+    await typeIn(box, text);
+    await reachable(page.getByRole("button", { name: "Send" }), "message send button");
+    await page.keyboard.press("Enter");
+    await page.locator("[data-messages]").getByText(text).waitFor({ timeout: 5000 });
+    if (await box.inputValue()) fail("agents message: the box was not cleared after sending");
+    await noSidewaysScroll("agents message panel");
+    await shot("agents-message");
+    // a direct message is private to that agent: it must not show in the feed
+    const feed = await page.evaluate(() => fetch("/api/v1/feed?channel=feed").then((r) => r.json()));
+    if (feed.posts.some((p) => p.body.includes("Find three gift ideas"))) fail("agents message: the message appeared in the feed");
+    await press(open);
+    await settle(600);
   });
   await step("agents realtime", async () => {
     await page.locator("main").evaluate((m) => m.scrollTo(0, 0));

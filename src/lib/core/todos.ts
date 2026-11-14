@@ -21,6 +21,9 @@ export type Todo = {
 };
 
 export type Folder = { key: string; label: string; hint?: string; count: number; guest?: string };
+/** How long a deleted task can still be brought back. */
+export const BIN_DAYS = 15;
+export type BinnedTodo = { id: string; title: string; done: boolean; has_notes: boolean; deleted_at: string; days_left: number };
 
 const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const LIST_COLS = "id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, created_at, updated_at, (notes <> '') AS has_notes";
@@ -66,9 +69,10 @@ function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec
   throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, backlog or a YYYY-MM-DD date.`);
 }
 
-export async function folders(): Promise<{ today: string; folders: Folder[] }> {
+export async function folders(): Promise<{ today: string; folders: Folder[]; bin: number }> {
   const cal = await calendar();
   await rollover(cal.today);
+  await emptyOldBin();
   const list: { key: string; label: string; hint?: string; guest?: string }[] = [
     { key: "week", label: "This week" },
     { key: "today", label: "Today", hint: DAY_NAMES[cal.dow] },
@@ -83,10 +87,11 @@ export async function folders(): Promise<{ today: string; folders: Folder[] }> {
   const out: Folder[] = [];
   for (const f of list) {
     const spec = viewSpec(f.key, cal);
-    const r = await q1<{ n: number }>(`SELECT count(*)::int AS n FROM todos WHERE NOT done AND ${spec.where}`, spec.params);
+    const r = await q1<{ n: number }>(`SELECT count(*)::int AS n FROM todos WHERE deleted_at IS NULL AND NOT done AND ${spec.where}`, spec.params);
     out.push({ ...f, count: r?.n ?? 0 });
   }
-  return { today: cal.today, folders: out };
+  const bin = (await q1<{ n: number }>("SELECT count(*)::int AS n FROM todos WHERE deleted_at IS NOT NULL"))!.n;
+  return { today: cal.today, folders: out, bin };
 }
 
 export async function listTodos(view: string) {
@@ -96,7 +101,7 @@ export async function listTodos(view: string) {
   // Finished tasks stay visible in backlog only for a day so the list keeps moving.
   const doneClause = view === "backlog" ? "AND (NOT done OR done_at > now() - interval '1 day')" : "";
   const todos = await q<Todo & { has_notes: boolean }>(
-    `SELECT ${LIST_COLS} FROM todos WHERE ${spec.where} ${doneClause} ORDER BY date NULLS FIRST, scope DESC, position, id`,
+    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ORDER BY date NULLS FIRST, scope DESC, position, id`,
     spec.params,
   );
   return { view, today: cal.today, todos };
@@ -252,9 +257,40 @@ export async function reorderTodos(actor: Agent, ids: string[]) {
   await q("UPDATE todos t SET position = o.ord FROM unnest($1::text[]) WITH ORDINALITY AS o(id, ord) WHERE t.id = o.id", [ids]);
 }
 
-export async function deleteTodo(actor: Agent, id: string) {
+/** Deleting moves a task to the bin. It leaves every list and search at once, and can be restored for BIN_DAYS days. */
+export async function deleteTodo(actor: Agent, id: string, forever = false) {
   const t = await getTodo(id);
-  await q("DELETE FROM todos WHERE id = $1", [id]);
+  if (forever) {
+    await q("DELETE FROM todos WHERE id = $1 AND deleted_at IS NOT NULL", [id]);
+    return;
+  }
+  if ((t as Todo & { deleted_at?: string | null }).deleted_at) return;
+  await q("UPDATE todos SET deleted_at = now() WHERE id = $1", [id]);
   await unindexDoc("todo", id);
   await logEvent({ actor: actor.id, type: "todo.deleted", entity_type: "todo", entity_id: id, summary: t.title });
+}
+
+/** Puts a binned task back exactly where it was. */
+export async function restoreTodo(actor: Agent, id: string) {
+  const t = await getTodo(id);
+  await q("UPDATE todos SET deleted_at = NULL WHERE id = $1", [id]);
+  await indexDoc("todo", t.id, t.title, t.notes);
+  await logEvent({ actor: actor.id, type: "todo.restored", entity_type: "todo", entity_id: id, summary: t.title });
+  return getTodo(id);
+}
+
+/** What is in the bin, most recently deleted first. */
+export async function binnedTodos(): Promise<BinnedTodo[]> {
+  await emptyOldBin();
+  return q<BinnedTodo>(
+    `SELECT id, title, done, (notes <> '') AS has_notes, deleted_at,
+            GREATEST(1, CEIL(EXTRACT(EPOCH FROM (deleted_at + make_interval(days => $1) - now())) / 86400))::int AS days_left
+     FROM todos WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 200`,
+    [BIN_DAYS],
+  );
+}
+
+/** Tasks binned more than BIN_DAYS days ago are removed for good. Runs whenever the lists are read; no scheduler needed. */
+async function emptyOldBin() {
+  await q("DELETE FROM todos WHERE deleted_at < now() - make_interval(days => $1)", [BIN_DAYS]);
 }

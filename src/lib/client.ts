@@ -1,5 +1,5 @@
 "use client";
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import useSWR from "swr";
 import type { Agent } from "./core/util";
 import type { Tracker } from "./core/trackers";
@@ -18,7 +18,7 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
 
 export const fetcher = (path: string) => api(path);
 
-export type Me = { me: Agent; agents: Agent[]; guests: Agent[]; trackers: Tracker[]; timezone: string };
+export type Me = { me: Agent; agents: Agent[]; guests: Agent[]; trackers: Tracker[]; timezone: string; direct?: Record<string, string> };
 
 export function useMe() {
   const { data, mutate } = useSWR<Me>("me", fetcher, { refreshInterval: 30_000 });
@@ -31,7 +31,43 @@ export function useMe() {
     /** Anyone by id: the owner, an agent or a guest. */
     agent: (id: string | null | undefined) => (id ? (data?.agents.find((a) => a.id === id) ?? data?.guests?.find((a) => a.id === id)) : undefined),
     tracker: (id: string | null) => (id ? data?.trackers.find((t) => t.id === id) : undefined),
+    /** Per agent id: when it last said something in its direct conversation with the owner. */
+    direct: data?.direct ?? NO_DIRECT,
     refresh: mutate,
+  };
+}
+const NO_DIRECT: Record<string, string> = {};
+
+// Which direct conversations have been read is remembered on this device.
+const SEEN_KEY = "ss_direct_seen";
+const seenListeners = new Set<() => void>();
+const seenRaw = () => {
+  try {
+    return localStorage.getItem(SEEN_KEY) ?? "{}";
+  } catch {
+    return "{}";
+  }
+};
+/** Tells which agents have said something in a direct conversation since the owner last opened it. */
+export function useDirectUnread() {
+  const { direct } = useMe();
+  const raw = useSyncExternalStore(
+    (cb) => (seenListeners.add(cb), window.addEventListener("storage", cb), () => (seenListeners.delete(cb), window.removeEventListener("storage", cb))),
+    seenRaw,
+    () => "{}",
+  );
+  const seen: Record<string, string> = JSON.parse(raw);
+  return {
+    unread: (agentId: string) => !!direct[agentId] && direct[agentId] > (seen[agentId] ?? ""),
+    any: Object.keys(direct).some((id) => direct[id] > (seen[id] ?? "")),
+    markRead: (agentId: string, at: string) => {
+      const cur: Record<string, string> = JSON.parse(seenRaw());
+      if ((cur[agentId] ?? "") >= at) return;
+      try {
+        localStorage.setItem(SEEN_KEY, JSON.stringify({ ...cur, [agentId]: at }));
+      } catch {}
+      seenListeners.forEach((l) => l());
+    },
   };
 }
 
@@ -63,4 +99,42 @@ export function useDark(): boolean {
     () => darkQuery().matches,
     () => false,
   );
+}
+
+/**
+ * Saves what is being typed a moment after typing stops. Saves never overlap: while one is on its
+ * way the next waits, so a slow connection cannot deliver an older version after a newer one.
+ * `dirty()` says whether something typed here is still waiting to be saved.
+ */
+export function useSaver(save: (text: string) => Promise<unknown>, delay = 700) {
+  const latest = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const running = useRef<Promise<void> | null>(null);
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  const flush = (): Promise<void> => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    return (running.current ??= (async () => {
+      try {
+        while (latest.current !== null) {
+          const text = latest.current;
+          await saveRef.current(text);
+          if (latest.current === text) latest.current = null;
+        }
+      } catch {
+        // left dirty: the next keystroke, or leaving the page, tries again
+      } finally {
+        running.current = null;
+      }
+    })());
+  };
+  const push = (text: string) => {
+    latest.current = text;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, delay);
+  };
+  useEffect(() => () => void flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  return { push, flush, dirty: () => latest.current !== null };
 }

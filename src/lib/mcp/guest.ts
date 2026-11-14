@@ -62,7 +62,7 @@ export const GUEST_TOOLS: Tool[] = [
   },
   {
     name: "task_delete",
-    description: "Withdraw a task: it is removed from the owner's list, whatever its status. This cannot be undone.",
+    description: "Withdraw a task: it is removed from the owner's list, whatever its status. Only the owner can bring it back.",
     inputSchema: { type: "object", properties: { id: str("Task id.") }, required: ["id"] },
     run: (g, { id }) => guestDelete(g, id),
   },

@@ -50,7 +50,7 @@ export async function removeGuest(actor: Agent, id: string) {
   const g = await guestById(id);
   await revokeAllFor(g.id);
   await q("UPDATE agents SET archived = true, passcode_hash = NULL WHERE id = $1", [g.id]);
-  await q("UPDATE todos SET scope = 'backlog', date = NULL WHERE guest_id = $1 AND scope = 'guest'", [g.id]);
+  await q("UPDATE todos SET scope = 'backlog', date = NULL WHERE guest_id = $1 AND scope = 'guest' AND deleted_at IS NULL", [g.id]);
   await logEvent({ actor: actor.id, type: "guest.removed", entity_type: "agent", entity_id: g.id, summary: `${g.name} can no longer add tasks` });
   return { ok: true };
 }
@@ -88,7 +88,7 @@ function shape(t: Row, guest: Agent, ownerName: string, withNotes: boolean) {
 const COLS = "id, title, notes, scope, date, done, done_at, created_by, created_at, updated_at";
 
 async function mine(guest: Agent, id: unknown): Promise<Row> {
-  const t = typeof id === "string" ? await q1<Row>(`SELECT ${COLS} FROM todos WHERE id = $1 AND guest_id = $2`, [id, guest.id]) : null;
+  const t = typeof id === "string" ? await q1<Row>(`SELECT ${COLS} FROM todos WHERE id = $1 AND guest_id = $2 AND deleted_at IS NULL`, [id, guest.id]) : null;
   if (!t) throw notFound("No such task. Call tasks() to see the ids of your tasks.");
   return t;
 }
@@ -113,7 +113,7 @@ export async function guestTasks(guest: Agent, args: { show?: string }) {
   if (!["open", "recent", "all"].includes(show)) throw bad('show is "open" (default), "recent" (open, plus finished in the last 30 days) or "all".');
   const owner = await ownerAgent();
   const done = show === "open" ? "AND NOT done" : show === "recent" ? "AND (NOT done OR done_at > now() - interval '30 days')" : "";
-  const rows = await q<Row>(`SELECT ${COLS} FROM todos WHERE guest_id = $1 ${done} ORDER BY done, id DESC LIMIT 300`, [guest.id]);
+  const rows = await q<Row>(`SELECT ${COLS} FROM todos WHERE guest_id = $1 AND deleted_at IS NULL ${done} ORDER BY done, id DESC LIMIT 300`, [guest.id]);
   return { today: todayIn(await timezone()), tasks: rows.map((t) => shape(t, guest, owner.name, false)) };
 }
 
@@ -124,7 +124,7 @@ export async function guestTask(guest: Agent, id: unknown) {
 export async function guestAdd(guest: Agent, input: { title?: unknown; notes?: unknown }) {
   const title = cleanTitle(input.title);
   const notes = cleanNotes(input.notes);
-  const open = await q1<{ n: number }>("SELECT count(*)::int AS n FROM todos WHERE guest_id = $1 AND NOT done", [guest.id]);
+  const open = await q1<{ n: number }>("SELECT count(*)::int AS n FROM todos WHERE guest_id = $1 AND NOT done AND deleted_at IS NULL", [guest.id]);
   if ((open?.n ?? 0) >= MAX_OPEN) throw bad(`There are already ${MAX_OPEN} open tasks on this list. Delete or wait for some to be finished first.`);
   const id = newId("t");
   const pos = await q1<{ p: number }>("SELECT COALESCE(max(position), 0) + 1 AS p FROM todos WHERE scope = 'guest'");
@@ -147,7 +147,7 @@ export async function guestUpdate(guest: Agent, id: unknown, patch: { title?: un
     if (notes.length > MAX_NOTES) throw bad("Notes are too long.");
   }
   if (title !== before.title || notes !== before.notes) {
-    await q("UPDATE todos SET title = $3, notes = $4, ai_unseen = true, updated_at = now() WHERE id = $1 AND guest_id = $2", [before.id, guest.id, title, notes]);
+    await q("UPDATE todos SET title = $3, notes = $4, ai_unseen = true, updated_at = now() WHERE id = $1 AND guest_id = $2 AND deleted_at IS NULL", [before.id, guest.id, title, notes]);
     await indexDoc("todo", before.id, title, notes);
     await logEvent({ actor: guest.id, type: "todo.updated", entity_type: "todo", entity_id: before.id, summary: `From ${guest.name}: ${title}`, data: { scope: before.scope, date: before.date, guest: guest.handle } });
   }
@@ -156,7 +156,8 @@ export async function guestUpdate(guest: Agent, id: unknown, patch: { title?: un
 
 export async function guestDelete(guest: Agent, id: unknown) {
   const t = await mine(guest, id);
-  await q("DELETE FROM todos WHERE id = $1 AND guest_id = $2", [t.id, guest.id]);
+  // Into the owner's bin like any deleted task, so it can be brought back for a while.
+  await q("UPDATE todos SET deleted_at = now() WHERE id = $1 AND guest_id = $2 AND deleted_at IS NULL", [t.id, guest.id]);
   await unindexDoc("todo", t.id);
   await logEvent({ actor: guest.id, type: "todo.deleted", entity_type: "todo", entity_id: t.id, summary: `From ${guest.name}: ${t.title}`, data: { guest: guest.handle } });
   return { ok: true, deleted: t.id };
@@ -168,7 +169,7 @@ export async function guestDelete(guest: Agent, id: unknown) {
 export async function waitingModules(): Promise<RailModule[]> {
   const guests = await listGuests();
   if (!guests.length) return [];
-  const rows = await q<Row & { guest_id: string }>(`SELECT ${COLS}, guest_id FROM todos WHERE scope = 'guest' AND NOT done AND guest_id = ANY($1) ORDER BY id DESC LIMIT 6`, [guests.map((g) => g.id)]);
+  const rows = await q<Row & { guest_id: string }>(`SELECT ${COLS}, guest_id FROM todos WHERE scope = 'guest' AND NOT done AND deleted_at IS NULL AND guest_id = ANY($1) ORDER BY id DESC LIMIT 6`, [guests.map((g) => g.id)]);
   return rows.map((t) => {
     const g = guests.find((x) => x.id === t.guest_id)!;
     return {

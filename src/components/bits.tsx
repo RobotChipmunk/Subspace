@@ -1,9 +1,10 @@
 "use client";
 import { PALETTES } from "@/lib/palettes";
-import { hash, useDark } from "@/lib/client";
+import { hash, spring, useDark } from "@/lib/client";
 import type { Agent } from "@/lib/core/util";
 import type { Art } from "@/lib/core/art";
-import { FileText } from "lucide-react";
+import { ArrowUp, FileText } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -160,5 +161,28 @@ export function PageCard({ page }: { page: { id: string; title: string; summary:
       </span>
       <span className="flex-none text-[12.5px] font-medium text-ink3 transition-colors group-hover/page:text-accent">Open</span>
     </Link>
+  );
+}
+
+/** The round send button of a message field. It appears once there is something to send. */
+export function SendButton({ show, busy }: { show: boolean; busy?: boolean }) {
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.button
+          type="submit"
+          aria-label="Send"
+          disabled={busy}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          whileTap={{ scale: 0.85 }}
+          transition={spring}
+          className="grid h-8 w-8 flex-none place-items-center self-end rounded-full bg-accent text-white shadow-[0_4px_14px_var(--accent-soft)]"
+        >
+          <ArrowUp size={17} strokeWidth={2.4} />
+        </motion.button>
+      )}
+    </AnimatePresence>
   );
 }

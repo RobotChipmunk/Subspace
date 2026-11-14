@@ -1,15 +1,17 @@
 "use client";
-import { AlignLeft, ChevronLeft, Plus, Trash2 } from "lucide-react";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { AlignLeft, ChevronLeft, Plus, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
 import { Editor } from "@/components/Editor";
-import { api, fetcher, soft, spring, useMe } from "@/lib/client";
-import type { Folder, Todo } from "@/lib/core/todos";
+import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
+import type { BinnedTodo, Folder, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
-type Folders = { today: string; folders: Folder[] };
+type Folders = { today: string; folders: Folder[]; bin: number };
+const BIN = "bin";
 
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -36,8 +38,10 @@ export default function TodosPage() {
 
   // If the day rolls over while the app is open, a dated folder may no longer exist.
   useEffect(() => {
-    if (f && !folder) setView("today");
-  }, [f, folder]);
+    if (f && !folder && view !== BIN) setView("today");
+    // the bin's entry goes away once it is empty; do not strand the owner on a list with no way back
+    if (f && view === BIN && !f.bin) setView("today");
+  }, [f, folder, view]);
 
   return (
     <div className="mx-auto flex max-w-[920px] gap-8 max-md:flex-col max-md:gap-4">
@@ -60,6 +64,23 @@ export default function TodosPage() {
               </button>
             );
           })}
+          {/* appears only while there is something to bring back */}
+          <AnimatePresence initial={false}>
+            {(f?.bin ?? 0) > 0 && (
+              <motion.button
+                key="bin"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => (setView(BIN), setOpenId(null))}
+                className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors md:mt-3 ${view === BIN ? "font-semibold text-ink" : "text-ink3 hover:text-ink2"}`}
+              >
+                {view === BIN && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
+                <span className="relative flex-1 whitespace-nowrap">Recently deleted</span>
+                <span className={`relative text-[12.5px] tabular-nums ${view === BIN ? "text-accent" : "text-ink3"}`}>{f?.bin}</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
         </nav>
       </aside>
 
@@ -71,7 +92,7 @@ export default function TodosPage() {
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
-              <List view={view} folder={folder} today={f?.today} onOpen={setOpenId} />
+              {view === BIN ? <Bin /> : <List view={view} folder={folder} today={f?.today} onOpen={setOpenId} />}
             </motion.div>
           )}
         </AnimatePresence>
@@ -80,6 +101,55 @@ export default function TodosPage() {
   );
 }
 
+
+/** Deleted tasks, kept for a while so a slip can be undone. Each can be put back or removed for good. */
+function Bin() {
+  const { data, mutate } = useSWR<{ todos: BinnedTodo[]; keep_days: number }>("todos/bin", fetcher, { refreshInterval: 30_000 });
+  const { mutate: globalMutate } = useSWRConfig();
+  const after = () => (mutate(), globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== "todos/bin"));
+  const leave = (id: string) => mutate((cur) => (cur ? { ...cur, todos: cur.todos.filter((t) => t.id !== id) } : cur), false);
+  return (
+    <div>
+      <header className="mb-5 px-1">
+        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Recently deleted</h1>
+        <p className="mt-0.5 text-[14px] text-ink2">Kept for {data?.keep_days ?? 15} days, then removed for good.</p>
+      </header>
+      <ul>
+        <AnimatePresence initial={false}>
+          {data?.todos.map((t) => (
+            <motion.li key={t.id} layout="position" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={soft} className="overflow-hidden" data-binned={t.id}>
+              <div className="-mx-2 flex items-center gap-2 rounded-2xl px-3 py-[7px]">
+                <div className="min-w-0 flex-1">
+                  <div className={`break-words text-[16px] text-ink2 ${t.done ? "line-through decoration-[var(--line)]" : ""}`}>{t.title}</div>
+                  <div className="text-[12px] text-ink3">{t.days_left === 1 ? "Last day" : `${t.days_left} days left`}</div>
+                </div>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  transition={spring}
+                  aria-label={`Restore ${t.title}`}
+                  onClick={async () => (leave(t.id), await api(`todos/${t.id}/restore`, { method: "POST" }), after())}
+                  className="flex h-8 flex-none items-center gap-1.5 rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 transition-colors hover:bg-fill2 hover:text-ink"
+                >
+                  <Undo2 size={14} /> Restore
+                </motion.button>
+                <ConfirmDelete label={`Delete ${t.title} for good`} confirm="Delete for good" size={15} onConfirm={async () => (leave(t.id), await api(`todos/${t.id}?forever=1`, { method: "DELETE" }), after())} />
+              </div>
+            </motion.li>
+          ))}
+        </AnimatePresence>
+      </ul>
+      {data && !data.todos.length && <p className="px-1 py-10 text-[14.5px] text-ink3">Nothing here.</p>}
+    </div>
+  );
+}
+
+/** Where a task added to "Weekend" goes: Saturday, or today when it is already Sunday. */
+function weekendDay(today: string): string {
+  const d = new Date(today + "T12:00:00Z");
+  const dow = d.getUTCDay();
+  if (dow !== 0) d.setUTCDate(d.getUTCDate() + (6 - dow));
+  return d.toISOString().slice(0, 10);
+}
 
 /** How long a finger rests on a task before it lifts for reordering. Shorter than the system's own long-press. */
 const HOLD_MS = 260;
@@ -191,8 +261,13 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
   const [draft, setDraft] = useState("");
   const dragging = useRef(false);
 
+  // Tasks typed here that the server has not answered for yet. They show at once and stay put.
+  const unsaved = useRef<Row[]>([]);
+  // A task keeps the key it was first drawn with, so it does not redraw when its real id arrives.
+  const keys = useRef(new Map<string, string>());
+
   useEffect(() => {
-    if (data && !dragging.current) setRows(data.todos);
+    if (data && !dragging.current) setRows([...data.todos, ...unsaved.current.filter((u) => !data.todos.some((r) => r.id === u.id))]);
   }, [data]);
 
   const refreshCounts = () => globalMutate("todos/folders");
@@ -219,10 +294,28 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
     const title = draft.trim();
     if (!title) return setAdding(false);
     setDraft("");
-    const t = await api<Row>("todos", { body: { title, view } });
-    setRows((rs) => [...(rs ?? []), { ...t, has_notes: false }]);
-    mutate();
-    refreshCounts();
+    // Show it straight away, exactly where it will live; the server's copy replaces it silently.
+    // the same place the server will file it, so it does not jump between groups when saved
+    const day = /^\d{4}-/.test(view) ? view : view === "today" ? today : view === "weekend" && today ? weekendDay(today) : null;
+    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, scope: view === "backlog" ? "backlog" : day ? "day" : "week", date: day ?? null } as unknown as Row;
+    unsaved.current.push(temp);
+    setRows((rs) => [...(rs ?? []), temp]);
+    try {
+      const t = await api<Row>("todos", { body: { title, view } });
+      const row = { ...t, has_notes: false };
+      keys.current.set(row.id, temp.id);
+      unsaved.current = unsaved.current.filter((u) => u !== temp);
+      setRows((rs) => (rs ?? []).map((r) => (r.id === temp.id ? row : r)));
+      // Put it in the cached list too; this also discards any refresh already on its way from before the task existed.
+      mutate((cur) => (cur ? { ...cur, todos: cur.todos.some((r) => r.id === row.id) ? cur.todos : [...cur.todos, row] } : cur), { revalidate: true });
+      refreshCounts();
+    } catch {
+      // could not be saved: take it back out and give the words back to the box
+      unsaved.current = unsaved.current.filter((u) => u !== temp);
+      setRows((rs) => (rs ?? []).filter((r) => r.id !== temp.id));
+      setDraft(title);
+      setAdding(true);
+    }
   }
 
   function reorder(groupKey: string, ordered: Row[]) {
@@ -260,13 +353,13 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
             <AnimatePresence initial={false}>
               {items.map((r) => (
                 <TodoRow
-                  key={r.id}
+                  key={keys.current.get(r.id) ?? r.id}
                   r={r}
                   tag={!!r.guest_id && !folder?.guest}
                   dragging={dragging}
-                  onToggle={() => toggle(r)}
-                  onOpen={() => onOpen(r.id)}
-                  onDropped={() => setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id) } }), rs))}
+                  onToggle={() => !r.id.startsWith("new_") && toggle(r)}
+                  onOpen={() => !r.id.startsWith("new_") && onOpen(r.id)}
+                  onDropped={() => setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id).filter((x) => !x.startsWith("new_")) } }), rs))}
                 />
               ))}
             </AnimatePresence>
@@ -295,43 +388,32 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
 function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: string; folders: Folder[]; onBack: () => void }) {
   const { agent } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
-  const { data: todo, mutate } = useSWR<Todo>(`todos/${id}`, fetcher, { refreshInterval: 8_000 });
+  // While notes typed here are waiting to be saved, background refreshes are held back: nothing
+  // re-renders the page under the keyboard, and an older copy can never arrive mid-sentence.
+  const saver = useSaver((md) => patch({ notes: md }, true), 600);
+  const { data: todo, mutate } = useSWR<Todo>(`todos/${id}`, fetcher, { refreshInterval: 8_000, isPaused: () => saver.dirty() });
   const [title, setTitle] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
-  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef<string | null>(null);
 
   // Take the server's notes only when nothing typed here is waiting to be saved.
   useEffect(() => {
     if (!todo) return;
     if (title === null) setTitle(todo.title);
-    if (latest.current === null) setNotes(todo.notes);
+    if (!saver.dirty()) setNotes(todo.notes);
     if (todo.ai_unseen && !todo.notes.includes("<ins ")) api(`todos/${id}`, { method: "PATCH", body: { seen: true } }).then(() => globalMutate((k) => typeof k === "string" && k.startsWith("todos?")));
   }, [todo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const patch = async (body: Record<string, unknown>) => {
+  const refreshLists = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== `todos/${id}`);
+  /** quiet: a notes save while typing. It changes nothing the lists show except the notes mark, so they are refreshed on leaving instead. */
+  async function patch(body: Record<string, unknown>, quiet = false) {
     const t = await api<Todo>(`todos/${id}`, { method: "PATCH", body });
     mutate(t, false);
-    globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== `todos/${id}`);
+    if (!quiet) refreshLists();
     return t;
-  };
-
-  async function flush() {
-    if (pending.current) clearTimeout(pending.current);
-    pending.current = null;
-    if (latest.current === null) return;
-    const md = latest.current;
-    await patch({ notes: md });
-    if (latest.current === md) latest.current = null;
   }
-
-  function onNotes(md: string) {
-    latest.current = md;
-    if (pending.current) clearTimeout(pending.current);
-    pending.current = setTimeout(flush, 600);
-  }
-
-  useEffect(() => () => void flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const flush = saver.flush;
+  const onNotes = saver.push;
+  useEffect(() => () => void refreshLists(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!todo || notes === null) return <div className="shimmer mt-16 h-8 w-2/3 rounded-full" />;
   const creator = agent(todo.created_by);
@@ -357,9 +439,7 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
               </option>
             ))}
           </select>
-          <button aria-label="Delete task" onClick={async () => (await api(`todos/${id}`, { method: "DELETE" }), globalMutate((k) => typeof k === "string" && k.startsWith("todos")), onBack())} className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-danger">
-            <Trash2 size={16} />
-          </button>
+          <ConfirmDelete label="Delete task" onConfirm={async () => (await api(`todos/${id}`, { method: "DELETE" }), globalMutate((k) => typeof k === "string" && k.startsWith("todos")), onBack())} />
         </div>
       </div>
 

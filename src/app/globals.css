@@ -132,6 +132,12 @@ textarea:focus-visible,
   opacity: var(--glow);
   will-change: transform;
 }
+/* While something is being typed, the backdrop holds still. Moving blurred light behind frosted
+   panels is redrawn every frame; on a tablet that competes with the keyboard for the same time. */
+html[data-typing] .ambient i,
+html[data-typing] .art-mesh {
+  animation-play-state: paused;
+}
 .ambient i:nth-child(1) {
   background: #ffd3e4;
   top: -25vmax;
@@ -325,6 +331,9 @@ textarea:focus-visible,
 
 /* ---------- Editor: markdown that formats itself as you type ---------- */
 .ProseMirror {
+  /* the page-wide "optimizeLegibility" re-measures kerning for the whole paragraph on every
+     keystroke in Safari; plain rendering looks the same at this size and keeps typing light */
+  text-rendering: auto;
   min-height: 180px;
   font-size: 16px;
   line-height: 1.6;
@@ -582,6 +591,23 @@ textarea:focus-visible,
   text-decoration-color: var(--accent-soft);
   text-underline-offset: 3px;
 }
+/* Removing something: a quiet bin that turns into a red pill when armed (see ConfirmDelete). */
+.confirm-delete {
+  color: var(--ink-3);
+  transition: background-color 0.3s var(--ease), color 0.3s var(--ease), box-shadow 0.3s var(--ease);
+}
+@media (hover: hover) {
+  .confirm-delete:not([data-armed="true"]):hover {
+    background: var(--fill);
+    color: var(--danger);
+  }
+}
+.confirm-delete[data-armed="true"] {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--danger) 32%, transparent);
+}
+
 /* A task row can be held and dragged: holding must not select its text or raise the system menu. */
 .todo-row {
   -webkit-user-select: none;
