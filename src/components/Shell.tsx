@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
-import { api, spring, useMe } from "@/lib/client";
+import { api, spring, useDirectUnread, useMe } from "@/lib/client";
 import { Rail, useRail } from "./Rail";
 
 const TABS = [
@@ -19,6 +19,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { me } = useMe();
   const rail = useRail();
+  const direct = useDirectUnread();
 
   // Todos follow the owner's local calendar, so keep the server in step with this device.
   // Mark the page as "typing" while a text field or the editor has the keyboard, so heavy
@@ -58,6 +59,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               {on && <motion.span layoutId="tab" transition={spring} className="pill absolute inset-0 rounded-[20px]" />}
               <motion.span whileTap={{ scale: 0.86 }} transition={spring} className={`relative transition-colors duration-300 ${on ? "text-accent" : "text-ink2 group-hover:text-ink"}`}>
                 <t.icon size={21} strokeWidth={on ? 2.2 : 1.8} />
+                {t.href === "/agents" && direct.any && <span aria-label="New message" className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent" />}
               </motion.span>
               <span className="pointer-events-none absolute left-full ml-3 hidden translate-x-[-4px] rounded-lg bg-ink px-2 py-1 text-[12px] font-medium text-bg opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 md:block">
                 {t.label}

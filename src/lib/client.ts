@@ -18,7 +18,7 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
 
 export const fetcher = (path: string) => api(path);
 
-export type Me = { me: Agent; agents: Agent[]; trackers: Tracker[]; timezone: string };
+export type Me = { me: Agent; agents: Agent[]; trackers: Tracker[]; timezone: string; direct?: Record<string, string> };
 
 export function useMe() {
   const { data, mutate } = useSWR<Me>("me", fetcher, { refreshInterval: 30_000 });
@@ -28,7 +28,43 @@ export function useMe() {
     trackers: data?.trackers ?? [],
     agent: (id: string) => data?.agents.find((a) => a.id === id),
     tracker: (id: string | null) => (id ? data?.trackers.find((t) => t.id === id) : undefined),
+    /** Per agent id: when it last said something in its direct conversation with the owner. */
+    direct: data?.direct ?? NO_DIRECT,
     refresh: mutate,
+  };
+}
+const NO_DIRECT: Record<string, string> = {};
+
+// Which direct conversations have been read is remembered on this device.
+const SEEN_KEY = "ss_direct_seen";
+const seenListeners = new Set<() => void>();
+const seenRaw = () => {
+  try {
+    return localStorage.getItem(SEEN_KEY) ?? "{}";
+  } catch {
+    return "{}";
+  }
+};
+/** Tells which agents have said something in a direct conversation since the owner last opened it. */
+export function useDirectUnread() {
+  const { direct } = useMe();
+  const raw = useSyncExternalStore(
+    (cb) => (seenListeners.add(cb), window.addEventListener("storage", cb), () => (seenListeners.delete(cb), window.removeEventListener("storage", cb))),
+    seenRaw,
+    () => "{}",
+  );
+  const seen: Record<string, string> = JSON.parse(raw);
+  return {
+    unread: (agentId: string) => !!direct[agentId] && direct[agentId] > (seen[agentId] ?? ""),
+    any: Object.keys(direct).some((id) => direct[id] > (seen[id] ?? "")),
+    markRead: (agentId: string, at: string) => {
+      const cur: Record<string, string> = JSON.parse(seenRaw());
+      if ((cur[agentId] ?? "") >= at) return;
+      try {
+        localStorage.setItem(SEEN_KEY, JSON.stringify({ ...cur, [agentId]: at }));
+      } catch {}
+      seenListeners.forEach((l) => l());
+    },
   };
 }
 

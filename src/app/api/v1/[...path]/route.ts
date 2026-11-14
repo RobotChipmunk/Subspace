@@ -6,8 +6,8 @@ import { listLinks, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { activeModules, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
-import { createPost, createReply, deletePost, getThread, listFeed } from "@/lib/core/posts";
-import { createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, updateTodo } from "@/lib/core/todos";
+import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect } from "@/lib/core/posts";
+import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
 import { ApiError, listAgents, setSetting, timezone, type Agent } from "@/lib/core/util";
 
@@ -23,7 +23,7 @@ type Ctx = { actor: Agent; url: URL; body: any; req: Request };
 type Handler = (c: Ctx, ...args: string[]) => Promise<unknown>;
 
 const routes: [string, RegExp, Handler][] = [
-  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), trackers: await listTrackers(), timezone: await timezone() })],
+  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), trackers: await listTrackers(), timezone: await timezone(), ...(actor.kind === "human" ? { direct: await directActivity() } : {}) })],
   ["PATCH", /^me$/, async ({ body }) => {
     if (typeof body.timezone === "string") {
       new Intl.DateTimeFormat("en", { timeZone: body.timezone }); // throws on an invalid zone
@@ -44,9 +44,12 @@ const routes: [string, RegExp, Handler][] = [
   ["GET", /^todos$/, ({ url }) => listTodos(url.searchParams.get("view") || "today")],
   ["POST", /^todos$/, ({ actor, body }) => createTodo(actor, body)],
   ["POST", /^todos\/reorder$/, async ({ actor, body }) => (await reorderTodos(actor, body.ids ?? []), { ok: true })],
+  ["GET", /^todos\/bin$/, async () => ({ todos: await binnedTodos(), keep_days: BIN_DAYS })],
+  ["POST", /^todos\/([^/]+)\/restore$/, ({ actor }, id) => restoreTodo(actor, id)],
   ["GET", /^todos\/([^/]+)$/, (_c, id) => getTodo(id)],
   ["PATCH", /^todos\/([^/]+)$/, ({ actor, body }, id) => updateTodo(actor, id, body)],
-  ["DELETE", /^todos\/([^/]+)$/, async ({ actor }, id) => (await deleteTodo(actor, id), { ok: true })],
+  // deleting moves a task to the bin; ?forever=1 removes one that is already there
+  ["DELETE", /^todos\/([^/]+)$/, async ({ actor, url }, id) => (await deleteTodo(actor, id, url.searchParams.get("forever") === "1"), { ok: true })],
 
   ["GET", /^context$/, async ({ url }) => {
     const ref = url.searchParams.get("node");
@@ -80,6 +83,8 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^agents$/, ({ actor, body }) => ownerOnly(actor, () => createAgent(actor, body))],
   ["PATCH", /^agents\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => updateAgent(actor, id, body))],
   ["PATCH", /^agents\/([^/]+)\/runtime$/, ({ actor, body }, id) => ownerOnly(actor, () => configureRuntime(id, body))],
+  ["GET", /^agents\/([^/]+)\/messages$/, ({ actor }, id) => ownerOnly(actor, async () => ({ messages: await listDirect(id) }))],
+  ["POST", /^agents\/([^/]+)\/messages$/, ({ actor, body }, id) => sendDirect(actor, id, body.body)],
   ["GET", /^runtime\/options$/, async () => ({ models: MODELS, efforts: EFFORTS, contexts: CONTEXTS, env_key: !!process.env.ANTHROPIC_API_KEY })],
   ["POST", /^agents\/([^/]+)\/token$/, ({ actor }, id) => ownerOnly(actor, async () => ({ token: await issueToken(id) }))],
 

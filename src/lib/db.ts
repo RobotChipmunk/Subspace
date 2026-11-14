@@ -256,6 +256,9 @@ const MIGRATIONS: string[] = [
      FROM context_nodes n WHERE n.id = d.entity_id AND d.entity_type = 'context' AND n.kind = 'link'`,
   // A rail module can be a warning or an error from an agent's work, shown first and marked as such.
   `ALTER TABLE rail_modules ADD COLUMN level text NOT NULL DEFAULT 'info'`,
+  // Deleted tasks wait in a bin (deleted_at set) and are removed for good 15 days later.
+  `ALTER TABLE todos ADD COLUMN deleted_at timestamptz;
+   CREATE INDEX todos_deleted ON todos (deleted_at) WHERE deleted_at IS NOT NULL`,
 ];
 
 async function migrate() {

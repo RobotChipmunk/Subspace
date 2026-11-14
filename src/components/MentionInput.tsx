@@ -59,6 +59,8 @@ export function MentionInput({
   const [query, setQuery] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const matches = useMentionMatches(query);
+  const { agents } = useMe();
+  const handles = agents.map((a) => a.handle);
 
   const caret = useRef<number | null>(null);
 
@@ -110,6 +112,23 @@ export function MentionInput({
 
   return (
     <div className="relative min-w-0 flex-1">
+      {/* A text field cannot colour part of its text, so the words are drawn underneath it with the
+          recognised @names in the accent colour, and the field's own letters are left clear. Only
+          the colour differs: a heavier weight would be wider and move the caret off its letter. */}
+      {value && (
+        <div aria-hidden data-mention-mirror className={`pointer-events-none absolute inset-0 whitespace-pre-wrap break-words ${className}`}>
+          {value.split(/(@[a-zA-Z0-9_-]{2,32})/g).map((s, i) =>
+            s.startsWith("@") && handles.includes(s.slice(1).toLowerCase()) ? (
+              <span key={i} data-mention className="text-accent">
+                {s}
+              </span>
+            ) : (
+              s
+            ),
+          )}
+          {"\u200b"}
+        </div>
+      )}
       <textarea
         ref={ref}
         rows={1}
@@ -118,7 +137,8 @@ export function MentionInput({
         onChange={(e) => (onChange(e.target.value), track(e.target))}
         onKeyDown={onKey}
         onClick={(e) => track(e.currentTarget)}
-        className={`block w-full resize-none overflow-hidden ${className}`}
+        style={{ color: "transparent", caretColor: "var(--ink)" }}
+        className={`relative block w-full resize-none overflow-hidden ${className}`}
       />
       <AnimatePresence>
         {matches.length > 0 && (
