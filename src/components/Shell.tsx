@@ -55,7 +55,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <motion.span whileTap={{ scale: 0.86 }} transition={spring} className={`relative transition-colors duration-300 ${rail.docked || rail.sheet ? "text-accent" : "text-ink2 group-hover:text-ink"}`}>
             <PanelRight size={21} strokeWidth={1.8} />
             {rail.modules.length > 0 && (
-              <span className="absolute -right-2 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-accent px-1 text-[10.5px] font-semibold leading-none text-white">{rail.modules.length}</span>
+              <span className={`absolute -right-2 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full px-1 text-[10.5px] font-semibold leading-none text-white ${rail.level === "error" ? "bg-danger" : rail.level === "warning" ? "bg-[var(--warn)]" : "bg-accent"}`}>{rail.modules.length}</span>
             )}
           </motion.span>
           <span className="pointer-events-none absolute left-full ml-3 hidden translate-x-[-4px] rounded-lg bg-ink px-2 py-1 text-[12px] font-medium text-bg opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 md:block">Now</span>

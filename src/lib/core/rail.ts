@@ -13,6 +13,9 @@ export const RAIL_BLOCKS = ["facts", "timeline", "callout", "stats", "cards", "m
 export const RAIL_MAX = 8;
 
 export type RailAction = { label: string; url: string };
+/** info: something to know. warning: something may go wrong or needs a decision. error: something failed. */
+export const RAIL_LEVELS = ["info", "warning", "error"] as const;
+export type RailLevel = (typeof RAIL_LEVELS)[number];
 export type RailModule = {
   id: string;
   key: string;
@@ -20,6 +23,7 @@ export type RailModule = {
   title: string;
   subtitle: string;
   label: string;
+  level: RailLevel;
   image: string | null;
   blocks: AnyBlock[];
   actions: RailAction[];
@@ -56,6 +60,7 @@ export async function setModule(
     title: string;
     subtitle?: string;
     label?: string;
+    level?: string;
     image?: string;
     blocks?: unknown;
     actions?: unknown;
@@ -73,6 +78,8 @@ export async function setModule(
   const label = String(input.label ?? "").trim();
   if (subtitle.length > 120) throw bad("subtitle is at most 120 characters.");
   if (label.length > 40) throw bad('label is a few words about timing, at most 40 characters, e.g. "Today · check-in 3 pm".');
+  const level = (input.level ?? "info") as RailLevel;
+  if (!RAIL_LEVELS.includes(level)) throw bad('level must be "info", "warning" or "error".');
   if (input.image !== undefined && !(typeof input.image === "string" && /^https:\/\//.test(input.image))) throw bad("image must be an https URL.");
 
   const blocks = (input.blocks ?? []) as AnyBlock[];
@@ -114,25 +121,25 @@ export async function setModule(
     const live = (await q1<{ n: number }>("SELECT count(*)::int AS n FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()"))!.n;
     if (live >= RAIL_MAX) throw bad(`The rail already holds ${live} modules. Remove one that is no longer needed (rail_remove) before adding another; see explore("/rail").`);
   }
-  const content = JSON.stringify({ title, subtitle, label, image: input.image ?? null, blocks, actions, pageId });
-  const same = mine && JSON.stringify({ title: mine.title, subtitle: mine.subtitle, label: mine.label, image: mine.image, blocks: mine.blocks, actions: mine.actions, pageId: mine.page_id }) === content;
+  const content = JSON.stringify({ title, subtitle, label, level, image: input.image ?? null, blocks, actions, pageId });
+  const same = mine && JSON.stringify({ title: mine.title, subtitle: mine.subtitle, label: mine.label, level: mine.level, image: mine.image, blocks: mine.blocks, actions: mine.actions, pageId: mine.page_id }) === content;
   const id = mine?.id ?? newId("r");
   // Changed content brings back a module the owner had dismissed; a mere refresh does not.
   await q(
-    `INSERT INTO rail_modules (id, key, author, title, subtitle, label, image, blocks, actions, page_id, priority, show_from, show_until)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     ON CONFLICT (author, key) DO UPDATE SET title = EXCLUDED.title, subtitle = EXCLUDED.subtitle, label = EXCLUDED.label, image = EXCLUDED.image,
+    `INSERT INTO rail_modules (id, key, author, title, subtitle, label, image, blocks, actions, page_id, priority, show_from, show_until, level)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$15)
+     ON CONFLICT (author, key) DO UPDATE SET level = EXCLUDED.level, title = EXCLUDED.title, subtitle = EXCLUDED.subtitle, label = EXCLUDED.label, image = EXCLUDED.image,
        blocks = EXCLUDED.blocks, actions = EXCLUDED.actions, page_id = EXCLUDED.page_id, priority = EXCLUDED.priority, show_from = EXCLUDED.show_from,
        show_until = EXCLUDED.show_until, updated_at = now(), dismissed_at = CASE WHEN $14 THEN rail_modules.dismissed_at ELSE NULL END`,
-    [id, key, actor.id, title, subtitle, label, input.image ?? null, JSON.stringify(blocks), JSON.stringify(actions), pageId, Math.max(0, Math.min(Number(input.priority) || 0, 10)), from, until, !!same],
+    [id, key, actor.id, title, subtitle, label, input.image ?? null, JSON.stringify(blocks), JSON.stringify(actions), pageId, Math.max(0, Math.min(Number(input.priority) || 0, 10)), from, until, !!same, level],
   );
-  if (!same) await logEvent({ actor: actor.id, type: mine ? "rail.updated" : "rail.added", entity_type: "rail", entity_id: id, summary: `${title}${label ? ` (${label})` : ""}`, data: { key } });
+  if (!same) await logEvent({ actor: actor.id, type: mine ? "rail.updated" : "rail.added", entity_type: "rail", entity_id: id, summary: `${level === "info" ? "" : level.toUpperCase() + ": "}${title}${label ? ` (${label})` : ""}`, data: { key, level } });
   return (await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1", [id]))!;
 }
 
 /** What the owner sees now. */
 export async function activeModules(): Promise<RailModule[]> {
-  const rows = await q<RailModule>("SELECT * FROM rail_modules WHERE dismissed_at IS NULL AND show_from <= now() AND show_until > now() ORDER BY priority DESC, show_until, created_at");
+  const rows = await q<RailModule>("SELECT * FROM rail_modules WHERE dismissed_at IS NULL AND show_from <= now() AND show_until > now() ORDER BY CASE level WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, priority DESC, show_until, created_at");
   const ids = [...new Set(rows.map((r) => r.page_id).filter(Boolean))] as string[];
   const pages = ids.length ? await q<{ id: string; title: string }>("SELECT id, title FROM context_nodes WHERE id = ANY($1) AND NOT archived", [ids]) : [];
   return rows.map((r) => ({ ...r, page: pages.find((p) => p.id === r.page_id) ?? null }));

@@ -301,12 +301,13 @@ export const TOOLS: Tool[] = [
   {
     name: "rail_set",
     description:
-      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. One module per thing. It needs an expiry (show_until) and a key; call again with the same key to update it. See the server instructions for when to use the rail.',
+      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. Also the place to tell the owner about an error or warning in work you are doing for them (level: "error" or "warning"). One module per thing. It needs an expiry (show_until) and a key; call again with the same key to update it. See the server instructions for when to use the rail.',
     inputSchema: obj(
       {
         key: str('Short stable name, lowercase with dashes, e.g. "portland-hotel". Reuse it to update the same module.'),
         title: str("What this is, e.g. the hotel's name. Aim for under 30 characters so it fits one line (60 at most). With the label, this is all the owner sees until they expand the module."),
         label: str('A few words about timing shown above the title, e.g. "Today · check-in 3 pm".'),
+        level: { type: "string", enum: ["info", "warning", "error"], description: 'Default info. "error": something you were doing for the owner failed or is blocked. "warning": it may fail, is degraded, or needs their decision. Errors and warnings are shown first and marked in colour.' },
         subtitle: str("One line of context, e.g. the address. Shown when expanded."),
         image: str("Optional https picture shown across the top. Only a real, found image."),
         blocks: {
@@ -328,7 +329,7 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, args) => {
       const m = await setModule(a, args as any);
-      return { id: m.id, key: m.key, showing_from: m.show_from, showing_until: m.show_until };
+      return { id: m.id, key: m.key, level: m.level, showing_from: m.show_from, showing_until: m.show_until };
     },
   },
   {

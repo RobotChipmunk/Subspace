@@ -45,6 +45,8 @@ export function useRail() {
   const wide = useWide();
   return {
     modules,
+    /** The most serious thing waiting: colours the count on the rail button. */
+    level: modules.some((m) => m.level === "error") ? ("error" as const) : modules.some((m) => m.level === "warning") ? ("warning" as const) : ("info" as const),
     open,
     docked: wide && open && modules.length > 0,
     sheet: sheet && !wide,
@@ -69,10 +71,16 @@ function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean
   const by = agent(m.author);
   const actions = [...m.actions, ...(m.page ? [{ label: "Open page", url: `/page/${m.page.id}` }] : [])];
   return (
-    <motion.article layout="position" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={soft} className={`rail-module overflow-hidden rounded-[18px] ${open ? "is-open" : ""}`} data-rail-module={m.key}>
+    <motion.article layout="position" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={soft} className={`rail-module overflow-hidden rounded-[18px] ${open ? "is-open" : ""}`} data-rail-module={m.key} data-level={m.level}>
       <button onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2.5 text-left">
         <span className="min-w-0 flex-1">
-          {m.label && <span className="block truncate text-[11.5px] font-medium text-ink3">{m.label}</span>}
+          {(m.label || m.level !== "info") && (
+            <span className={`flex items-center gap-1.5 text-[11.5px] font-medium ${m.level === "error" ? "text-danger" : m.level === "warning" ? "text-[var(--warn)]" : "text-ink3"}`}>
+              {m.level !== "info" && <span aria-hidden className="h-[6px] w-[6px] flex-none rounded-full bg-current" />}
+              <span className="truncate">{m.label || (m.level === "error" ? "Error" : "Warning")}</span>
+              {m.level !== "info" && m.label && <span className="sr-only">{m.level}</span>}
+            </span>
+          )}
           <span className={`block text-[14.5px] font-medium leading-snug ${open ? "" : "truncate"}`}>{m.title}</span>
         </span>
         <ChevronDown size={15} className={`shrink-0 text-ink3 transition-transform duration-300 ${open ? "rotate-180" : ""}`} />

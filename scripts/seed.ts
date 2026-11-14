@@ -142,6 +142,15 @@ async function main() {
     priority: 5,
   });
   await setModule(atlas, {
+    key: "calendar-auth",
+    level: "error",
+    label: "Calendar · needs sign-in",
+    title: "Calendar connection expired",
+    blocks: [{ type: "callout", tone: "warn", text: "I could not read your calendar this morning, so the day plan is missing. Reconnect Google Calendar and I will try again." }],
+    actions: [{ label: "Reconnect", url: "https://example.com/connect" }],
+    show_until: new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10),
+  });
+  await setModule(atlas, {
     key: "roof-inspection",
     label: "Monday 9 am",
     title: "Roofer comes to inspect",

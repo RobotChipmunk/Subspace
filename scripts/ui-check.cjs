@@ -144,7 +144,11 @@ async function run(profile) {
     await reachable(hotel.getByRole("link", { name: /Directions/ }), "rail module action");
     await reachable(hotel.getByRole("link", { name: "Open page" }), "rail module page link");
     const count = await page.locator("[data-rail-module]").count();
-    if (count !== 2) fail(`rail: ${count} modules shown, expected 2`);
+    if (count !== 3) fail(`rail: ${count} modules shown, expected 3`);
+    // an error from an agent is listed first and marked
+    const firstMod = page.locator("[data-rail-module]").first();
+    if ((await firstMod.getAttribute("data-level")) !== "error") fail("rail: the error module is not shown first");
+    await reachable(firstMod.getByText("Calendar connection expired"), "rail error title");
     await noSidewaysScroll("rail");
     await shot("rail");
     // dismissing one removes it; hiding the rail gives the space back
@@ -155,7 +159,7 @@ async function run(profile) {
       .catch(() => fail("rail: opening one module left the other expanded"));
     await press(page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
     await settle(900);
-    if ((await page.locator("[data-rail-module]").count()) !== 1) fail("rail: dismissing a module did not remove it");
+    if ((await page.locator("[data-rail-module]").count()) !== 2) fail("rail: dismissing a module did not remove it");
     await press(page.getByRole("button", { name: "Hide the rail" }));
     await settle(900);
     if (await hotel.count()) fail("rail: hiding the rail left its modules on screen");

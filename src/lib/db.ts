@@ -254,6 +254,8 @@ const MIGRATIONS: string[] = [
    UPDATE search_docs d SET entity_type = 'link',
           body = d.body || E'\\n' || regexp_replace(regexp_replace(n.url, '^https?://', ''), '[^[:alnum:]]+', ' ', 'g')
      FROM context_nodes n WHERE n.id = d.entity_id AND d.entity_type = 'context' AND n.kind = 'link'`,
+  // A rail module can be a warning or an error from an agent's work, shown first and marked as such.
+  `ALTER TABLE rail_modules ADD COLUMN level text NOT NULL DEFAULT 'info'`,
 ];
 
 async function migrate() {
