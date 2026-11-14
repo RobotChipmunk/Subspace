@@ -2,6 +2,10 @@
  * The MCP server a guest's agents see: the guest's shared task list and nothing else. It has no
  * tool that reads the feed, context, links, other todos or the rail, so there is nothing to
  * restrict tool by tool; the limit to the guest's own tasks is enforced again in core/guests.ts.
+ *
+ * Everything here is written from the guest's side and names the owner ("Chris"), not the
+ * product. The guest's agent should reach for it whenever they ask to send Chris a task or a
+ * reminder, without having to know that it is called Subspace.
  */
 import { guestAdd, guestDelete, guestTask, guestTasks, guestUpdate } from "../core/guests";
 import { ownerAgent, type Agent } from "../core/util";
@@ -9,61 +13,96 @@ import type { Tool } from "./tools";
 
 const str = (description: string) => ({ type: "string", description });
 
-export async function GUEST_GUIDE(guest: Agent, readOnly: boolean): Promise<string> {
-  const owner = (await ownerAgent()).name;
-  return `You are connected on behalf of ${guest.name} to ${owner}'s Subspace, where ${owner} keeps their to-do list.
-
-This connection does one thing: it lets ${guest.name} give ${owner} tasks and follow them. You can see and change only the tasks on ${guest.name}'s shared list ("From ${guest.name}"). Nothing else of ${owner}'s is reachable from here.${readOnly ? "\n\nThis connection is read-only: you can look at the tasks but not add, change or delete them." : ""}
-
-HOW IT WORKS
-- task_add puts a new task in front of ${owner}. It appears at once in their "From ${guest.name}" list and beside their feed, and stays there until they give it a day.
-- ${owner} decides when to do it. You cannot set the day; if timing matters, say so in the title ("Book the dentist before Friday") or the notes.
-- tasks() shows every task with its status: waiting (no day yet), scheduled (with the day, or the week), backlog (set aside, no day), done.
-- task(id) returns one task with its notes. Notes are markdown; either of you may write there.
-- task_update renames a task or edits its notes. task_delete withdraws it, wherever it is.
-
-WRITING A GOOD TASK
-- The title starts with a verb and fits on one line: "Pick up the dry cleaning", not "dry cleaning?".
-- One task per thing to do. Details, links, addresses and deadlines go in the notes.
-- Before adding, call tasks() and check it is not already there.
-- When ${guest.name} asks "did ${owner} do X?" or "when is X happening?", call tasks() and answer from the status. Do not guess.`;
+/** The owner's first name, and the same as a word usable in a tool name ("Chris" → "chris"). */
+export async function ownerNames() {
+  const name = (await ownerAgent()).name.trim();
+  const first = name.split(/\s+/)[0] || "the owner";
+  const slug = first.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "") || "owner";
+  return { name: first, slug };
 }
 
-export const GUEST_TOOLS: Tool[] = [
-  {
-    name: "tasks",
-    description: "The tasks on your shared list, newest first, each with its status: waiting (not on a day yet), scheduled (with the day or week), backlog, or done. Call this first.",
-    inputSchema: { type: "object", properties: { show: str('"open" (default): tasks not finished. "recent": also those finished in the last 30 days. "all": everything.') } },
-    readOnly: true,
-    run: (g, args) => guestTasks(g, args),
-  },
-  {
-    name: "task",
-    description: "One task in full: its status, the day it is planned for, and its notes.",
-    inputSchema: { type: "object", properties: { id: str("Task id from tasks().") }, required: ["id"] },
-    readOnly: true,
-    run: (g, { id }) => guestTask(g, id),
-  },
-  {
-    name: "task_add",
-    description: "Add a task for the owner. It shows up for them right away and waits until they give it a day. Title starts with a verb and fits on one line; put details in notes.",
-    inputSchema: { type: "object", properties: { title: str("The task, one line."), notes: str("Optional details, as markdown.") }, required: ["title"] },
-    run: (g, args) => guestAdd(g, args),
-  },
-  {
-    name: "task_update",
-    description: "Rename a task or edit its notes. notes replaces all the notes; notes_append adds to the end and is safer when the owner may have written there too (read the task first).",
-    inputSchema: {
-      type: "object",
-      properties: { id: str("Task id."), title: str("New title."), notes: str("New notes, replacing the existing ones."), notes_append: str("Markdown to add at the end of the notes.") },
-      required: ["id"],
+/** How the server presents itself in the guest's app: "Tasks for Chris". */
+export async function guestServerInfo() {
+  const o = await ownerNames();
+  return { name: `tasks-for-${o.slug}`, title: `Tasks for ${o.name}` };
+}
+
+export async function GUEST_GUIDE(guest: Agent, readOnly: boolean): Promise<string> {
+  const { name: o, slug } = await ownerNames();
+  const g = guest.name;
+  return `TASKS FOR ${o.toUpperCase()}
+
+This connection is how ${g} sends ${o} tasks and reminders, and keeps track of them. It puts things straight onto ${o}'s own to-do list.
+
+WHEN TO USE IT
+Use it whenever ${g} wants ${o} to do something, or to remember something, even if they do not name this connection. For example:
+- "Send ${o} a task to pick up the dry cleaning"
+- "Remind ${o} to call the plumber"
+- "Ask ${o} to book the dentist before Friday"
+- "Tell ${o} we need milk"
+- "Add renewing the car registration to ${o}'s list"
+- "Can you get ${o} to look at the leaky tap?"
+Also use it when ${g} asks about something they sent: "Did ${o} do the dry cleaning?", "When is ${o} calling the plumber?", "What's still on ${o}'s list from me?"
+
+WHAT IT CAN AND CANNOT DO
+- send_task_to_${slug} puts a task on ${o}'s list at once. It stays in front of ${o} until ${o} gives it a day.
+- ${o} decides when to do it. You cannot set the day or a time, and ${o} gets no alarm at a set time: a "reminder" is a task ${o} sees on their list. When timing matters, put it in the title ("Book the dentist before Friday") and the details in notes.
+- list_tasks_for_${slug} shows what ${g} has sent and what became of each: waiting (no day yet), scheduled (with the day or week), backlog (set aside), or done.
+- get_task_for_${slug}, update_task_for_${slug} and delete_task_for_${slug} read, change or withdraw one of them.
+- You see only the tasks ${g} sent (and any ${o} added to this shared list), nothing else of ${o}'s.${readOnly ? `\n- This connection is read-only: you can look at the tasks but not send, change or withdraw them.` : ""}
+
+DOING IT WELL
+- One task per thing to do. The title starts with a verb and fits on one line: "Pick up the dry cleaning", not "dry cleaning?".
+- Addresses, phone numbers, links, ticket numbers and deadlines go in notes.
+- Before sending, list the tasks and check it is not already there; if it is, update that one instead.
+- When asked about progress, answer from the status. Do not guess.
+- After sending, tell ${g} in a few words what you sent. Do not say "Subspace"; say it is on ${o}'s list.`;
+}
+
+/** The tools, named for the owner so the guest's agent picks them for "send Chris…". */
+export async function guestTools(): Promise<(Tool & { aliases?: string[] })[]> {
+  const { name: o, slug } = await ownerNames();
+  return [
+    {
+      name: `send_task_to_${slug}`,
+      aliases: ["task_add"],
+      description: `Send ${o} a task or reminder: it goes straight onto ${o}'s to-do list. Use this whenever the user asks to send, remind, ask or tell ${o} to do something, or to add something to ${o}'s list, even if they do not name this tool. Title starts with a verb and fits on one line; details and deadlines go in notes. ${o} picks the day.`,
+      inputSchema: { type: "object", properties: { title: str(`What ${o} should do, one line, starting with a verb. Include a deadline if there is one, e.g. "Book the dentist before Friday".`), notes: str("Optional details as markdown: addresses, numbers, links, why it matters.") }, required: ["title"] },
+      run: (g, args) => guestAdd(g, args),
     },
-    run: (g, { id, ...patch }) => guestUpdate(g, id, patch),
-  },
-  {
-    name: "task_delete",
-    description: "Withdraw a task: it is removed from the owner's list, whatever its status. Only the owner can bring it back.",
-    inputSchema: { type: "object", properties: { id: str("Task id.") }, required: ["id"] },
-    run: (g, { id }) => guestDelete(g, id),
-  },
-];
+    {
+      name: `list_tasks_for_${slug}`,
+      aliases: ["tasks"],
+      description: `The tasks and reminders the user has sent ${o}, newest first, with what became of each: waiting (${o} has not given it a day yet), scheduled (with the day or week), backlog, or done. Use it to answer "did ${o} do…?" or "what's still on ${o}'s list?", and to check before sending a duplicate.`,
+      inputSchema: { type: "object", properties: { show: str('"open" (default): not finished. "recent": also those finished in the last 30 days. "all": everything.') } },
+      readOnly: true,
+      run: (g, args) => guestTasks(g, args),
+    },
+    {
+      name: `get_task_for_${slug}`,
+      aliases: ["task"],
+      description: `One task sent to ${o}, in full: its status, the day ${o} planned it for, and its notes.`,
+      inputSchema: { type: "object", properties: { id: str(`Task id from list_tasks_for_${slug}.`) }, required: ["id"] },
+      readOnly: true,
+      run: (g, { id }) => guestTask(g, id),
+    },
+    {
+      name: `update_task_for_${slug}`,
+      aliases: ["task_update"],
+      description: `Change a task already sent to ${o}: rename it or edit its notes. notes replaces all the notes; notes_append adds to the end and is safer, since ${o} may have written there too.`,
+      inputSchema: {
+        type: "object",
+        properties: { id: str("Task id."), title: str("New title."), notes: str("New notes, replacing the existing ones."), notes_append: str("Markdown to add at the end of the notes.") },
+        required: ["id"],
+      },
+      run: (g, { id, ...patch }) => guestUpdate(g, id, patch),
+    },
+    {
+      name: `delete_task_for_${slug}`,
+      aliases: ["task_delete"],
+      description: `Withdraw a task sent to ${o}: it comes off ${o}'s list, whatever its status. Only ${o} can bring it back.`,
+      inputSchema: { type: "object", properties: { id: str("Task id.") }, required: ["id"] },
+      run: (g, { id }) => guestDelete(g, id),
+    },
+  ];
+}
