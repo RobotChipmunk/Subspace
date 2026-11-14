@@ -123,6 +123,12 @@ async function main() {
   ok(!wrong.code && wrong.approveStatus === 401 && wrong.approveBody.includes("not right"), "a wrong password is refused on the approval page");
   const cross = await fetch(`${BASE}/oauth/authorize`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://evil.example", Cookie: cookie }, body: form({ ...c2.q, decision: "approve" }) });
   ok(cross.status === 403, "a form posted from another site is refused, even with the owner's session");
+  const asBrowser = async (headers: Record<string, string>) => {
+    const r = await fetch(`${BASE}/oauth/authorize`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", ...headers }, body: form({ ...c2.q, decision: "approve", secret: PASSWORD }) });
+    return r.status;
+  };
+  ok((await asBrowser({ Origin: "null", "Sec-Fetch-Site": "same-origin" })) === 303, "a browser that withholds its origin but marks the form same-site is accepted");
+  ok((await asBrowser({ Origin: "null", "Sec-Fetch-Site": "cross-site" })) === 403 && (await asBrowser({})) === 403, "but not one marked cross-site, or with no sign of where it came from");
   const evil = await fetch(`${BASE}/oauth/authorize?${form({ ...c2.q, redirect_uri: "https://evil.example/cb" })}`, { redirect: "manual" });
   ok(evil.status === 400 && !evil.headers.get("location"), "an unregistered redirect address gets an error page, not a redirect");
   const reg = await fetch(`${BASE}/oauth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ redirect_uris: ["http://evil.example/cb"] }) });

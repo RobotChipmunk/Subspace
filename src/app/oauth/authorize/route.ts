@@ -19,9 +19,22 @@ const HEADERS = {
   "Cache-Control": "no-store",
   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
   "X-Frame-Options": "DENY",
-  "Referrer-Policy": "no-referrer",
+  // same-origin, not no-referrer: with no-referrer browsers send "Origin: null" when the form is
+  // submitted, and the check below could not tell this page's own form from anyone else's.
+  // Other sites still receive nothing.
+  "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
 };
+
+/**
+ * Whether a form submission came from this site's own page. Browsers say so with the Origin
+ * header, or, where they withhold it ("null" or absent), with Sec-Fetch-Site.
+ */
+function fromThisSite(req: Request, origin: string): boolean {
+  const from = req.headers.get("origin");
+  if (from && from !== "null") return from === origin || from === new URL(req.url).origin;
+  return req.headers.get("sec-fetch-site") === "same-origin";
+}
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -135,8 +148,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const origin = originOf(req);
   // Only this page's own form may post here.
-  const from = req.headers.get("origin");
-  if (!from || from !== origin) return problem("This request is not valid", "Start the connection again from the app.", 403);
+  if (!fromThisSite(req, origin)) return problem("This request is not valid", "Start the connection again from the app.", 403);
   let f: URLSearchParams;
   try {
     f = new URLSearchParams(await req.text());
