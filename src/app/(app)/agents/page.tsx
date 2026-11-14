@@ -1,6 +1,6 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { Check, Copy, LogOut, MessageCircle, Plus, ShieldAlert, Wand2, Zap } from "lucide-react";
+import { Check, Copy, LogOut, MessageCircle, Plus, Wand2, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";
 import useSWR from "swr";
@@ -166,7 +166,6 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
   const illustrator = a.roles.includes("illustrator");
   const origin = typeof window !== "undefined" ? location.origin : "";
   const patch = async (body: Record<string, unknown>) => (await api(`agents/${a.id}`, { method: "PATCH", body }), onChanged());
-  const oldAddress = !!a.has_token && !!a.url_token;
 
   return (
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: index * 0.04 }} className={`glass rounded-[24px] p-3.5 ${open || realtime || chat ? "glass-lift" : ""}`}>
@@ -184,11 +183,6 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
             {illustrator && (
               <span className="flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-medium text-accent">
                 <Wand2 size={11} /> Illustrator
-              </span>
-            )}
-            {oldAddress && (
-              <span title="The old secret address still works" className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--warn)_16%,transparent)] px-2 py-0.5 text-[11.5px] font-medium text-[var(--warn)]">
-                <ShieldAlert size={11} /> Old address on
               </span>
             )}
           </div>
@@ -237,17 +231,6 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
               </p>
               <CopyField label="Connector address" value={`${origin}/api/mcp/${a.handle}`} />
               <Connections id={a.id} empty="No app has signed in yet." />
-
-              {oldAddress && (
-                <div className="rounded-[14px] bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] px-3 py-2.5">
-                  <p className="text-[13px] leading-relaxed text-[var(--warn)]">
-                    {a.name} can still connect with its old address, the one with a secret in it. Anyone who has seen that address can use it. Once {a.name} appears under Connected apps, switch the old address off.
-                  </p>
-                  <div className="mt-2 flex justify-end">
-                    <Confirm label="Switch off the old address" sure="Switch it off for good?" className="bg-[var(--warn)] font-medium text-white" onConfirm={() => patch({ url_token: false })} />
-                  </div>
-                </div>
-              )}
 
               <details className="group rounded-[14px] bg-fill px-3 py-2.5 text-[13px] text-ink2">
                 <summary className="cursor-pointer list-none font-medium marker:hidden">For scripts: a token sent as a header</summary>

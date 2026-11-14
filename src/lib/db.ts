@@ -260,7 +260,8 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE todos ADD COLUMN deleted_at timestamptz;
    CREATE INDEX todos_deleted ON todos (deleted_at) WHERE deleted_at IS NOT NULL`,
   // Signing in to connect (OAuth), and guests.
-  // - url_token: whether an agent's static token may still be given in the address itself.
+  // - url_token: whether an agent's static token could still be given in the address itself.
+  //   Retired with that form of address (next migration); the column is no longer read.
   // - A guest is a person other than the owner (agents.kind = 'guest') whose own agents may add and
   //   follow tasks for the owner. passcode_hash is what the guest signs in with when connecting one.
   // - todos.guest_id tags a task as belonging to that guest's shared list; scope 'guest' means the
@@ -308,6 +309,10 @@ const MIGRATIONS: string[] = [
    CREATE INDEX IF NOT EXISTS auth_attempts_key ON auth_attempts (key, ts);
    ALTER TABLE todos ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
    CREATE INDEX IF NOT EXISTS todos_deleted ON todos (deleted_at) WHERE deleted_at IS NOT NULL`,
+  // Addresses with the static token in them (/api/mcp/ss_…) are retired. Tokens that could be used
+  // that way may sit in logs and settings screens, so they are cancelled. Tokens made since, which
+  // were only ever accepted as a header, keep working.
+  `UPDATE agents SET token_hash = NULL WHERE url_token AND token_hash IS NOT NULL`,
 ];
 
 async function migrate() {

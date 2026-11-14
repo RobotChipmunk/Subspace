@@ -64,18 +64,10 @@ export type McpCaller = { agent: Agent; grant?: Grant } | { deny: string; target
  * - /api/mcp/<handle> and /api/mcp/guest/<handle>: an OAuth access token issued for exactly that
  *   agent or guest. An agent's static token is also accepted there as a Bearer header.
  * - /api/mcp: an agent's static token as a Bearer header (scripts, and clients that send headers).
- * - /api/mcp/ss_…: the static token in the address, the older way, while the owner still allows it.
  * Guests are reached only with OAuth tokens. The owner's own session is never accepted here.
  */
-export async function mcpCaller(req: Request, at: { target?: Target; pathToken?: string }): Promise<McpCaller> {
-  if (at.pathToken) {
-    const a = await agentByToken(at.pathToken);
-    if (!a) return { deny: "Unknown agent token. Create one in Subspace under Agents." };
-    if (!a.url_token) return { deny: `The old secret address for @${a.handle} has been switched off. Connect to /api/mcp/${a.handle} and sign in instead.` };
-    return { agent: a };
-  }
+export async function mcpCaller(req: Request, target?: Target): Promise<McpCaller> {
   const bearer = bearerOf(req);
-  const target = at.target;
   if (!target) {
     const a = bearer?.startsWith("ss_") ? await agentByToken(bearer) : null;
     return a ? { agent: a } : { deny: "Unknown or missing agent token. Connect to your agent's own address (shown in Subspace under Agents) to sign in." };

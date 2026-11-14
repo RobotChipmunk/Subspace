@@ -101,7 +101,7 @@ async function main() {
   ok((await mcp(G, t.json.access_token, "initialize")).status === 401, "an agent's token is refused at a guest address");
   ok((await mcp("/api/mcp/claude", t.json.access_token, "initialize")).status === 401, "and at another agent's address");
   ok((await fetch(`${BASE}/api/v1/me`, { headers: { Authorization: `Bearer ${t.json.access_token}` } })).status === 401, "and by the REST API");
-  ok((await mcp(`/api/mcp/${t.json.access_token}`, null, "initialize")).status === 401, "and when put in the address");
+  ok((await mcp(`/api/mcp/${t.json.access_token}`, null, "initialize")).status === 404, "and when put in the address");
 
   console.log("\nRenewal");
   const r1 = await token({ grant_type: "refresh_token", refresh_token: t.json.refresh_token, client_id: c2.reg.client_id });
@@ -206,7 +206,7 @@ async function main() {
   console.log("\nStatic tokens");
   const st = (await rest(`agents/${agent.id}/token`, { method: "POST" })).json.token as string;
   ok((await mcp("/api/mcp", st, "ping")).status === 200 && (await mcp(A, st, "ping")).status === 200, "a static token works as an Authorization header");
-  ok((await mcp(`/api/mcp/${st}`, null, "ping")).status === 401, "but a new static token is not accepted in the address");
+  ok((await mcp(`/api/mcp/${st}`, null, "ping")).status === 404, "but a static token is not accepted in the address");
   ok((await mcp("/api/mcp", cookie.split("=")[1], "ping")).status === 401, "the owner's session token is not accepted by the MCP server");
 
   await rest(`guests/${guest.id}`, { method: "DELETE" });

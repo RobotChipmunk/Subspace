@@ -15,8 +15,6 @@ export type Agent = {
   archived: boolean;
   created_at: string;
   has_token?: boolean;
-  /** Whether the static token may still be given in the address itself (the older way to connect). */
-  url_token?: boolean;
   /** Guests: whether a passcode has been issued. */
   has_passcode?: boolean;
   /** Built-in runtime settings, without the key. */
@@ -74,7 +72,7 @@ export function oneLine(s: string, max = 140): string {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
 }
 
-const AGENT_COLS = "id, handle, name, kind, bio, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token, url_token, passcode_hash IS NOT NULL AS has_passcode, runtime - 'key_enc' AS runtime";
+const AGENT_COLS = "id, handle, name, kind, bio, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token, passcode_hash IS NOT NULL AS has_passcode, runtime - 'key_enc' AS runtime";
 
 export async function listAgents(includeArchived = false): Promise<Agent[]> {
   return q<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE kind <> 'guest' ${includeArchived ? "" : "AND NOT archived"} ORDER BY kind DESC, created_at`);

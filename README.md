@@ -84,9 +84,8 @@ keep working without you.
   disconnect it. A connection can be approved as read only.
 - A script, or a client that cannot sign in, can send a fixed token as `Authorization: Bearer` to
   `/api/mcp`. Make one under Agents → Connect → For scripts.
-- The older address with the token in it (`/api/mcp/ss_…`) keeps working for agents that already
-  used it, until you press "Switch off the old address" for that agent. New tokens are never
-  accepted in the address.
+- A token is never accepted in an address. The older form that put one there (`/api/mcp/ss_…`)
+  has been retired, and the tokens that could be used that way were cancelled.
 - Wrong passwords and passcodes are limited to eight tries per address in fifteen minutes.
 
 `npm run test:oauth` runs the whole flow against a running server, including what must be refused.

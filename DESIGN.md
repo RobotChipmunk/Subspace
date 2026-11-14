@@ -151,7 +151,7 @@ Patterns:
   shows only while it holds something. Prefer this pattern, confirm then recoverable, for
   anything the owner wrote themselves.
 - **Confirm once more** (`Confirm` in `agents/page.tsx`): for a step that is not a deletion but
-  cannot be taken back (switching off an old address, replacing a token or passcode). The button
+  cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
 - **From tag** (`FromTag` in `todos/page.tsx`): an `accent-soft` pill reading "From <name>" on a
