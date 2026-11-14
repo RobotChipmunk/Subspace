@@ -102,6 +102,10 @@ Patterns:
   delete pill; the save button grows out of the link field. Avoid cross-fading two different
   controls.
 - **Lift.** A dragged row scales to 1.02, gains `--shadow-lift` and a solid surface.
+- **Carry.** A lifted row goes wherever it is taken. Carried over another section of the same
+  list it joins it at once and the rows there part to make room. Carried over the list of folders
+  it thins to 30% and passes beneath their names; the folder it would land in turns solid with its
+  name in accent. A place that cannot take it does not react.
 - **Emphasis is rare.** One small flourish at the moment it matters (the bin's shake as it arms).
   Never loop attention-seeking motion.
 - **Make room, do not cover.** A panel that opens beside the content slides in from its edge with
@@ -146,6 +150,17 @@ Patterns:
 - **Confirm delete** (`ConfirmDelete.tsx`): the only way to remove anything. A quiet bin; the
   first tap arms it into a red pill with the action's name; the second tap does it; it disarms
   after 4 seconds, on Escape, or on a tap elsewhere. Use it for every destructive action.
+- **Lists of several days** (This week, Next week, Last week, Weekend in `todos/page.tsx`): a
+  small-caps heading per day, shown with or without tasks so every day is somewhere to drop one:
+  what is left of this week up to Friday, the five weekdays of next and last week. Days outside
+  that (the weekend in a week, days already gone) show only while they hold something. No count
+  under the title; the headings say enough.
+- **Moving a task** (todos): drag it to another day in the page, or onto a folder in the list of
+  folders (see Carry). Recently deleted is never a drop target, a person's list takes only tasks
+  they shared, and days already gone take only finished tasks, since an unfinished one would roll
+  straight back to today.
+- **Last week** (todos): what was finished last week, by day. It sits last in the list of folders,
+  beneath Recently deleted, in `ink3` like it. Nothing can be added there.
 - **Recently deleted** (todos): a deleted task leaves its list at once and waits in a bin for 15
   days, where it can be restored or deleted for good. The bin's entry in the list of folders
   shows only while it holds something. Prefer this pattern, confirm then recoverable, for

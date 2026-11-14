@@ -171,7 +171,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_list",
-    description: "The owner's tasks for a view: today, week, weekend, next_week, backlog, or a YYYY-MM-DD date.",
+    description: "The owner's tasks for a view: today, week, weekend, next_week, backlog, last_week (what was finished last week), or a YYYY-MM-DD date.",
     inputSchema: obj({ view: str("Default today.") }),
     readOnly: true,
     run: async (_a, { view }) => {

@@ -109,6 +109,11 @@ async function main() {
   await createTodo(owner, { title: "Draft Q1 goals", view: "week" });
   await createTodo(owner, { title: "Renew passport", view: "next_week" });
   await createTodo(owner, { title: "Replace the hallway light", view: "backlog" });
+  // Finished last week: unfinished tasks roll forward, so a past week only ever holds what got done.
+  for (const [title, day] of [["Send the school forms", 1], ["Order winter tyres", 3]] as const) {
+    const done = await createTodo(owner, { title, view: "today" });
+    await q("UPDATE todos SET done = true, done_at = now() - interval '7 days', date = date_trunc('week', date)::date - 7 + $2::int WHERE id = $1", [done.id, day]);
+  }
 
   await createNode(claude, { parent: "work", title: "Robotics thesis", summary: "Why I hold robotics positions and what would change my mind.", body: "## Position\n\n- Agility Robotics, secondary shares (as of 2026-11)\n\n## Thesis\n\n- Paid deployments matter more than demos\n- Multiples: Figure about 95x revenue, Agility about 31x\n\n## Would change my mind\n\n- A fleet recall\n- A competitor reaching 1,000 paid units first" });
   await createNode(atlas, { parent: "home", title: "Weekly rhythm", summary: "School run, pickups and recurring household chores.", body: "- School run: 8:10 out, 3:05 pickup\n- Compost: every other Monday from 2026-11-16\n- Recycling: Mondays" });

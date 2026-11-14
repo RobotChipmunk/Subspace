@@ -616,6 +616,10 @@ html[data-typing] .art-mesh {
   user-select: none;
   -webkit-touch-callout: none;
 }
+/* Dragged over the lists in the side panel: it thins and passes beneath their names, so the one aimed at stays readable. */
+.todo-row.over-lists {
+  opacity: 0.3 !important;
+}
 
 /* ---------- Feed: several pictures on one post, swiped sideways ---------- */
 .slides {

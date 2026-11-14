@@ -38,14 +38,14 @@ async function rollover(today: string) {
 export async function calendar() {
   const today = todayIn(await timezone());
   const monday = mondayOf(today);
-  return { today, monday, saturday: addDays(monday, 5), sunday: addDays(monday, 6), nextMonday: addDays(monday, 7), dow: weekday(today) };
+  return { today, monday, saturday: addDays(monday, 5), sunday: addDays(monday, 6), nextMonday: addDays(monday, 7), lastMonday: addDays(monday, -7), dow: weekday(today) };
 }
 
 type Spec = { where: string; params: unknown[]; add: { scope: string; date: string | null; guest_id?: string } };
 
 /** Where a view's tasks live, and where a task added to that view should go. */
 function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec {
-  const { today, monday, saturday, sunday, nextMonday } = cal;
+  const { today, monday, saturday, sunday, nextMonday, lastMonday } = cal;
   // a guest's tasks that the owner has not yet placed on a day
   if (view.startsWith("guest:")) return { where: "scope = 'guest' AND guest_id = $1", params: [view.slice(6)], add: { scope: "guest", date: null, guest_id: view.slice(6) } };
   if (view === "today") return { where: "scope = 'day' AND date = $1", params: [today], add: { scope: "day", date: today } };
@@ -64,9 +64,16 @@ function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec
       params: [nextMonday, addDays(nextMonday, 6)],
       add: { scope: "week", date: nextMonday },
     };
+  // Unfinished tasks roll forward, so last week holds only what was finished then.
+  if (view === "last_week")
+    return {
+      where: "((scope = 'day' AND date BETWEEN $1 AND $2) OR (scope = 'week' AND date = $1))",
+      params: [lastMonday, addDays(lastMonday, 6)],
+      add: { scope: "week", date: lastMonday },
+    };
   if (view === "backlog") return { where: "scope = 'backlog'", params: [], add: { scope: "backlog", date: null } };
   if (/^\d{4}-\d{2}-\d{2}$/.test(view)) return { where: "scope = 'day' AND date = $1", params: [view], add: { scope: "day", date: view } };
-  throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, backlog or a YYYY-MM-DD date.`);
+  throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, last_week, backlog or a YYYY-MM-DD date.`);
 }
 
 export async function folders(): Promise<{ today: string; folders: Folder[]; bin: number }> {
@@ -83,6 +90,8 @@ export async function folders(): Promise<{ today: string; folders: Folder[]; bin
   else if (cal.dow === 6) list.push({ key: cal.sunday, label: "Tomorrow", hint: "Sunday" });
   list.push({ key: "next_week", label: "Next week" }, { key: "backlog", label: "Backlog" });
   for (const g of await listGuests()) list.push({ key: `guest:${g.id}`, label: `From ${g.name}`, guest: g.id });
+  // Always last: the app lists it beneath Recently deleted.
+  list.push({ key: "last_week", label: "Last week" });
 
   const out: Folder[] = [];
   for (const f of list) {

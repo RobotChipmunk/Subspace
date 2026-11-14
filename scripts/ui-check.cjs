@@ -397,6 +397,60 @@ async function run(profile) {
     if (await page.getByLabel("Task name").count()) fail("todos reorder: letting go of a dragged task opened it");
     await shot("todos-reordered");
   });
+  await step("todos drag to a day and to a list", async () => {
+    // A task can be carried into another day's section, and onto a list in the side panel.
+    const nav = page.getByRole("navigation", { name: "Lists" });
+    const open = async (name) => (await press(nav.getByRole("button", { name })), await settle(1200));
+    const at = async (loc) => ((b) => ({ x: b.x + Math.min(110, b.width / 2), y: b.y + b.height / 2 }))(await loc.first().boundingBox());
+    const carry = async (from, to, name) => {
+      const point = (i) => [from.x + ((to.x - from.x) * i) / 30, from.y + ((to.y - from.y) * i) / 30];
+      const cdp = profile.touch && (await page.context().newCDPSession(page));
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      if (cdp) (await touch("touchStart", from.x, from.y), await page.waitForTimeout(450));
+      else (await page.mouse.move(from.x, from.y), await page.mouse.down());
+      for (let i = 1; i <= 30; i++) (await (cdp ? touch("touchMove", ...point(i)) : page.mouse.move(...point(i))), await page.waitForTimeout(22));
+      await page.waitForTimeout(350);
+      await shot(name);
+      if (cdp) (await touch("touchEnd", 0, 0), await cdp.detach());
+      else await page.mouse.up();
+      await settle(1500);
+    };
+    const days = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[data-day]")].map((d) => [d.querySelector("h2").innerText.toLowerCase(), [...d.querySelectorAll("li")].map((l) => l.innerText.trim().split("\n")[0])])));
+    const task = "Renew passport";
+    const row = page.locator("main li", { hasText: task });
+
+    await open(/^Next week/);
+    await noSidewaysScroll("todos next week");
+    const before = await days();
+    for (const d of ["any day", "monday", "tuesday", "wednesday", "thursday", "friday"]) if (!(d in before)) fail(`todos: Next week does not show "${d}"`);
+    if (await page.locator("main header p").count()) fail("todos: Next week still shows a line under its title");
+    if (!before["any day"]?.includes(task)) return fail(`todos drag: "${task}" is not under Any day in Next week to test with`);
+
+    await carry(await at(row), await at(page.locator("[data-day] h2", { hasText: "Wednesday" })), "todos-drag-day");
+    if (!(await days()).wednesday?.includes(task)) fail("todos drag: a task carried to Wednesday did not stay there");
+    if (await page.getByLabel("Task name").count()) fail("todos drag: letting go of a carried task opened it");
+    // the move is saved, not only shown
+    await open(/^Backlog/);
+    await open(/^Next week/);
+    if (!(await days()).wednesday?.includes(task)) fail("todos drag: a task carried to Wednesday was not saved there");
+
+    // on a phone the lists run sideways above the tasks; bring the one aimed at into view first
+    const backlog = nav.getByRole("button", { name: /^Backlog/ });
+    await backlog.scrollIntoViewIfNeeded();
+    await carry(await at(row), await at(backlog), "todos-drag-list");
+    if (await row.count()) fail("todos drag: a task dropped on Backlog is still listed in Next week");
+    await open(/^Backlog/);
+    if (!(await row.count())) fail("todos drag: a task dropped on Backlog did not arrive there");
+    // and back again, from a list with no sections
+    const next = nav.getByRole("button", { name: /^Next week/ });
+    await next.scrollIntoViewIfNeeded();
+    await carry(await at(row), await at(next), "todos-drag-back");
+    await open(/^Next week/);
+    if (!(await days())["any day"]?.includes(task)) fail("todos drag: a task dropped on Next week did not arrive under Any day");
+    await open(/^Last week/);
+    await shot("todos-last-week");
+    if (await page.getByLabel("Add task").count()) fail("todos: Last week offers to add a task");
+  });
   await step("todos add, tick, open", async () => {
     await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
     await settle(500);
