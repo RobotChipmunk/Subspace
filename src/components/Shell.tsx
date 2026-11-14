@@ -3,7 +3,7 @@ import { Bot, BookOpen, CircleCheck, PanelRight, Radar, Sparkle } from "lucide-r
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api, spring, useMe } from "@/lib/client";
 import { Rail, useRail } from "./Rail";
 
@@ -15,10 +15,27 @@ const TABS = [
   { href: "/agents", label: "Agents", icon: Bot },
 ];
 
+/**
+ * The comments panel beside the feed. The shell owns whether it is open, because the page has to
+ * make room for it and the docked rail has to step aside while it is there.
+ */
+const Comments = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
+export const useComments = () => useContext(Comments);
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { me } = useMe();
   const rail = useRail();
+  const [commentsOpen, setComments] = useState(false);
+  const comments = useMemo(() => ({ open: commentsOpen, set: setComments }), [commentsOpen]);
+  // Comments take the rail's place while they are open; the rail returns when they close.
+  const railDocked = rail.docked && !commentsOpen;
+  const toggleRail = () => {
+    if (commentsOpen && rail.wide && rail.modules.length) {
+      setComments(false);
+      if (!rail.open) rail.toggle();
+    } else rail.toggle();
+  };
 
   // Todos follow the owner's local calendar, so keep the server in step with this device.
   // Mark the page as "typing" while a text field or the editor has the keyboard, so heavy
@@ -46,7 +63,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, [me]);
 
   return (
-    <div className="group/shell relative z-10 flex h-dvh" data-rail={rail.docked ? "open" : "closed"}>
+    <div className="group/shell relative z-10 flex h-dvh" data-rail={railDocked ? "open" : "closed"} data-comments={commentsOpen ? "open" : "closed"}>
       <nav
         aria-label="Apps"
         className="glass nav fixed z-30 flex items-center gap-1 rounded-[26px] p-1.5 max-md:inset-x-0 max-md:bottom-[max(12px,env(safe-area-inset-bottom))] max-md:mx-auto max-md:w-fit md:left-4 md:top-1/2 md:-translate-y-1/2 md:flex-col"
@@ -66,8 +83,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           );
         })}
         <span className="mx-1 h-6 w-px bg-[var(--line)] md:mx-0 md:my-1 md:h-px md:w-6" aria-hidden />
-        <button onClick={rail.toggle} aria-label={rail.modules.length ? `Now: ${rail.modules.length} ${rail.modules.length === 1 ? "thing" : "things"} to know` : "Now"} aria-pressed={rail.docked || rail.sheet} className="group relative grid h-12 w-12 place-items-center rounded-[20px]">
-          <motion.span whileTap={{ scale: 0.86 }} transition={spring} className={`relative transition-colors duration-300 ${rail.docked || rail.sheet ? "text-accent" : "text-ink2 group-hover:text-ink"}`}>
+        <button onClick={toggleRail} aria-label={rail.modules.length ? `Now: ${rail.modules.length} ${rail.modules.length === 1 ? "thing" : "things"} to know` : "Now"} aria-pressed={railDocked || rail.sheet} className="group relative grid h-12 w-12 place-items-center rounded-[20px]">
+          <motion.span whileTap={{ scale: 0.86 }} transition={spring} className={`relative transition-colors duration-300 ${railDocked || rail.sheet ? "text-accent" : "text-ink2 group-hover:text-ink"}`}>
             <PanelRight size={21} strokeWidth={1.8} />
             {rail.modules.length > 0 && (
               <span className={`absolute -right-2 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full px-1 text-[10.5px] font-semibold leading-none text-white ${rail.level === "error" ? "bg-danger" : rail.level === "warning" ? "bg-[var(--warn)]" : "bg-accent"}`}>{rail.modules.length}</span>
@@ -76,12 +93,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <span className="pointer-events-none absolute left-full ml-3 hidden translate-x-[-4px] rounded-lg bg-ink px-2 py-1 text-[12px] font-medium text-bg opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 md:block">Now</span>
         </button>
       </nav>
-      <main className="scroll h-dvh min-w-0 flex-1 transition-[padding] duration-500 ease-out-soft md:pl-[92px] min-[1100px]:group-data-[rail=open]/shell:pr-[280px]">
+      <main className="scroll h-dvh min-w-0 flex-1 transition-[padding] duration-500 ease-out-soft md:pl-[92px] min-[1100px]:group-data-[rail=open]/shell:pr-[280px] md:group-data-[comments=open]/shell:pr-[var(--comments-w)]">
         <motion.div key={path.split("/")[1]} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} className="min-h-full px-4 pb-32 pt-10 md:px-8 md:pt-14">
-          {children}
+          <Comments.Provider value={comments}>{children}</Comments.Provider>
         </motion.div>
       </main>
-      <Rail rail={rail} />
+      <Rail rail={rail} docked={railDocked} />
     </div>
   );
 }

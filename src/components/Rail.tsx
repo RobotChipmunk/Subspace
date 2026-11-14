@@ -48,6 +48,7 @@ export function useRail() {
     /** The most serious thing waiting: colours the count on the rail button. */
     level: modules.some((m) => m.level === "error") ? ("error" as const) : modules.some((m) => m.level === "warning") ? ("warning" as const) : ("info" as const),
     open,
+    wide,
     docked: wide && open && modules.length > 0,
     sheet: sheet && !wide,
     /** The one control: docks or undocks on a wide screen, opens the sheet on a narrow one. */
@@ -159,7 +160,7 @@ const Header = ({ rail }: { rail: RailState }) => (
 );
 
 /** Docked beside the content on a wide screen; a sheet from the right edge on a narrow one. */
-export function Rail({ rail }: { rail: RailState }) {
+export function Rail({ rail, docked = rail.docked }: { rail: RailState; docked?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && rail.sheet && rail.close();
     window.addEventListener("keydown", onKey);
@@ -168,7 +169,7 @@ export function Rail({ rail }: { rail: RailState }) {
   return (
     <>
       <AnimatePresence initial={false}>
-        {rail.docked && (
+        {docked && (
           <motion.aside key="dock" aria-label="Now" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={soft} className="scroll fixed bottom-0 right-0 top-0 z-20 w-[288px] px-3 pb-6 pt-5">
             <Header rail={rail} />
             <Modules rail={rail} />
