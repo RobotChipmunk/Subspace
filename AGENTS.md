@@ -64,7 +64,7 @@ commit; the app decodes leniently, but a renamed field silently shows nothing.
 There is no Swift compiler or simulator in a Linux cloud container. The only way to compile and
 run the app from there is the `iOS` workflow (`.github/workflows/ios.yml`), which runs on a push
 that touches `ios/`: read the job log for compile errors and the test summary, and the
-`ios-ui-tests` artifact for screenshots. Each run takes several minutes of Mac runner time, so
+`ios-ui-tests-iphone` and `ios-ui-tests-ipad` artifacts for screenshots. Each run takes several minutes of Mac runner time, so
 batch changes and re-read Swift carefully before pushing. When you change behaviour, change the
 matching UI test in `ios/SubspaceUITests` in the same commit.
 
@@ -80,3 +80,11 @@ being true. Read this list before starting work.
   controls for things that should simply appear when there is content (owner's call, Nov 2026).
 - Copying `.env.example` then running `ui-check` failed every login and locked sign-in with a 429.
   See "Running it locally" for the password and how to clear the lock.
+- iOS CI: a job's log cannot be read until the job ends, so a stalled step looks like silence.
+  `ios/scripts/ci-test.sh` runs the tests under a watchdog for that reason; keep it.
+- iOS CI: building with `CODE_SIGNING_ALLOWED=NO` made the simulator's UI test runner hang without
+  an error. Leave signing at its default for simulator builds.
+- iOS UI tests: after sign-in iOS shows "Save Password?" over the app and blocks every tap behind
+  it. `signIn()` in `SubspaceUITests/Support.swift` dismisses it; new tests should sign in through it.
+- iOS CI screenshots are downloaded from `productionresultssaN.blob.core.windows.net`; the cloud
+  environment must allow those hosts or the artifact link fails with a proxy 403.

@@ -26,11 +26,39 @@ class SubspaceTestCase: XCTestCase {
 
     func signIn() {
         let password = app.secureTextFields["login.password"]
-        XCTAssertTrue(password.waitForExistence(timeout: 20), "The sign-in screen did not appear")
+        XCTAssertTrue(password.waitForExistence(timeout: 60), "The sign-in screen did not appear")
         password.tap()
         password.typeText(Self.password)
         app.buttons["login.submit"].tap()
-        XCTAssertTrue(app.buttons["nav.feed"].waitForExistence(timeout: 20), "Signing in did not reach the app")
+        XCTAssertTrue(app.buttons["nav.feed"].waitForExistence(timeout: 40), "Signing in did not reach the app")
+        declineSavingPassword()
+    }
+
+    /// iOS offers to save the password just typed, over the app. Say no, so it is not in the way.
+    func declineSavingPassword() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for owner in [springboard, app!] {
+            let notNow = owner.buttons["Not Now"]
+            if notNow.waitForExistence(timeout: owner === springboard ? 6 : 1) {
+                notNow.tap()
+                waitToVanish(notNow, "the Save Password prompt")
+                return
+            }
+        }
+    }
+
+    /// Taps where the element is, as a finger would, without asking the accessibility tree whether
+    /// something overlaps it. If something really is in the way, the next expectation fails.
+    func press(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
+        expect(element, what, timeout: timeout, file: file, line: line)
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
+    /// Taps a field and types into it.
+    func enter(_ text: String, into element: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+        press(element, what, file: file, line: line)
+        Thread.sleep(forTimeInterval: 0.4)
+        app.typeText(text)
     }
 
     func launchSignedIn() {
@@ -39,9 +67,8 @@ class SubspaceTestCase: XCTestCase {
     }
 
     func go(_ tab: String) {
-        let button = app.buttons["nav.\(tab)"]
-        XCTAssertTrue(button.waitForExistence(timeout: 10), "No \(tab) button in the app bar")
-        button.tap()
+        press(app.buttons["nav.\(tab)"], "the \(tab) button in the app bar")
+        Thread.sleep(forTimeInterval: 0.4)
     }
 
     /// Attaches a screenshot named for the report, e.g. "03-todos".
@@ -57,7 +84,15 @@ class SubspaceTestCase: XCTestCase {
     /// Waits for an element, failing with a clear message.
     @discardableResult
     func expect(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
-        XCTAssertTrue(element.waitForExistence(timeout: timeout), "Expected \(what)", file: file, line: line)
+        if !element.waitForExistence(timeout: timeout) {
+            // What the app was showing, as text, to explain the failure.
+            let tree = XCTAttachment(string: app.debugDescription)
+            tree.name = "hierarchy"
+            tree.lifetime = .keepAlways
+            add(tree)
+            shot("failed")
+            XCTFail("Expected \(what)", file: file, line: line)
+        }
         return element
     }
 

@@ -118,15 +118,14 @@ final class SVGRenderer: NSObject {
             view.backgroundColor = .clear
             view.scrollView.backgroundColor = .clear
             view.isUserInteractionEnabled = false
-            view.alpha = 0.011
-            // A web view draws only while it is in a window; keep it out of sight and out of reach.
-            if let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
-                view.frame.origin = CGPoint(x: -4000, y: -4000)
-                window.insertSubview(view, at: 0)
-            }
+            view.accessibilityElementsHidden = true
+            // A web view draws only while it is in a window and on screen. It sits at the very back,
+            // behind the app's own opaque background, so it is never seen.
+            guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap({ $0.windows }).first else { return nil }
+            window.insertSubview(view, at: 0)
             web = view
         }
-        view.frame.size = CGSize(width: side, height: side)
+        view.frame = CGRect(x: 0, y: 0, width: side, height: side)
         // As a picture, SVG needs its namespace; agents sometimes leave it out.
         let source = svg.contains("xmlns=") ? svg : svg.replacingOccurrences(of: "<svg", with: "<svg xmlns=\"http://www.w3.org/2000/svg\"", options: [], range: svg.range(of: "<svg"))
         let encoded = Data(source.utf8).base64EncodedString()
@@ -135,7 +134,7 @@ final class SVGRenderer: NSObject {
         view.navigationDelegate = loaded
         view.loadHTMLString(html, baseURL: nil)
         await loaded.wait()
-        try? await Task.sleep(for: .milliseconds(60))
+        try? await Task.sleep(for: .milliseconds(80))
         let config = WKSnapshotConfiguration()
         config.rect = CGRect(x: 0, y: 0, width: side, height: side)
         let img = try? await view.takeSnapshot(configuration: config)

@@ -57,6 +57,11 @@ for test in json.load(open(os.path.join(raw, "manifest.json"))):
 print(f"{sum(seen.values())} screenshots in {out}")
 PY
   rm -rf "$SHOTS.raw"
+  # Simulator screenshots are large; JPEG keeps the artifact small enough to open anywhere.
+  for f in "$SHOTS"/*.png; do
+    [ -f "$f" ] || continue
+    sips -s format jpeg -s formatOptions 75 -Z 1600 "$f" --out "${f%.png}.jpg" >/dev/null 2>&1 && rm -f "$f"
+  done
 fi
 
 ios/scripts/e2e-server.sh stop

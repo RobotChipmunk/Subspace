@@ -18,9 +18,13 @@ permissions:
 
 jobs:
   test:
-    name: Build and UI tests
+    name: UI tests (${{ matrix.device }})
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [iphone, ipad]
     env:
       DATABASE_URL: postgres://runner@localhost:5432/subspace
       PROJECT: ios/Subspace.xcodeproj
@@ -38,15 +42,14 @@ jobs:
           PAD=$(pick "iPad Pro 11-inch \(M5\)" || pick "iPad Pro 11-inch \(M4\)" || pick "iPad \(A16\)")
           echo "iPhone: $PHONE, iPad: $PAD"
           test -n "$PHONE" && test -n "$PAD"
-          echo "PHONE=$PHONE" >> "$GITHUB_ENV"
-          echo "PAD=$PAD" >> "$GITHUB_ENV"
+          if [ "${{ matrix.device }}" = ipad ]; then echo "SIM=$PAD" >> "$GITHUB_ENV"; else echo "SIM=$PHONE" >> "$GITHUB_ENV"; fi
 
       # Compile first: a build error should fail in two minutes, not after the server is set up.
       - name: Build the app and its tests
         run: |
           set -o pipefail
           xcodebuild build-for-testing -project "$PROJECT" -scheme Subspace -configuration Debug \
-            -destination "id=$PHONE" -derivedDataPath "$DERIVED" \
+            -destination "id=$SIM" -derivedDataPath "$DERIVED" \
             > "$OUT/build.log" 2>&1 || {
               echo "::group::Errors"
               grep -E "error:|error: |: error|BUILD FAILED|The following build commands failed" -A2 "$OUT/build.log" | grep -v "^--$" | awk '!seen[$0]++' | head -300
@@ -72,12 +75,8 @@ jobs:
           npm ci
           SUBSPACE_PASSWORD=subspace npm run build
 
-      - name: UI tests on iPhone
-        run: ios/scripts/ci-test.sh iphone "$PHONE"
-
-      - name: UI tests on iPad
-        if: success() || failure()
-        run: ios/scripts/ci-test.sh ipad "$PAD"
+      - name: UI tests
+        run: ios/scripts/ci-test.sh "${{ matrix.device }}" "$SIM"
 
       - name: Logs when something failed
         if: failure() || cancelled()
@@ -88,10 +87,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-ui-tests
+          name: ios-ui-tests-${{ matrix.device }}
           path: |
-            ios-out/**/*.png
             ios-out/**/*.jpg
+            ios-out/**/*.txt
             ios-out/*.log
-            ios-out/*.txt
           retention-days: 14
