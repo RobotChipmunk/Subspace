@@ -27,10 +27,18 @@ class SubspaceTestCase: XCTestCase {
     func signIn() {
         let password = app.secureTextFields["login.password"]
         XCTAssertTrue(password.waitForExistence(timeout: 60), "The sign-in screen did not appear")
-        password.tap()
-        password.typeText(Self.password)
-        app.buttons["login.submit"].tap()
-        XCTAssertTrue(app.buttons["nav.feed"].waitForExistence(timeout: 40), "Signing in did not reach the app")
+        // The first launch on a fresh simulator can swallow the first keystrokes while the keyboard
+        // sets itself up, so try once more before calling it a failure.
+        for attempt in 1...2 {
+            password.tap()
+            password.typeText(Self.password)
+            app.buttons["login.submit"].tap()
+            if app.buttons["nav.feed"].waitForExistence(timeout: 25) { break }
+            shot("sign-in-attempt-\(attempt)")
+            if attempt == 2 { XCTFail("Signing in did not reach the app") }
+            password.tap()
+            password.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 24))
+        }
         declineSavingPassword()
     }
 

@@ -29,9 +29,7 @@ final class TodosTests: SubspaceTestCase {
 
         // Add
         let title = "Buy stamps \(Int.random(in: 1000...9999))"
-        let add = expect(app.textFields["todos.add"], "the add field")
-        add.tap()
-        add.typeText(title + "\n")
+        enter(title + "\n", into: app.textFields["todos.add"], "the add field")
         let added = expect(row(title), "the new task in the list")
         shot("11-todos-added")
 

@@ -48,6 +48,10 @@ for test in json.load(open(os.path.join(raw, "manifest.json"))):
         if not os.path.isfile(src):
             continue
         name = a.get("suggestedHumanReadableName") or a.get("exportedFileName")
+        if name.startswith("Debug description"):
+            continue
+        # artifact uploads refuse these characters
+        name = re.sub(r'[":<>|*?\r\n/\\`]', "", name)
         # "feed_0_ABCD-….png" -> "feed.png"
         base, ext = os.path.splitext(name)
         base = re.sub(r"_\d+_[0-9A-F-]{36}$", "", base)
