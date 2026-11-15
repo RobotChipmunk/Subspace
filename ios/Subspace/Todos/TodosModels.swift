@@ -59,6 +59,7 @@ struct TodosRepeatOption: Identifiable {
 enum TodosRepeat {
     static let options: [TodosRepeatOption] = [
         TodosRepeatOption(key: "daily", label: "Every day"),
+        TodosRepeatOption(key: "every_3_days", label: "Every 3 days"),
         TodosRepeatOption(key: "weekly", label: "Every week"),
         TodosRepeatOption(key: "biweekly", label: "Every 2 weeks"),
         TodosRepeatOption(key: "monthly", label: "Every month"),
@@ -74,6 +75,7 @@ enum TodosRepeat {
     static func hint(_ key: String) -> String {
         switch key {
         case "daily": return "When you finish it, the next one is added for the day after."
+        case "every_3_days": return "When you finish it, the next one is added three days from that day."
         case "weekly": return "When you finish it, the next one is added a week from that day."
         case "biweekly": return "When you finish it, the next one is added two weeks from that day."
         case "monthly": return "When you finish it, the next one is added a month from that day."

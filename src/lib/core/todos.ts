@@ -29,12 +29,13 @@ export type Todo = {
   updated_at: string;
 };
 
-export const REPEATS = ["daily", "weekly", "biweekly", "monthly", "yearly"] as const;
+export const REPEATS = ["daily", "every_3_days", "weekly", "biweekly", "monthly", "yearly"] as const;
 export type Repeat = (typeof REPEATS)[number];
 
 /** The day a repeating task comes round again, counted from the day it was finished. Month ends are kept in range (31 January gives 28 February). */
 export function nextDate(from: string, repeat: Repeat): string {
   if (repeat === "daily") return addDays(from, 1);
+  if (repeat === "every_3_days") return addDays(from, 3);
   if (repeat === "weekly") return addDays(from, 7);
   if (repeat === "biweekly") return addDays(from, 14);
   const [y, m, d] = from.split("-").map(Number);
@@ -230,7 +231,7 @@ export async function updateTodo(
     notes_append?: string;
     notes_replace?: { find: string; replace: string };
     seen?: boolean;
-    /** daily, weekly, biweekly, monthly, yearly; null or "none" to stop repeating */
+    /** daily, every_3_days, weekly, biweekly, monthly, yearly; null or "none" to stop repeating */
     repeat?: string | null;
   },
 ) {

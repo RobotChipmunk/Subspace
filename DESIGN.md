@@ -189,7 +189,7 @@ Patterns:
   keeps one height. Choosing a day closes it and saves at once. Use it wherever a date is set.
   In the iOS app the pill reveals the system's own graphical date picker in place beneath it.
 - **Repeat** (todo detail): a pill beside the date that opens the system menu (Never, Every day,
-  Every week, Every 2 weeks, Every month, Every year); it turns `accent-soft` while set, and one
+  Every 3 days, Every week, Every 2 weeks, Every month, Every year); it turns `accent-soft` while set, and one
   meta line beneath says what finishing will do. A repeating row carries a small repeat icon.
 - **Next one added** (`NextNote` in `todos/page.tsx`): finishing a repeating task adds the next
   one, counted from the day it was finished, not from its date. The finished task then carries
