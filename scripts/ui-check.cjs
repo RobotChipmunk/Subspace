@@ -647,19 +647,46 @@ async function run(profile) {
     await noSidewaysScroll("area with links");
     await shot("links-in-area");
   });
-  await step("save a link from the feed", async () => {
+  await step("bookmark a post in the feed", async () => {
     await page.goto(`${BASE}/feed`);
-    const save = page.locator("article", { hasText: "Figure raised" }).getByRole("button", { name: /^(Save link|Saved to links)$/ }).first();
-    await save.waitFor({ timeout: 8000 });
+    const post = () => page.locator("article", { hasText: "Figure raised" });
+    const mark = (name) => post().getByRole("button", { name, exact: true });
+    await post().first().waitFor({ timeout: 8000 });
     await settle(800);
-    await reachable(save, "feed save button");
-    await press(save);
-    await page.getByRole("button", { name: "Saved to links" }).first().waitFor({ timeout: 4000 }).catch(() => fail("feed: saving a post's source did not confirm"));
+    const filter = page.getByRole("button", { name: "Bookmarked", exact: true });
+    await reachable(filter, "feed bookmarked toggle");
+    if ((await filter.getAttribute("aria-pressed")) !== "false") fail("feed: the bookmarked toggle is on before it was pressed");
+    await reachable(mark("Bookmark"), "feed bookmark button");
+    await press(mark("Bookmark"));
+    await mark("Remove bookmark").waitFor({ timeout: 4000 }).catch(() => fail("feed: bookmarking a post did not confirm"));
     await settle(1500);
     await shot("feed-saved");
+    // the bookmark is stored, not just shown: it is still there after loading the feed again
+    await page.reload();
+    await mark("Remove bookmark").waitFor({ timeout: 8000 }).catch(() => fail("feed: the bookmark was gone after reloading"));
+    // bookmarked only: just that post
+    await press(filter);
+    await page.waitForURL("**/feed?view=bookmarked");
+    await page.locator("article", { hasText: "Three-Live" }).waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("feed: the bookmarked view still shows a post that is not bookmarked"));
+    if ((await post().count()) !== 1) fail("feed: the bookmarked view does not show the bookmarked post");
+    if ((await filter.getAttribute("aria-pressed")) !== "true") fail("feed: the bookmarked toggle does not show as on");
+    await noSidewaysScroll("feed bookmarked");
+    await settle(600);
+    await shot("feed-bookmarked");
+    // its source is kept in the links, once
     await page.goto(`${BASE}/context?view=links`);
-    await page.locator('[data-link] a[href="https://example.com/figure-series-c"]').waitFor({ timeout: 12000 }).catch(() => fail("feed: the saved source is not in the links list"));
-    if ((await page.locator('[data-link] a[href="https://example.com/figure-series-c"]').count()) !== 1) fail("feed: saving the same source again made a second entry");
+    await page.locator('[data-link] a[href="https://example.com/figure-series-c"]').waitFor({ timeout: 12000 }).catch(() => fail("feed: the bookmarked post's source is not in the links list"));
+    if ((await page.locator('[data-link] a[href="https://example.com/figure-series-c"]').count()) !== 1) fail("feed: bookmarking the same source again made a second entry");
+    // taking the bookmark off in the bookmarked view removes the post from it, and the feed is whole again with the toggle off
+    await page.goto(`${BASE}/feed?view=bookmarked`);
+    await mark("Remove bookmark").waitFor({ timeout: 8000 });
+    await settle(600);
+    await press(mark("Remove bookmark"));
+    await page.getByText("Nothing bookmarked yet.").waitFor({ timeout: 6000 }).catch(() => fail("feed: a post stayed in the bookmarked view after its bookmark was removed"));
+    await settle(900);
+    await shot("feed-bookmarked-empty");
+    await press(page.getByRole("button", { name: "Bookmarked", exact: true }));
+    await mark("Bookmark").waitFor({ timeout: 8000 }).catch(() => fail("feed: turning the bookmarked toggle off did not bring the whole feed back"));
   });
 
   // ---------- Pages ----------

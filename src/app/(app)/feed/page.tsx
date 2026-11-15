@@ -3,7 +3,8 @@ import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { Bookmark, ChevronLeft, ChevronRight, MessageCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { preload, useSWRConfig } from "swr";
 import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton, TrackerChip } from "@/components/bits";
@@ -14,10 +15,23 @@ import { ago, api, fetcher, soft, useMe } from "@/lib/client";
 import type { Image, Post } from "@/lib/core/posts";
 
 export default function FeedPage() {
-  const key = "feed?channel=feed";
+  return (
+    <Suspense>
+      <Feed />
+    </Suspense>
+  );
+}
+
+function Feed() {
+  const router = useRouter();
+  // Bookmarked only: off unless asked for, and kept in the address so going back undoes it.
+  const only = useSearchParams().get("view") === "bookmarked";
+  const key = only ? "feed?channel=feed&bookmarked=1" : "feed?channel=feed";
   const { data, mutate } = useSWR<{ posts: Post[] }>(key, fetcher, { refreshInterval: 12_000 });
   const [older, setOlder] = useState<Post[]>([]);
   const [done, setDone] = useState(false);
+  // The two views page separately: what was loaded further down one does not belong to the other.
+  useEffect(() => (setOlder([]), setDone(false)), [only]);
   // Comments sit beside the feed and follow it: while they are open they show the post being read.
   const comments = useComments();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -123,6 +137,21 @@ export default function FeedPage() {
     settle.current = setTimeout(() => bringToLine(id), wait);
   };
 
+  /** Bookmarks a post or takes the bookmark off. It shows at once; in the bookmarked view a post that loses its bookmark leaves. */
+  const bookmark = async (post: Post) => {
+    const on = !post.bookmarked_at;
+    const apply = (list: Post[]) => (on || !only ? list.map((p) => (p.id === post.id ? { ...p, bookmarked_at: on ? new Date().toISOString() : null } : p)) : list.filter((p) => p.id !== post.id));
+    const before = older;
+    setOlder(apply);
+    mutate((d) => d && { posts: apply(d.posts) }, { revalidate: false });
+    try {
+      await api(`posts/${post.id}/bookmark`, { method: on ? "PUT" : "DELETE" });
+    } catch {
+      setOlder(before);
+    }
+    mutate();
+  };
+
   const activeAt = commentsOpen ? posts.findIndex((p) => p.id === activeId) : -1;
   const active = posts[activeAt];
   // Fetch the comments of the posts either side of the one being read, so they are there by the time the feed reaches them.
@@ -133,7 +162,19 @@ export default function FeedPage() {
 
   return (
     <div className="mx-auto max-w-[620px]">
-      <PageHeader title="Feed" />
+      <PageHeader
+        title="Feed"
+        right={
+          <button
+            type="button"
+            onClick={() => router.push(only ? "/feed" : "/feed?view=bookmarked", { scroll: false })}
+            aria-pressed={only}
+            className={`glass flex h-10 flex-none items-center gap-1.5 rounded-full px-3.5 text-[14.5px] font-medium transition-colors ${only ? "text-accent" : "text-ink2 hover:text-ink"}`}
+          >
+            <Bookmark size={16} fill={only ? "currentColor" : "none"} /> Bookmarked
+          </button>
+        }
+      />
 
       <div ref={list} className="flex flex-col gap-3">
         <AnimatePresence initial={false} mode="popLayout">
@@ -144,12 +185,19 @@ export default function FeedPage() {
               index={i}
               open={active?.id === p.id}
               onToggle={() => toggleComments(p.id)}
+              onBookmark={() => bookmark(p)}
             />
           ))}
         </AnimatePresence>
       </div>
 
-      {data && posts.length === 0 && (
+      {data && posts.length === 0 && only && (
+        // waits for the last post to finish leaving before it shows
+        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="py-24 text-center text-[14.5px] text-ink3">
+          Nothing bookmarked yet.
+        </motion.p>
+      )}
+      {data && posts.length === 0 && !only && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="py-24 text-center">
           <div className="art-pending mx-auto mb-6 h-16 w-16 rounded-full" style={{ background: "conic-gradient(#ffc9b5,#c9b8ff,#a8e6ff,#b5f5d8,#ffc9b5)", filter: "blur(2px)" }} />
           <p className="text-[17px] font-semibold">Quiet for now</p>
@@ -291,34 +339,24 @@ function ToSource({ post, children, className = "block" }: { post: Post; childre
   );
 }
 
-/** Keeps a post's source in the owner's saved links. Saving twice is harmless: the same page is stored once. */
-function SaveLink({ post }: { post: Post }) {
-  const [saved, setSaved] = useState(false);
-  if (!post.source) return null;
-  const { url, name } = post.source;
+/** Bookmarks a post to come back to. The mark is stored with the post, and its source is kept in the saved links. */
+function BookmarkButton({ on, onPress }: { on: boolean; onPress: () => void }) {
+  const label = on ? "Remove bookmark" : "Bookmark";
   return (
     <button
       type="button"
-      aria-label={saved ? "Saved to links" : "Save link"}
-      aria-pressed={saved}
-      title={saved ? "Saved to links" : "Save link"}
-      onClick={async () => {
-        if (saved) return;
-        setSaved(true);
-        try {
-          await api("links", { body: { url, site: name, about: post.body } });
-        } catch {
-          setSaved(false);
-        }
-      }}
-      className={`-mr-2 grid h-9 w-9 flex-none place-items-center rounded-full transition-colors ${saved ? "text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+      aria-label={label}
+      aria-pressed={on}
+      title={label}
+      onClick={onPress}
+      className={`-mr-2 grid h-9 w-9 flex-none place-items-center rounded-full transition-colors ${on ? "text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
     >
-      <Bookmark size={16} fill={saved ? "currentColor" : "none"} />
+      <Bookmark size={16} fill={on ? "currentColor" : "none"} />
     </button>
   );
 }
 
-function PostCard({ post, index, open, onToggle }: { post: Post; index: number; open: boolean; onToggle: () => void }) {
+function PostCard({ post, index, open, onToggle, onBookmark }: { post: Post; index: number; open: boolean; onToggle: () => void; onBookmark: () => void }) {
   const { agent, tracker, agents } = useMe();
   const author = agent(post.author);
   const tr = tracker(post.tracker_id);
@@ -360,7 +398,7 @@ function PostCard({ post, index, open, onToggle }: { post: Post; index: number; 
               <span />
             )}
             <span className="flex-1" />
-            {post.source && <SaveLink post={post} />}
+            {post.source && <BookmarkButton on={!!post.bookmarked_at} onPress={onBookmark} />}
             <button
               type="button"
               onClick={onToggle}

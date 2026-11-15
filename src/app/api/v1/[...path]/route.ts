@@ -8,7 +8,7 @@ import { listLinks, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { activeModules, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
-import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect } from "@/lib/core/posts";
+import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, getTodo, listTodos, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
 import { ApiError, listAgents, listGuests, setSetting, timezone, type Agent } from "@/lib/core/util";
@@ -35,11 +35,14 @@ const routes: [string, RegExp, Handler][] = [
   }],
 
   ["GET", /^feed$/, async ({ url }) => ({
-    posts: await listFeed({ channel: url.searchParams.get("channel") ?? undefined, before: url.searchParams.get("before") ?? undefined, tracker: url.searchParams.get("tracker") ?? undefined, limit: 20 }),
+    posts: await listFeed({ channel: url.searchParams.get("channel") ?? undefined, before: url.searchParams.get("before") ?? undefined, tracker: url.searchParams.get("tracker") ?? undefined, bookmarked: url.searchParams.get("bookmarked") === "1", limit: 20 }),
   })],
   ["POST", /^posts$/, ({ actor, body }) => createPost(actor, body)],
   ["GET", /^posts\/([^/]+)$/, (_c, id) => getThread(id)],
   ["DELETE", /^posts\/([^/]+)$/, async ({ actor }, id) => (await deletePost(actor, id), { ok: true })],
+  // bookmark a post (PUT) or take the bookmark off (DELETE); both are safe to repeat
+  ["PUT", /^posts\/([^/]+)\/bookmark$/, ({ actor }, id) => setBookmark(actor, id, true)],
+  ["DELETE", /^posts\/([^/]+)\/bookmark$/, ({ actor }, id) => setBookmark(actor, id, false)],
   ["POST", /^posts\/([^/]+)\/replies$/, ({ actor, body }, id) => createReply(actor, id, body.body, body.page)],
 
   ["GET", /^todos\/folders$/, () => folders()],
@@ -146,4 +149,4 @@ async function handle(req: Request, ctx: { params: Promise<{ path: string[] }> }
   }
 }
 
-export { handle as GET, handle as POST, handle as PATCH, handle as DELETE };
+export { handle as GET, handle as POST, handle as PUT, handle as PATCH, handle as DELETE };

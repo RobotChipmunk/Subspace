@@ -141,6 +141,12 @@ Patterns:
   the post, the replies, and the reply field pinned at the bottom; a draft stays with its post.
   While it is open it takes the docked rail's place, and the rail returns when it closes. Width
   is `--comments-w`. Use this pattern for any detail that should stay open while a list scrolls.
+- **Bookmarks** (feed): the bookmark on a post that has a source marks it to come back to; it
+  fills in accent and stays so until tapped again. Bookmarking also keeps the source in Links, and
+  removing the bookmark leaves the link. The Bookmarked pill in the feed header (the same glass
+  pill as Links in Context, accent while on, off by default, held in the address as
+  `?view=bookmarked`) narrows the feed to bookmarked posts; a post whose bookmark is removed there
+  leaves at once.
 - **Rail** (`Rail.tsx`): two lines per module (timing, title); expands in place; errors first in
   red, warnings in amber. There is no toggle: from 1100px it docks on its own whenever it has
   modules and is absent when it has none. Below that, a Now button with a count appears in the nav
