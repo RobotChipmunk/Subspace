@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The owner's tasks: folders beside (or above) the selected folder's list, with the open task's
 /// detail taking the list's place, as on the web.
@@ -164,7 +165,11 @@ private struct TodosFolderNav: View {
 
     private var buttons: some View {
         ForEach(entries) { entry in
-            TodosFolderButton(entry: entry, on: store.view == entry.key, fill: vertical, indicator: indicator) {
+            TodosFolderButton(
+                entry: entry, on: store.view == entry.key, fill: vertical, indicator: indicator,
+                accepts: { store.accepts(entry.key) },
+                dropped: { store.dropOnFolder(entry.key) }
+            ) {
                 store.select(entry.key)
             }
             .padding(.top, vertical && entry.gap ? 12 : 0)
@@ -178,11 +183,18 @@ private struct TodosFolderButton: View {
     var on: Bool
     var fill: Bool
     var indicator: Namespace.ID
+    /// Whether the task being carried can be put on this list.
+    var accepts: () -> Bool
+    /// The carried task was let go here.
+    var dropped: () -> Void
     var action: () -> Void
+    @State private var over = false
 
     var body: some View {
-        let ink: Color = on ? Theme.ink : (entry.dim ? Theme.ink3 : Theme.ink2)
-        let weight: Font.Weight = on ? .semibold : .regular
+        // A carried task held over a list it can go to lights that list up.
+        let target = over && accepts()
+        let ink: Color = target ? Theme.accent : (on ? Theme.ink : (entry.dim ? Theme.ink3 : Theme.ink2))
+        let weight: Font.Weight = (on || target) ? .semibold : .regular
         let countInk: Color = on ? Theme.accent : Theme.ink3
         Button(action: action) {
             HStack(spacing: 8) {
@@ -208,9 +220,16 @@ private struct TodosFolderButton: View {
                         .matchedGeometryEffect(id: "folder", in: indicator)
                 }
             }
+            .background(target ? Theme.solid : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(target ? Theme.accent : Color.clear, lineWidth: 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(PressStyle(scale: 0.97))
+        .onDrop(of: [UTType.text], isTargeted: $over) { _ in
+            dropped()
+            return true
+        }
+        .animation(.ssSpring, value: target)
         .accessibilityIdentifier("todos.folder.\(entry.key)")
         .accessibilityAddTraits(on ? .isSelected : [])
     }

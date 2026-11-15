@@ -135,24 +135,26 @@ private struct FeedPostFooter: View {
     }
 }
 
-/// Keeps a post's source in the owner's saved links. Saving twice is harmless.
+/// Bookmarks a post to come back to. The mark is stored with the post, and its source is kept
+/// in the saved links. It fills in accent and stays so until tapped again.
 private struct FeedSaveLink: View {
     var post: Post
     var model: FeedModel
 
     var body: some View {
-        let saved = model.saved.contains(post.id)
+        let on = post.bookmarked_at != nil
         Button {
-            Task { await model.saveLink(post) }
+            Task { await model.toggleBookmark(post) }
         } label: {
-            Image(systemName: saved ? "bookmark.fill" : "bookmark")
+            Image(systemName: on ? "bookmark.fill" : "bookmark")
                 .font(.system(size: 15))
-                .foregroundStyle(saved ? Theme.accent : Theme.ink3)
+                .foregroundStyle(on ? Theme.accent : Theme.ink3)
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())
         }
         .buttonStyle(PressStyle(scale: 0.9))
-        .accessibilityLabel(saved ? "Saved to links" : "Save link")
+        .accessibilityLabel(on ? "Remove bookmark" : "Bookmark")
+        .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityIdentifier("feed.save.\(post.id)")
     }
 }

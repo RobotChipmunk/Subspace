@@ -183,7 +183,8 @@ beyond the session and which direct messages have been read.
 
 `ios/SubspaceUITests` drives the real app in the simulator against a real, freshly seeded server:
 sign-in, every screen, and the main things you can do on each. `.github/workflows/ios.yml` runs
-it on an iPhone and an iPad simulator on every push that touches `ios/`, and keeps the screenshots
+it on an iPhone and an iPad simulator on every push that touches `ios/` or the server side the app
+depends on (the REST API, `src/lib/core`, the schema, the seed), and keeps the screenshots
 as the `ios-ui-tests-iphone` and `ios-ui-tests-ipad` artifacts of the run. On a Mac, with Postgres running:
 
 ```sh

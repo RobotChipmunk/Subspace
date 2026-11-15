@@ -42,8 +42,8 @@ final class FeedModel {
     /// Sound is one choice for the whole feed.
     var sound = false
 
-    /// Posts whose source has been saved to links.
-    var saved: Set<String> = []
+    /// Show bookmarked posts only. Off unless asked for.
+    var onlyBookmarked = false
 
     @ObservationIgnored var api: API?
     @ObservationIgnored var beside = false
@@ -75,7 +75,10 @@ final class FeedModel {
     func refresh() async {
         guard let api else { return }
         do {
-            let r: FeedPostsResponse = try await api.get("feed?channel=feed")
+            let only = onlyBookmarked
+            let r: FeedPostsResponse = try await api.get(feedPath)
+            // the filter changed while this was on its way: the answer is for the other view
+            guard only == onlyBookmarked else { return }
             if r.posts != first {
                 withAnimation(.ssSoft) { first = r.posts }
             }
@@ -94,7 +97,7 @@ final class FeedModel {
         guard let last = all.last, !done, !loadingMore, all.count >= 20 else { return }
         loadingMore = true
         defer { loadingMore = false }
-        guard let r: FeedPostsResponse = try? await api.get("feed?channel=feed&before=\(q(last.id))") else { return }
+        guard let r: FeedPostsResponse = try? await api.get("\(feedPath)&before=\(q(last.id))") else { return }
         if r.posts.isEmpty { done = true }
         older.append(contentsOf: r.posts)
     }
@@ -199,13 +202,50 @@ final class FeedModel {
         await refresh()
     }
 
-    func saveLink(_ post: Post) async {
-        guard let api, let source = post.source, !saved.contains(post.id) else { return }
-        saved.insert(post.id)
+    private var feedPath: String { onlyBookmarked ? "feed?channel=feed&bookmarked=1" : "feed?channel=feed" }
+
+    /// Narrows the feed to bookmarked posts, or shows everything again.
+    func setOnlyBookmarked(_ on: Bool) async {
+        guard on != onlyBookmarked else { return }
+        close()
+        onlyBookmarked = on
+        withAnimation(.ssSoft) {
+            first = []
+            older = []
+        }
+        done = false
+        loaded = false
+        await refresh()
+    }
+
+    /// Bookmarks a post or takes the bookmark off. It shows at once; in the bookmarked view a
+    /// post that loses its bookmark leaves. Bookmarking also keeps the source in Links (the
+    /// server does that).
+    func toggleBookmark(_ post: Post) async {
+        guard let api else { return }
+        let on = post.bookmarked_at == nil
+        let before = (first, older)
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        func apply(_ list: [Post]) -> [Post] {
+            if !on && onlyBookmarked { return list.filter { $0.id != post.id } }
+            return list.map { p in
+                guard p.id == post.id else { return p }
+                var changed = p
+                changed.bookmarked_at = on ? stamp : nil
+                return changed
+            }
+        }
+        withAnimation(.ssSoft) {
+            first = apply(first)
+            older = apply(older)
+        }
         do {
-            try await api.send("POST", "links", body: ["url": source.url, "site": source.name, "about": post.body])
+            try await api.send(on ? "PUT" : "DELETE", "posts/\(post.id)/bookmark")
         } catch {
-            saved.remove(post.id)
+            withAnimation(.ssSoft) {
+                first = before.0
+                older = before.1
+            }
         }
     }
 

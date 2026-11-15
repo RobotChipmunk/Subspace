@@ -79,7 +79,9 @@ private struct FeedList: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
-                    PageHeader("Feed")
+                    PageHeader("Feed") {
+                        FeedBookmarkedToggle(model: model)
+                    }
                     FeedListBody(model: model)
                 }
                 .padding(.horizontal, 16)
@@ -121,7 +123,14 @@ private struct FeedListBody: View {
                     .id(post.id)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
-            if model.loaded && posts.isEmpty {
+            if model.loaded && posts.isEmpty && model.onlyBookmarked {
+                Text("Nothing bookmarked yet.")
+                    .font(.ssSecondary)
+                    .foregroundStyle(Theme.ink3)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 96)
+                    .accessibilityIdentifier("feed.bookmarked.empty")
+            } else if model.loaded && posts.isEmpty {
                 FeedEmptyState()
             }
             if !model.loaded {
@@ -226,5 +235,30 @@ private struct FeedSkeletonCard: View {
         }
         .padding(16)
         .glass(radius: 26)
+    }
+}
+
+/// The quiet bookmark in the feed's header: narrows the feed to bookmarked posts. No label or
+/// surface at rest; filled accent on accent-soft while on.
+private struct FeedBookmarkedToggle: View {
+    var model: FeedModel
+
+    var body: some View {
+        let on = model.onlyBookmarked
+        Button {
+            Task { await model.setOnlyBookmarked(!on) }
+        } label: {
+            Image(systemName: on ? "bookmark.fill" : "bookmark")
+                .font(.system(size: 17))
+                .foregroundStyle(on ? Theme.accent : Theme.ink3)
+                .frame(width: 40, height: 40)
+                .background(on ? Theme.accentSoft : Color.clear, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressStyle(scale: 0.9))
+        .accessibilityLabel("Bookmarked")
+        .accessibilityHint(on ? "Shows everything" : "Shows bookmarked posts only")
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityIdentifier("feed.bookmarked")
     }
 }

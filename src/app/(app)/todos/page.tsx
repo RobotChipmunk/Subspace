@@ -27,6 +27,8 @@ function FromTag({ id }: { id: string | null }) {
 export default function TodosPage() {
   const [view, setView] = useState("today");
   const [openId, setOpenId] = useState<string | null>(null);
+  // the list a carried task is being held over, lit as the place it will land
+  const [carry, setCarry] = useState<string | null>(null);
 
   // The rail links here with ?open=<task id> to show one task.
   useEffect(() => {
@@ -45,7 +47,7 @@ export default function TodosPage() {
 
   return (
     <div className="mx-auto flex max-w-[920px] gap-8 max-md:flex-col max-md:gap-4">
-      <aside className="md:w-[200px] md:flex-none md:pt-[70px]">
+      <aside className="relative z-10 md:w-[200px] md:flex-none md:pt-[70px]">
         <nav className="flex gap-0.5 max-md:-mx-4 max-md:overflow-x-auto max-md:px-4 md:flex-col" aria-label="Lists">
           {f?.folders.map((x, i) => {
             const on = x.key === view;
@@ -53,8 +55,10 @@ export default function TodosPage() {
             return (
               <button
                 key={x.key}
+                data-folder={x.key}
+                data-over={carry === x.key || undefined}
                 onClick={() => (setView(x.key), setOpenId(null))}
-                className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors ${on ? "font-semibold text-ink" : "text-ink2 hover:text-ink"} ${gap ? "md:mt-3" : ""}`}
+                className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors ${carry === x.key ? "drop-target font-semibold text-accent" : on ? "font-semibold text-ink" : "text-ink2 hover:text-ink"} ${gap ? "md:mt-3" : ""}`}
               >
                 {on && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
                 <span className="relative flex-1 whitespace-nowrap">{x.label}</span>
@@ -92,7 +96,7 @@ export default function TodosPage() {
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
-              {view === BIN ? <Bin /> : <List view={view} folder={folder} today={f?.today} onOpen={setOpenId} />}
+              {view === BIN ? <Bin /> : <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} onOpen={setOpenId} onCarry={setCarry} />}
             </motion.div>
           )}
         </AnimatePresence>
@@ -154,18 +158,49 @@ function weekendDay(today: string): string {
 /** How long a finger rests on a task before it lifts for reordering. Shorter than the system's own long-press. */
 const HOLD_MS = 260;
 
+/** How far sideways a carried task travels before it stops trading places with its neighbours. */
+const AWAY_PX = 48;
+
 /**
- * One task in the list. With a mouse it drags straight away. With a finger, a quick swipe scrolls
- * the page as usual; resting on the row for a moment lifts it, and from then on the page is held
- * still so the row can travel any distance. (Safari hands a moving touch to scrolling and cancels
- * the drag unless the page is told to stay put, which is why a row used to move only one place.)
+ * One task in the list. With a mouse it drags straight away. With a finger, a quick swipe up or
+ * down scrolls the page as usual; resting on the row for a moment, or pulling it sideways, lifts
+ * it, and from then on the page is held still so the row can travel any distance. (Safari hands a
+ * moving touch to scrolling and cancels the drag unless the page is told to stay put, which is why
+ * a row used to move only one place.)
+ *
+ * A lifted row moves freely. Carried up or down it reorders; carried onto a list in the folders
+ * (to the left on a wide screen, above on a phone) it lights that list and moves there on release.
  */
-function TodoRow({ r, tag, dragging, onToggle, onOpen, onDropped }: { r: Row; tag: boolean; dragging: React.MutableRefObject<boolean>; onToggle: () => void; onOpen: () => void; onDropped: () => void }) {
+function TodoRow({
+  r,
+  tag,
+  dragging,
+  away,
+  accepts,
+  onToggle,
+  onOpen,
+  onCarry,
+  onDropped,
+}: {
+  r: Row;
+  tag: boolean;
+  dragging: React.MutableRefObject<boolean>;
+  /** true while the carried row has left the list sideways: the list stops reordering under it */
+  away: React.MutableRefObject<boolean>;
+  accepts: (folder: string) => boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+  onCarry: (folder: string | null) => void;
+  onDropped: (folder: string | null) => void;
+}) {
   const controls = useDragControls();
   const el = useRef<HTMLLIElement>(null);
-  const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; start: PointerEvent } | null>(null);
   const lifted = useRef(false);
+  const over = useRef<string | null>(null);
   const [up, setUp] = useState(false);
+  // how far the carried row has stepped back: 0 in the list, 1 away from it, 2 over a list it can land in
+  const [out, setOut] = useState(0);
 
   useEffect(() => {
     const node = el.current;
@@ -189,16 +224,27 @@ function TodoRow({ r, tag, dragging, onToggle, onOpen, onDropped }: { r: Row; ta
     lifted.current = false;
     setUp(false);
   };
+  const lift = (start: PointerEvent) => {
+    cancelHold();
+    lifted.current = true;
+    dragging.current = true;
+    setUp(true);
+    controls.start(start);
+  };
 
   return (
     <Reorder.Item
       ref={el}
       value={r}
       as="li"
+      drag
       dragListener={false}
       dragControls={controls}
+      // nothing lies to the right, and travelling there would make the page scroll sideways
+      dragConstraints={{ right: 0 }}
+      dragElastic={0}
       initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto", scale: up ? 1.02 : 1, boxShadow: up ? "var(--shadow-lift)" : "0 0 0 rgba(0,0,0,0)", backgroundColor: up ? "var(--surface-solid)" : "rgba(0,0,0,0)", zIndex: up ? 5 : 0 }}
+      animate={{ opacity: [1, 0.6, 0.18][out], height: "auto", scale: up ? 1.02 : 1, boxShadow: up ? "var(--shadow-lift)" : "0 0 0 rgba(0,0,0,0)", backgroundColor: up ? "var(--surface-solid)" : "rgba(0,0,0,0)", zIndex: up ? 5 : 0 }}
       exit={{ opacity: 0, height: 0 }}
       transition={soft}
       whileDrag={{ scale: 1.02, boxShadow: "var(--shadow-lift)", backgroundColor: "var(--surface-solid)", zIndex: 5 }}
@@ -207,19 +253,17 @@ function TodoRow({ r, tag, dragging, onToggle, onOpen, onDropped }: { r: Row; ta
         if (e.pointerType === "mouse") return controls.start(e);
         const start = e.nativeEvent;
         cancelHold();
-        hold.current = {
-          x: e.clientX,
-          y: e.clientY,
-          timer: setTimeout(() => {
-            hold.current = null;
-            lifted.current = true;
-            dragging.current = true;
-            setUp(true);
-            controls.start(start);
-          }, HOLD_MS),
-        };
+        hold.current = { x: e.clientX, y: e.clientY, start, timer: setTimeout(() => lift(start), HOLD_MS) };
       }}
-      onPointerMove={(e) => hold.current && Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) > 8 && cancelHold()}
+      onPointerMove={(e) => {
+        if (!hold.current) return;
+        const dx = Math.abs(e.clientX - hold.current.x);
+        const dy = Math.abs(e.clientY - hold.current.y);
+        if (Math.hypot(dx, dy) <= 8) return;
+        // sideways is never a scroll, so the row can come away at once; up or down is left to the page
+        if (dx > dy * 1.5) lift(hold.current.start);
+        else cancelHold();
+      }}
       onPointerUp={() => {
         const was = lifted.current;
         release();
@@ -228,10 +272,24 @@ function TodoRow({ r, tag, dragging, onToggle, onOpen, onDropped }: { r: Row; ta
       }}
       onPointerCancel={release}
       onDragStart={() => (dragging.current = true)}
+      onDrag={(e, info) => {
+        const at = e as PointerEvent;
+        const hit = document.elementsFromPoint(at.clientX, at.clientY).map((n) => n.closest("[data-folder]")).find(Boolean);
+        const key = hit?.getAttribute("data-folder") ?? null;
+        const to = key && accepts(key) ? key : null;
+        if (to !== over.current) onCarry((over.current = to));
+        away.current = !!to || Math.abs(info.offset.x) > AWAY_PX;
+        setOut(to ? 2 : away.current ? 1 : 0);
+      }}
       onDragEnd={() => {
+        const to = over.current;
+        over.current = null;
+        away.current = false;
+        setOut(0);
+        onCarry(null);
         release();
         setTimeout(() => (dragging.current = false), 50);
-        onDropped();
+        onDropped(to);
       }}
       className="todo-row relative -mx-2 flex cursor-grab touch-pan-y select-none items-start gap-3 rounded-2xl px-3 active:cursor-grabbing"
     >
@@ -253,13 +311,14 @@ function TodoRow({ r, tag, dragging, onToggle, onOpen, onDropped }: { r: Row; ta
   );
 }
 
-function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; today?: string; onOpen: (id: string) => void }) {
+function List({ view, folder, folders, today, onOpen, onCarry }: { view: string; folder?: Folder; folders: Folder[]; today?: string; onOpen: (id: string) => void; onCarry: (folder: string | null) => void }) {
   const { data, mutate } = useSWR<{ todos: Row[]; today: string }>(`todos?view=${view}`, fetcher, { refreshInterval: 15_000 });
   const { mutate: globalMutate } = useSWRConfig();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
   const dragging = useRef(false);
+  const away = useRef(false);
 
   // Tasks typed here that the server has not answered for yet. They show at once and stay put.
   const unsaved = useRef<Row[]>([]);
@@ -318,6 +377,25 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
     }
   }
 
+  /** The lists a task may be carried to: the same ones its "Move to" menu offers, less the one it is in. */
+  const accepts = (r: Row, key: string) => {
+    const to = folders.find((x) => x.key === key);
+    return !!to && key !== view && key !== "week" && !r.id.startsWith("new_") && (!to.guest || to.guest === r.guest_id);
+  };
+
+  /** A task let go over another list: it leaves this one at once, unless this view also shows the day it went to. */
+  async function move(r: Row, to: string) {
+    if (!(view === "week" || view === "next_week" || view === "weekend")) {
+      setRows((rs) => rs!.filter((x) => x.id !== r.id));
+      mutate((cur) => (cur ? { ...cur, todos: cur.todos.filter((x) => x.id !== r.id) } : cur), { revalidate: false });
+    }
+    try {
+      await api(`todos/${r.id}`, { method: "PATCH", body: { view: to } });
+    } finally {
+      globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
+    }
+  }
+
   function reorder(groupKey: string, ordered: Row[]) {
     setRows((rs) => {
       const inGroup = new Set(ordered.map((o) => o.id));
@@ -349,7 +427,7 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
               {key === "any" ? "Any day" : key === today ? "Today" : dayName(key)}
             </h2>
           )}
-          <Reorder.Group axis="y" values={items} onReorder={(o) => reorder(key, o)} as="ul">
+          <Reorder.Group axis="y" values={items} onReorder={(o) => !away.current && reorder(key, o)} as="ul">
             <AnimatePresence initial={false}>
               {items.map((r) => (
                 <TodoRow
@@ -357,9 +435,12 @@ function List({ view, folder, today, onOpen }: { view: string; folder?: Folder; 
                   r={r}
                   tag={!!r.guest_id && !folder?.guest}
                   dragging={dragging}
+                  away={away}
+                  accepts={(k) => accepts(r, k)}
+                  onCarry={onCarry}
                   onToggle={() => !r.id.startsWith("new_") && toggle(r)}
                   onOpen={() => !r.id.startsWith("new_") && onOpen(r.id)}
-                  onDropped={() => setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id).filter((x) => !x.startsWith("new_")) } }), rs))}
+                  onDropped={(to) => (to ? move(r, to) : setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id).filter((x) => !x.startsWith("new_")) } }), rs)))}
                 />
               ))}
             </AnimatePresence>

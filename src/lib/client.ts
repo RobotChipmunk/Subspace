@@ -116,7 +116,11 @@ export function useSaver(save: (text: string) => Promise<unknown>, delay = 700) 
   const flush = (): Promise<void> => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
-    return (running.current ??= (async () => {
+    if (running.current) return running.current;
+    // Nothing to save: do not start a run. One that finishes before it is stored here would be
+    // remembered as still running, and every later save would wait on it and never be sent.
+    if (latest.current === null) return Promise.resolve();
+    return (running.current = (async () => {
       try {
         while (latest.current !== null) {
           const text = latest.current;

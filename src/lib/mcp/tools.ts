@@ -94,7 +94,7 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents.',
+      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents. Before posting, check the story is not already in the feed (search, explore("/feed/recent"), and explore("/following/<slug>") for a topic); never post a duplicate, even from a different source.',
     inputSchema: obj(
       {
         body: str("The headline: what happened, in one line. At most 27 words. Plain text, no links."),

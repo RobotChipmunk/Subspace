@@ -1,12 +1,19 @@
 name: iOS
 
 # Builds the iPhone and iPad app and drives it end to end, in the simulator, against a freshly
-# seeded Subspace running on the same machine. Runs when the app or this file changes.
+# seeded Subspace running on the same machine. Runs when the app changes, and also when the server
+# side it depends on changes (the REST API, the rules behind it, the schema, the seeded data), so
+# a change on the web that the app has not followed shows up here as a failing run.
 on:
   push:
     paths:
       - "ios/**"
       - ".github/workflows/ios.yml"
+      - "src/app/api/v1/**"
+      - "src/lib/core/**"
+      - "src/lib/db.ts"
+      - "src/lib/blocks.ts"
+      - "scripts/seed.ts"
   workflow_dispatch:
 
 concurrency:

@@ -617,6 +617,12 @@ html[data-typing] .art-mesh {
   -webkit-touch-callout: none;
 }
 
+/* The list a carried task is held over. Opaque, so the row beneath it reads as going in. */
+.drop-target {
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface-solid);
+  box-shadow: var(--shadow);
+}
+
 /* ---------- Feed: several pictures on one post, swiped sideways ---------- */
 .slides {
   display: flex;

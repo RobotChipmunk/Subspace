@@ -370,6 +370,41 @@ final class TodosStore {
         withAnimation(.ssSoft) { rows = list }
     }
 
+    /// Whether the row being carried can be put on this list. The same rule as the web: not the
+    /// list it is on, not "This week", and a guest's list only for that guest's own task.
+    func accepts(_ key: String) -> Bool {
+        guard let id = draggingID, !id.hasPrefix("new_"), key != view, key != "week" else { return false }
+        guard let row = (rows ?? []).first(where: { $0.id == id }), let folder = folders.first(where: { $0.key == key }) else { return false }
+        return folder.guest == nil || folder.guest == row.guest_id
+    }
+
+    /// The carried row was let go over a list in the folders: it moves there. It leaves this list
+    /// at once and is saved behind; if that fails it comes back.
+    func dropOnFolder(_ key: String) {
+        guard accepts(key), let id = draggingID, let api = app?.api else {
+            endDrag()
+            return
+        }
+        let before = rows
+        let wasWaiting = (rows ?? []).first(where: { $0.id == id })?.scope == "guest"
+        draggingID = nil
+        dragAt = nil
+        generation += 1
+        withAnimation(.ssSoft) { rows = (rows ?? []).filter { $0.id != id } }
+        Task {
+            do {
+                try await api.send("PATCH", "todos/\(id)", body: ["view": key])
+                problem = nil
+                // a guest's waiting task now has a day: its module leaves the rail
+                if wasWaiting { await app?.refreshRail() }
+            } catch {
+                withAnimation(.ssSoft) { rows = before }
+                problem = error.localizedDescription
+            }
+            await refreshFolders()
+        }
+    }
+
     func endDrag() {
         guard draggingID != nil else { return }
         draggingID = nil

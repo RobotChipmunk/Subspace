@@ -108,6 +108,8 @@ struct Post: Codable, Identifiable, Hashable {
     var mentions: [String]?
     var reply_count: Int?
     var last_reply_at: String?
+    /// When the owner bookmarked this post to come back to it; nil when it is not bookmarked.
+    var bookmarked_at: String?
     var created_at: String
 }
 

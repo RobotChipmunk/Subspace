@@ -68,4 +68,21 @@ final class TodosTests: SubspaceTestCase {
         press(app.buttons["todos.folder.backlog"], "the Backlog folder again")
         expect(row(title), "the restored task back in Backlog")
     }
+
+    func testDragATaskOntoAnotherList() {
+        launchSignedIn()
+        go("todos")
+        expect(app.buttons["todos.folder.today"], "the Today folder").tap()
+        let task = expect(row("Call the roofer back"), "a seeded task on Today")
+        let nextWeek = expect(app.buttons["todos.folder.next_week"], "the Next week folder")
+
+        // Lift the task and let it go over another list in the folders.
+        task.press(forDuration: 1.2, thenDragTo: nextWeek, withVelocity: .slow, thenHoldForDuration: 0.6)
+        waitToVanish(row("Call the roofer back"), "the task, gone from Today once it is moved")
+        shot("12-todos-dragged-away")
+
+        nextWeek.tap()
+        expect(row("Call the roofer back"), "the task on Next week")
+        shot("12-todos-dragged-to-next-week")
+    }
 }

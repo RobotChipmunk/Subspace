@@ -33,4 +33,34 @@ final class FeedTests: SubspaceTestCase {
         expect(textContaining("Saturday at seven works"), "the reply just sent, in the thread")
         shot("51-feed-replied")
     }
+
+    func testBookmarkAPostAndShowBookmarkedOnly() {
+        launchSignedIn()
+        expect(body("Italian place for Saturday"), "the feed")
+
+        // Nothing is bookmarked in the seeded data.
+        press(app.buttons["feed.bookmarked"], "the Bookmarked toggle in the header")
+        expect(app.descendants(matching: .any)["feed.bookmarked.empty"], "the empty bookmarked view")
+        shot("52-feed-bookmarked-empty")
+        press(app.buttons["feed.bookmarked"], "the Bookmarked toggle, to show everything again")
+        expect(body("Italian place for Saturday"), "the whole feed again")
+
+        // Bookmark the first post that has a source (only those can be bookmarked).
+        let mark = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'feed.save.' AND label == 'Bookmark'")).firstMatch
+        var swipes = 0
+        while !mark.exists && swipes < 6 {
+            app.swipeUp()
+            swipes += 1
+        }
+        expect(mark, "a bookmark button on a post with a source").tap()
+        expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'feed.save.' AND label == 'Remove bookmark'")).firstMatch, "the bookmark, filled in")
+        shot("52-feed-bookmarked-post")
+
+        // Back to the top, and narrow the feed to bookmarked posts.
+        for _ in 0..<(swipes + 1) { app.swipeDown() }
+        press(app.buttons["feed.bookmarked"], "the Bookmarked toggle")
+        expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'feed.save.' AND label == 'Remove bookmark'")).firstMatch, "the bookmarked post, alone in the bookmarked view")
+        waitToVanish(body("Italian place for Saturday"), "posts that are not bookmarked")
+        shot("52-feed-bookmarked-only")
+    }
 }

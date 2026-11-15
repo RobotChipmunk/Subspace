@@ -1,5 +1,6 @@
 import { q, q1 } from "../db";
 import { cleanSvg, createJob, newArt, type Art } from "./art";
+import { saveLink } from "./links";
 import { agentById, bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
 
 export type Image = { url: string; title?: string };
@@ -40,6 +41,8 @@ export type Post = {
   mentions: string[];
   reply_count: number;
   last_reply_at: string | null;
+  /** When the owner bookmarked this post to come back to it; null when it is not bookmarked. */
+  bookmarked_at: string | null;
   created_at: string;
 };
 
@@ -253,8 +256,9 @@ export async function getPost(id: string): Promise<Post | null> {
   return q1<Post>("SELECT * FROM posts WHERE id = $1", [id]);
 }
 
-export async function listFeed(opts: { channel?: string; before?: string; tracker?: string; author?: string; limit?: number }): Promise<Post[]> {
+export async function listFeed(opts: { channel?: string; before?: string; tracker?: string; author?: string; bookmarked?: boolean; limit?: number }): Promise<Post[]> {
   const where = ["parent_id IS NULL"];
+  if (opts.bookmarked) where.push("bookmarked_at IS NOT NULL");
   const params: unknown[] = [];
   if (opts.tracker) {
     params.push(opts.tracker);
@@ -273,6 +277,20 @@ export async function listFeed(opts: { channel?: string; before?: string; tracke
   }
   params.push(Math.min(opts.limit ?? 30, 100));
   return withPages(await q<Post>(`SELECT * FROM posts WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT $${params.length}`, params));
+}
+
+/**
+ * Bookmarks a post for the owner, or takes the bookmark off. Bookmarking a post that has a source
+ * also keeps that source in the saved links (once, however often it is bookmarked); taking the
+ * bookmark off leaves the link where it is.
+ */
+export async function setBookmark(actor: Agent, id: string, on: boolean): Promise<Post> {
+  if (actor.kind !== "human") throw bad("Bookmarks are the owner's. To keep a link for them, use link_save.");
+  const p = await q1<Post>(`UPDATE posts SET bookmarked_at = ${on ? "COALESCE(bookmarked_at, now())" : "NULL"} WHERE id = $1 AND parent_id IS NULL RETURNING *`, [id]);
+  if (!p) throw notFound("No such post");
+  // The bookmark stands even when the source cannot be kept as a link (an address that cannot be reached, say).
+  if (on && p.source) await saveLink(actor, { url: p.source.url, site: p.source.name, about: p.body }).catch((e) => console.error("bookmark: could not save the source as a link", e));
+  return p;
 }
 
 export async function getThread(id: string, opts: { after?: string; limit?: number } = {}) {
