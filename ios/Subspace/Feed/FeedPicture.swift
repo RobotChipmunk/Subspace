@@ -58,7 +58,7 @@ private struct FeedPictures: View {
         VStack(spacing: 10) {
             TabView(selection: $at) {
                 ForEach(Array(images.enumerated()), id: \.offset) { item in
-                    FeedSlide(image: item.element, known: shapes[item.offset], frame: shape) { r in
+                    FeedSlide(image: item.element, known: shapes[item.offset], box: shape) { r in
                         shapes[item.offset] = r
                     }
                     .modifier(FeedToSource(source: post.source))
@@ -82,17 +82,17 @@ private struct FeedPictures: View {
 private struct FeedSlide: View {
     var image: PostImage
     var known: CGFloat?
-    var frame: CGFloat
+    var box: CGFloat
     var onRatio: (CGFloat) -> Void
 
+    /// Close to the frame's shape: fill it. Clearly different: show the whole picture.
+    private var fits: Bool {
+        guard let known, box > 0 else { return true }
+        return abs(known / box - 1) < 0.12
+    }
+
     var body: some View {
-        // Close to the frame's shape: fill it. Clearly different: show the whole picture.
-        var fits = true
-        if let known, frame > 0 {
-            fits = abs(known / frame - 1) < 0.12
-        }
-        return RemoteImage(image.url, contentMode: fits ? .fill : .fit, onRatio: onRatio)
-            .accessibilityLabel(image.title ?? "Picture")
+        RemoteImage(image.url, contentMode: fits ? .fill : .fit, onRatio: onRatio)
     }
 }
 
@@ -113,7 +113,6 @@ private struct FeedDots: View {
         }
         .animation(.ssSoft, value: at)
         .accessibilityHidden(true)
-        .accessibilityIdentifier("feed.dots")
     }
 }
 
@@ -155,7 +154,7 @@ private func feedArtSVG(_ svg: String?, ink: String, dark: Bool) -> String? {
     let r = Int((Double((n >> 16) & 255) * 0.38).rounded())
     let g = Int((Double((n >> 8) & 255) * 0.38).rounded())
     let b = Int((Double(n & 255) * 0.38).rounded())
-    let shaded = String(format: "#%02x%02x%02x", r, g, b)
+    let shaded = String(format: "#%02lx%02lx%02lx", r, g, b)
     let inked = svg.replacingOccurrences(of: ink, with: shaded, options: [.caseInsensitive])
     return inked.replacingOccurrences(of: "(#fff(?:fff)?\\b|\\bwhite\\b)", with: "#f3f1fa", options: [.regularExpression, .caseInsensitive])
 }

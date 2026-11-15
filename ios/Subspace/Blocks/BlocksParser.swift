@@ -266,8 +266,11 @@ enum BlocksParser {
         if next != " " && next != "\t" { return nil }
         var text = rest.trimmingCharacters(in: .whitespaces)
         // Closing hashes ("## Title ##") are decoration.
-        while text.hasSuffix("#") { text = String(text.dropLast()) }
-        text = text.trimmingCharacters(in: .whitespaces)
+        var body = text
+        while body.hasSuffix("#") { body = String(body.dropLast()) }
+        if body.count < text.count, body.hasSuffix(" ") || body.isEmpty {
+            text = body.trimmingCharacters(in: .whitespaces)
+        }
         if stripMarks(text).trimmingCharacters(in: .whitespaces).isEmpty { return nil }
         return (level, text)
     }
