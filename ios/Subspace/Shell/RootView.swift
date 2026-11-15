@@ -50,8 +50,8 @@ struct ShellView: View {
                 // Content scrolls up behind the status bar; soften it there so the clock stays readable.
                 Rectangle()
                     .fill(.ultraThinMaterial)
-                    .mask(LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom))
-                    .frame(height: geo.safeAreaInsets.top + 14)
+                    .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.65), .init(color: .black.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom))
+                    .frame(height: geo.safeAreaInsets.top + 18)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)

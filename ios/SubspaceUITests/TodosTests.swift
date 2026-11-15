@@ -59,15 +59,13 @@ final class TodosTests: SubspaceTestCase {
         waitToVanish(row(title), "the deleted task")
         let bin = expect(app.buttons["todos.folder.bin"], "Recently deleted, now that it holds something")
         // On a phone the folders are one row that scrolls sideways, and the bin is at its far end.
-        for _ in 0..<3 where !bin.isHittable { app.buttons["todos.folder.backlog"].swipeLeft() }
-        bin.tap()
+        if !isPad { app.buttons["todos.folder.today"].swipeLeft() }
+        press(bin, "Recently deleted, in view")
         expect(textContaining(title), "the deleted task in the bin")
         shot("11-todos-bin")
         let restore = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.restore.'")).firstMatch
         expect(restore, "Restore").tap()
-        let backlog = app.buttons["todos.folder.backlog"]
-        for _ in 0..<3 where !backlog.isHittable { app.swipeRight() }
-        backlog.tap()
+        press(app.buttons["todos.folder.backlog"], "the Backlog folder again")
         expect(row(title), "the restored task back in Backlog")
     }
 }
