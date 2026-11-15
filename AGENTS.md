@@ -53,6 +53,21 @@ dismissed rail modules between sizes. It takes more than ten minutes: start it i
 read the screenshots in `<outDir>` as they appear, and wait for the summary line. When you change
 behaviour, change the matching assertions in it in the same commit.
 
+## The iOS app
+
+`ios/` is the native SwiftUI app for iPhone and iPad (see "The iOS app" in `README.md`). It follows
+`DESIGN.md` through `ios/Subspace/Design`: use `Theme` tokens, `.glass`, `ConfirmDelete` and the
+other shared pieces there, and when a token or pattern changes on the web, change it there too.
+When you change an endpoint under `/api/v1`, change its caller and model in `ios/` in the same
+commit; the app decodes leniently, but a renamed field silently shows nothing.
+
+There is no Swift compiler or simulator in a Linux cloud container. The only way to compile and
+run the app from there is the `iOS` workflow (`.github/workflows/ios.yml`), which runs on a push
+that touches `ios/`: read the job log for compile errors and the test summary, and the
+`ios-ui-tests` artifact for screenshots. Each run takes several minutes of Mac runner time, so
+batch changes and re-read Swift carefully before pushing. When you change behaviour, change the
+matching UI test in `ios/SubspaceUITests` in the same commit.
+
 ## Lessons
 
 When something costs you time in this repo (a wrong assumption, a setup step that failed, a
