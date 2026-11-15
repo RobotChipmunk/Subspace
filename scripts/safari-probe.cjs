@@ -182,9 +182,10 @@ async function run(name, title, { mention, background }) {
     const pw = await waitFor("input[type=password]", 60000);
     // Which way of pressing keys reaches the page in this Safari?
     target = pw;
+    await js(PROBE);
     await click(pw);
-    await sleep(1000);
-    const held = () => js("return document.querySelector('input[type=password]').value + ' (focused: ' + (document.activeElement && document.activeElement.tagName) + ')'");
+    await sleep(1500);
+    const held = () => js("return document.querySelector('input[type=password]').value + ' (focused: ' + (document.activeElement && document.activeElement.tagName) + ') ' + JSON.stringify(window.__probe.events)");
     await type("abc");
     console.log("keys by actions after a tap:", await held());
     keyMode = "sendKeys";
