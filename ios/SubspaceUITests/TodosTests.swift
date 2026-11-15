@@ -69,6 +69,40 @@ final class TodosTests: SubspaceTestCase {
         expect(row(title), "the restored task back in Backlog")
     }
 
+    func testDateCalendarAndRepeat() {
+        launchSignedIn()
+        go("todos")
+        expect(app.buttons["todos.folder.today"], "the Today folder").tap()
+        let title = "Water the plants \(Int.random(in: 1000...9999))"
+        enter(title + "\n", into: app.textFields["todos.add"], "the add field")
+        expect(row(title), "the new task in the list").tap()
+
+        // The date pill opens a month calendar in place, and closes it again.
+        let date = expect(app.buttons["todos.detail.date"], "the date pill")
+        XCTAssertTrue(date.label.contains("Today"), "A task on today should say Today, not \(date.label)")
+        date.tap()
+        expect(app.descendants(matching: .any)["todos.detail.calendar"], "the month calendar")
+        shot("13-todos-calendar")
+        date.tap()
+        waitToVanish(app.descendants(matching: .any)["todos.detail.calendar"], "the month calendar, closed")
+
+        // Repeating: finishing it adds the next one and says so, with a way to open it.
+        expect(app.descendants(matching: .any)["todos.detail.repeat"], "the repeat pill").tap()
+        expect(app.buttons["Every week"], "Every week in the repeat menu").tap()
+        expect(textContaining("a week from that day"), "what finishing will do")
+        expect(app.buttons["todos.detail.check"], "the done circle").tap()
+        expect(textContaining("Next one added for"), "the line saying the next task was added")
+        shot("13-todos-repeat-done")
+        expect(app.buttons["todos.next.open"], "Open, beside that line").tap()
+
+        // The next one: the same task, not finished, a week on.
+        let nextDate = expect(app.buttons["todos.detail.date"], "the date pill of the next task")
+        let moved = NSPredicate(format: "NOT (label CONTAINS 'Today')")
+        wait(for: [expectation(for: moved, evaluatedWith: nextDate)], timeout: 15)
+        waitToVanish(textContaining("Next one added for"), "the finished task's line, gone from the next task")
+        shot("13-todos-repeat-next")
+    }
+
     func testDragATaskOntoAnotherList() {
         launchSignedIn()
         go("todos")

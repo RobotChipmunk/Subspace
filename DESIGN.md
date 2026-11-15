@@ -187,6 +187,7 @@ Patterns:
   36px day circles, today in accent, the chosen day filled. Days already past are dimmed and
   cannot be chosen; stepping a month slides the grid the way the owner is moving, and the panel
   keeps one height. Choosing a day closes it and saves at once. Use it wherever a date is set.
+  In the iOS app the pill reveals the system's own graphical date picker in place beneath it.
 - **Repeat** (todo detail): a pill beside the date that opens the system menu (Never, Every day,
   Every week, Every 2 weeks, Every month, Every year); it turns `accent-soft` while set, and one
   meta line beneath says what finishing will do. A repeating row carries a small repeat icon.

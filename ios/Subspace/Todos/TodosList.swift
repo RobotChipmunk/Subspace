@@ -21,7 +21,7 @@ struct TodosListView: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 20)
             }
-            if loaded {
+            if loaded && store.canAdd {
                 TodosAddField(store: store)
                     .padding(.top, 4)
             }
@@ -50,6 +50,7 @@ private struct TodosGroupView: View {
 
     var body: some View {
         let tagged = store.folder?.guest == nil
+        let today = store.today
         VStack(alignment: .leading, spacing: 0) {
             if !group.key.isEmpty {
                 Text(store.groupTitle(group.key).uppercased())
@@ -62,7 +63,9 @@ private struct TodosGroupView: View {
                     .accessibilityAddTraits(.isHeader)
             }
             ForEach(keyed) { item in
-                TodosRowView(row: item.row, tag: tagged && item.row.guest_id != nil, store: store)
+                // on a person's list a task says which day it has been given
+                let place = tagged ? "" : TodosDates.placeLabel(scope: item.row.scope, date: item.row.date, today: today)
+                TodosRowView(row: item.row, tag: tagged && item.row.guest_id != nil, place: place, store: store)
                     .transition(.opacity)
             }
         }
@@ -75,24 +78,38 @@ private struct TodosGroupView: View {
 private struct TodosRowView: View {
     var row: Todo
     var tag: Bool
+    var place: String
     var store: TodosStore
 
     var body: some View {
         let temp = row.id.hasPrefix("new_")
         let id = row.id
+        let nextID = row.done ? row.next_id : nil
+        let nextDate = row.done ? row.next_date : nil
         HStack(alignment: .top, spacing: 4) {
             TodosCheck(on: row.done, label: row.done ? "Mark not done" : "Mark done") {
                 Task { await store.toggle(id) }
             }
             .accessibilityIdentifier("todos.check.\(id)")
 
-            Button {
-                if !temp { store.open(id) }
-            } label: {
-                TodosRowLabel(row: row, tag: tag)
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    if !temp { store.open(id) }
+                } label: {
+                    TodosRowLabel(row: row, tag: tag, place: place)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("todos.row.\(id)")
+
+                // finished and repeating: the next one has been added, and can be opened from here
+                if let nextID, let nextDate {
+                    TodosNextNote(date: nextDate, today: store.today) {
+                        store.open(nextID)
+                    }
+                    .padding(.top, -6)
+                    .transition(.opacity)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("todos.row.\(id)")
 
             if !temp {
                 ConfirmDelete(label: "Delete \(row.title)", size: 14) {
@@ -110,13 +127,50 @@ private struct TodosRowView: View {
     }
 }
 
+/// On a finished repeating task: one quiet line saying when it comes round again, with a way to
+/// open that one and change its date.
+struct TodosNextNote: View {
+    var date: String
+    var today: String?
+    var open: () -> Void
+
+    var body: some View {
+        let label = TodosDates.placeLabel(scope: "day", date: date, today: today)
+        let day = label.isEmpty ? TodosDates.shortDate(date) : label
+        HStack(spacing: 6) {
+            Image(systemName: "repeat")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.ink3)
+                .accessibilityHidden(true)
+            Text("Next one added for \(day)")
+                .font(.ssMeta)
+                .foregroundStyle(Theme.ink3)
+                .lineLimit(1)
+                .accessibilityIdentifier("todos.next.note")
+            Button(action: open) {
+                Text("Open")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Open the next one")
+            .accessibilityIdentifier("todos.next.open")
+        }
+    }
+}
+
 private struct TodosRowLabel: View {
     var row: Todo
     var tag: Bool
+    var place: String
 
     var body: some View {
         let unseen = row.ai_unseen ?? false
         let notes = row.has_notes ?? false
+        let repeats = row.`repeat` != nil && !row.done
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
@@ -140,6 +194,21 @@ private struct TodosRowLabel: View {
                     .accessibilityLabel("Changed since you last looked")
             }
             Spacer(minLength: 0)
+            if !place.isEmpty {
+                Text(place)
+                    .font(.ssMeta)
+                    .foregroundStyle(Theme.ink3)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.top, 3)
+            }
+            if repeats {
+                Image(systemName: "repeat")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.ink3)
+                    .padding(.top, 4)
+                    .accessibilityLabel("Repeats")
+            }
             if notes {
                 Image(systemName: "text.alignleft")
                     .font(.system(size: 13))

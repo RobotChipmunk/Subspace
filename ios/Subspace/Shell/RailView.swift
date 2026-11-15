@@ -75,7 +75,7 @@ private struct RailModuleView: View {
                                 Text(label).font(.system(size: 11.5, weight: .medium)).foregroundStyle(tone).lineLimit(1)
                             }
                         }
-                        Text(m.title).font(.system(size: 14.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(open ? nil : 1).multilineTextAlignment(.leading)
+                        Text(m.title).font(.system(size: 14.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(open ? nil : 2).multilineTextAlignment(.leading)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink3).rotationEffect(.degrees(open ? 180 : 0))

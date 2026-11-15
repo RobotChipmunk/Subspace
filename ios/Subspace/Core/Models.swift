@@ -130,6 +130,12 @@ struct Todo: Codable, Identifiable, Hashable {
     var created_at: String?
     var updated_at: String?
     var has_notes: Bool?
+    /// How often the task comes round again: "daily", "weekly", "biweekly", "monthly" or "yearly".
+    /// Finishing it creates the next one, counted from the day it was finished.
+    var `repeat`: String?
+    /// On a finished repeating task: the task that was created to follow it, and the day it is on.
+    var next_id: String?
+    var next_date: String?
 }
 
 /// A node of the context tree: a note, a page an agent made, or a saved link.
