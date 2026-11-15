@@ -98,7 +98,7 @@ function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean
               {m.level !== "info" && m.label && <span className="sr-only">{m.level}</span>}
             </span>
           )}
-          <span className={`block text-[14.5px] font-medium leading-snug [overflow-wrap:anywhere] ${open ? "" : "line-clamp-2"}`}>{m.title}</span>
+          <span className={`text-[14.5px] font-medium leading-snug [overflow-wrap:anywhere] ${open ? "block" : "line-clamp-2"}`}>{m.title}</span>
         </span>
         <ChevronDown size={15} className={`shrink-0 text-ink3 transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
       </button>

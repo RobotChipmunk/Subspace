@@ -968,11 +968,13 @@ async function run(profile) {
     // the person has a list of their own in Todos
     await press(page.getByRole("link", { name: "Todos", exact: true }));
     await page.waitForURL("**/todos");
-    await page.getByRole("button", { name: `From ${name}` }).waitFor({ timeout: 5000 });
-    await page.getByRole("button", { name: `From ${name}` }).scrollIntoViewIfNeeded();
-    await reachable(page.getByRole("button", { name: `From ${name}` }), "From list in todos");
+    // in the list of folders: a waiting task of theirs is also a button, in the rail
+    const fromList = page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: `From ${name}` });
+    await fromList.waitFor({ timeout: 5000 });
+    await fromList.scrollIntoViewIfNeeded();
+    await reachable(fromList, "From list in todos");
     // the list is a category: a task in it waits in the rail, then keeps its place here once it has a day
-    const fromKey = await page.getByRole("button", { name: `From ${name}` }).getAttribute("data-folder");
+    const fromKey = await fromList.getAttribute("data-folder");
     const long = `Book the plumber for the upstairs bathroom before the tiles arrive ${name}`;
     const send = (url, method, body) => page.evaluate(([u, m, b]) => fetch(u, { method: m, headers: { "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined }).then((r) => r.json()), [url, method, body]);
     const task = await send("/api/v1/todos", "POST", { title: long, view: fromKey });
@@ -987,13 +989,13 @@ async function run(profile) {
       await shot("rail-two-lines");
     }
     await send(`/api/v1/todos/${task.id}`, "PATCH", { view: "today" });
-    await press(page.getByRole("button", { name: `From ${name}` }));
+    await press(fromList);
     const kept = page.locator(".todo-row", { hasText: long });
     await kept.waitFor({ timeout: 6000 }).catch(() => fail("people: a task given a day left the person's list"));
     if ((await kept.locator("[data-place]").innerText().catch(() => "")) !== "Today") fail("people: a placed task does not show its day in the person's list");
     await noSidewaysScroll("person's list");
     await shot("person-list");
-    await press(page.getByRole("button", { name: /^Today/ }));
+    await press(page.locator("[data-folder=today]"));
     await page.locator(".todo-row", { hasText: long }).waitFor({ timeout: 6000 }).catch(() => fail("people: a task given a day is not under that day"));
     await send(`/api/v1/todos/${task.id}`, "DELETE");
     await send(`/api/v1/todos/${task.id}?forever=1`, "DELETE");
