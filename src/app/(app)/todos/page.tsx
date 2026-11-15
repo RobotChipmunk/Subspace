@@ -18,7 +18,7 @@ const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateStrin
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 const shortDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
-const REPEAT_LABELS: [Repeat, string][] = [["daily", "Every day"], ["weekly", "Every week"], ["biweekly", "Every 2 weeks"], ["monthly", "Every month"], ["yearly", "Every year"]];
+const REPEAT_LABELS: [Repeat, string][] = [["daily", "Every day"], ["every_3_days", "Every 3 days"], ["weekly", "Every week"], ["biweekly", "Every 2 weeks"], ["monthly", "Every month"], ["yearly", "Every year"]];
 
 /** On a finished repeating task: one quiet line saying when it comes round again, with a way to open that one. */
 function NextNote({ date, today, onOpen, className = "" }: { date: string; today?: string; onOpen: () => void; className?: string }) {
@@ -607,7 +607,7 @@ function Detail({ id, backLabel, folders, today, onOpen, onBack }: { id: string;
           </select>
         </label>
       </div>
-      {todo.repeat && !todo.done && <p className="ml-[40px] mt-2 text-[13px] text-ink3">When you finish it, the next one is added {todo.repeat === "daily" ? "for the day after" : `${{ weekly: "a week", biweekly: "two weeks", monthly: "a month", yearly: "a year" }[todo.repeat]} from that day`}.</p>}
+      {todo.repeat && !todo.done && <p className="ml-[40px] mt-2 text-[13px] text-ink3">When you finish it, the next one is added {todo.repeat === "daily" ? "for the day after" : `${{ every_3_days: "three days", weekly: "a week", biweekly: "two weeks", monthly: "a month", yearly: "a year" }[todo.repeat]} from that day`}.</p>}
       <AnimatePresence initial={false}>
         {todo.done && todo.next_id && todo.next_date && (
           <motion.div key="next" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="ml-[40px] overflow-hidden">

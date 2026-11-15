@@ -187,7 +187,7 @@ export const TOOLS: Tool[] = [
   {
     name: "todo_add",
     description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions).",
-    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), repeat: str("Optional: daily, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished.") }, ["title"]),
+    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished.") }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
       return { id: t.id, scope: t.scope, date: t.date };
@@ -202,7 +202,7 @@ export const TOOLS: Tool[] = [
         title: str("New title."),
         done: { type: "boolean" },
         view: str("Move to: today, week, weekend, next_week, backlog or YYYY-MM-DD."),
-        repeat: str("daily, weekly, biweekly, monthly, yearly, or none to stop. Finishing a repeating task creates the next one that long after the day it was finished; the result then names it under next."),
+        repeat: str("daily, every_3_days, weekly, biweekly, monthly, yearly, or none to stop. Finishing a repeating task creates the next one that long after the day it was finished; the result then names it under next."),
         notes_append: str("Markdown to add at the end of the notes. May contain blocks: fenced code blocks whose language is the block type and whose body is JSON."),
         notes_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement markdown.") }, required: ["find", "replace"] },
       },
