@@ -25,7 +25,7 @@ jobs:
       DATABASE_URL: postgres://runner@localhost:5432/subspace
       PROJECT: ios/Subspace.xcodeproj
       DERIVED: ${{ github.workspace }}/.derived
-      OUT: ${{ github.workspace }}/.ios-out
+      OUT: ${{ github.workspace }}/ios-out
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +46,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild build-for-testing -project "$PROJECT" -scheme Subspace -configuration Debug \
-            -destination "id=$PHONE" -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO \
+            -destination "id=$PHONE" -derivedDataPath "$DERIVED" \
             > "$OUT/build.log" 2>&1 || {
               echo "::group::Errors"
               grep -E "error:|error: |: error|BUILD FAILED|The following build commands failed" -A2 "$OUT/build.log" | grep -v "^--$" | awk '!seen[$0]++' | head -300
@@ -79,17 +79,19 @@ jobs:
         if: success() || failure()
         run: ios/scripts/ci-test.sh ipad "$PAD"
 
-      - name: Server log
-        if: failure()
-        run: tail -80 "$OUT"/server-*.log || true
+      - name: Logs when something failed
+        if: failure() || cancelled()
+        run: |
+          for f in "$OUT"/test-*.log; do echo "== $f"; grep -vE "^\s*$" "$f" | tail -60; done || true
+          for f in "$OUT"/server-*.log; do echo "== $f"; tail -40 "$f"; done || true
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ios-ui-tests
           path: |
-            .ios-out/**/*.png
-            .ios-out/**/*.jpg
-            .ios-out/*.log
-            .ios-out/*.txt
+            ios-out/**/*.png
+            ios-out/**/*.jpg
+            ios-out/*.log
+            ios-out/*.txt
           retention-days: 14

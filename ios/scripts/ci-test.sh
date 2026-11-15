@@ -6,7 +6,7 @@ set -uo pipefail
 NAME="$1"
 SIM="$2"
 cd "$(dirname "$0")/../.."
-OUT="${OUT:-$PWD/.ios-out}"
+OUT="${OUT:-$PWD/ios-out}"
 DERIVED="${DERIVED:-$PWD/.derived}"
 mkdir -p "$OUT"
 
@@ -16,10 +16,19 @@ xcrun simctl boot "$SIM" 2>/dev/null || true
 xcrun simctl bootstatus "$SIM" -b >/dev/null 2>&1 || true
 
 rm -rf "$OUT/$NAME.xcresult"
+# Run in the background under a watchdog: a simulator that never starts the tests must not hold
+# the job until its timeout.
+LIMIT="${TEST_LIMIT_SECONDS:-1500}"
 xcodebuild test-without-building -project ios/Subspace.xcodeproj -scheme Subspace \
   -destination "id=$SIM" -derivedDataPath "$DERIVED" -resultBundlePath "$OUT/$NAME.xcresult" \
-  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO > "$OUT/test-$NAME.log" 2>&1
+  -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 240 \
+  > "$OUT/test-$NAME.log" 2>&1 &
+XCB=$!
+( sleep "$LIMIT"; echo "Stopped: the tests ran longer than $LIMIT seconds." >> "$OUT/test-$NAME.log"; kill "$XCB" 2>/dev/null ) &
+WATCH=$!
+wait "$XCB"
 STATUS=$?
+kill "$WATCH" 2>/dev/null || true
 
 # What ran and how it ended, short enough to read in the job log.
 grep -E "^Test (Case|Suite) .*(passed|failed|started)|error: |Executed [0-9]+ tests|\*\* TEST" "$OUT/test-$NAME.log" | grep -v "started" | awk '!seen[$0]++' | tail -150 | tee "$OUT/summary-$NAME.txt"

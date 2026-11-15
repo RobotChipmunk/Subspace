@@ -9,6 +9,6 @@ next-env.d.ts
 
 # iOS build output
 .derived
-.ios-out
+ios-out
 xcuserdata
 *.xcuserstate
