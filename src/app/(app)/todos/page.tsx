@@ -336,7 +336,8 @@ function TodoRow({
       onDragStart={() => (dragging.current = true)}
       onDrag={(e, info) => {
         const at = e as PointerEvent;
-        const under = document.elementsFromPoint(at.clientX, at.clientY);
+        // what lies beneath the carried row, not the row itself (it still sits inside its own section)
+        const under = document.elementsFromPoint(at.clientX, at.clientY).filter((n) => !el.current?.contains(n));
         const key = under.map((n) => n.closest("[data-folder]")).find(Boolean)?.getAttribute("data-folder") ?? null;
         const to = key && accepts(key) ? key : null;
         if (to !== over.current) onCarry((over.current = to));
