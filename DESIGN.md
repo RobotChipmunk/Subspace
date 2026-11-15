@@ -143,8 +143,8 @@ Patterns:
   is `--comments-w`. Use this pattern for any detail that should stay open while a list scrolls.
 - **Bookmarks** (feed): the bookmark on a post that has a source marks it to come back to; it
   fills in accent and stays so until tapped again. Bookmarking also keeps the source in Links, and
-  removing the bookmark leaves the link. The Bookmarked pill in the feed header (the same glass
-  pill as Links in Context, accent while on, off by default, held in the address as
+  removing the bookmark leaves the link. A quiet bookmark icon in the feed header (no label or surface; `ink3` at rest,
+  filled accent on `accent-soft` while on; off by default, held in the address as
   `?view=bookmarked`) narrows the feed to bookmarked posts; a post whose bookmark is removed there
   leaves at once.
 - **Rail** (`Rail.tsx`): two lines per module (timing, title); expands in place; errors first in

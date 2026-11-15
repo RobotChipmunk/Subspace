@@ -169,9 +169,11 @@ function Feed() {
             type="button"
             onClick={() => router.push(only ? "/feed" : "/feed?view=bookmarked", { scroll: false })}
             aria-pressed={only}
-            className={`glass flex h-10 flex-none items-center gap-1.5 rounded-full px-3.5 text-[14.5px] font-medium transition-colors ${only ? "text-accent" : "text-ink2 hover:text-ink"}`}
+            aria-label="Bookmarked"
+            title={only ? "Show everything" : "Show bookmarked only"}
+            className={`-mr-1 mb-0.5 grid h-10 w-10 flex-none place-items-center rounded-full transition-colors ${only ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
           >
-            <Bookmark size={16} fill={only ? "currentColor" : "none"} /> Bookmarked
+            <Bookmark size={18} fill={only ? "currentColor" : "none"} />
           </button>
         }
       />
