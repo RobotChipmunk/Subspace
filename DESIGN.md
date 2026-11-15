@@ -102,6 +102,10 @@ Patterns:
   delete pill; the save button grows out of the link field. Avoid cross-fading two different
   controls.
 - **Lift.** A dragged row scales to 1.02, gains `--shadow-lift` and a solid surface.
+- **Carry.** A lifted row moves freely. Held over a place it can go (a list in the todo folders),
+  that place lights up (`.drop-target`: accent on an opaque surface) and the row fades back so the
+  target reads clearly; letting go moves it there. Away from the list it stops trading places with
+  its neighbours. On touch, pulling a row sideways lifts it at once; up or down still scrolls.
 - **Emphasis is rare.** One small flourish at the moment it matters (the bin's shake as it arms).
   Never loop attention-seeking motion.
 - **Make room, do not cover.** A panel that opens beside the content slides in from its edge with
@@ -154,6 +158,8 @@ Patterns:
 - **Confirm delete** (`ConfirmDelete.tsx`): the only way to remove anything. A quiet bin; the
   first tap arms it into a red pill with the action's name; the second tap does it; it disarms
   after 4 seconds, on Escape, or on a tap elsewhere. Use it for every destructive action.
+- **Moving a task** (todos): drag it onto a list in the folders (beside the tasks on a wide
+  screen, above them on a phone), or open it and use "Move to". Both offer the same lists.
 - **Recently deleted** (todos): a deleted task leaves its list at once and waits in a bin for 15
   days, where it can be restored or deleted for good. The bin's entry in the list of folders
   shows only while it holds something. Prefer this pattern, confirm then recoverable, for

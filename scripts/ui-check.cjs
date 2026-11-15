@@ -397,6 +397,56 @@ async function run(profile) {
     if (await page.getByLabel("Task name").count()) fail("todos reorder: letting go of a dragged task opened it");
     await shot("todos-reordered");
   });
+  await step("todos carry to another day", async () => {
+    // A task dragged onto a list in the folders moves there. On touch the folders are beside the
+    // list from tablet width, where pulling a row sideways lifts it at once; above it on a phone.
+    const nav = page.getByRole("navigation", { name: "Lists" });
+    const rows = page.locator("main ul li");
+    const titles = () => rows.evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
+    const mid = (loc) => loc.evaluate((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left }))(e.getBoundingClientRect()));
+    async function carry(title, toName, shotName) {
+      const from = await mid(page.locator("main ul li", { hasText: title }));
+      from.x = from.left + 110;
+      const target = nav.getByRole("button", { name: toName });
+      await target.scrollIntoViewIfNeeded();
+      const to = await mid(target);
+      const at = (i) => [from.x + ((to.x - from.x) * i) / 24, from.y + ((to.y - from.y) * i) / 24];
+      let cdp;
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      if (profile.touch) {
+        cdp = await page.context().newCDPSession(page);
+        await touch("touchStart", from.x, from.y);
+        // straight up is a scroll until the row has been held; sideways needs no hold
+        if (Math.abs(to.x - from.x) < Math.abs(to.y - from.y) * 2) await page.waitForTimeout(450);
+        for (let i = 1; i <= 24; i++) (await touch("touchMove", ...at(i)), await page.waitForTimeout(25));
+      } else {
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        for (let i = 1; i <= 24; i++) (await page.mouse.move(...at(i)), await page.waitForTimeout(20));
+      }
+      await page.waitForTimeout(400);
+      if ((await target.getAttribute("data-over")) !== "true") fail(`todos carry: holding a task over "${toName}" did not light it`);
+      if (shotName) (await noSidewaysScroll("todos carry"), await shot(shotName));
+      if (profile.touch) (await touch("touchEnd", 0, 0), await cdp.detach());
+      else await page.mouse.up();
+      await settle(1200);
+    }
+    await press(nav.getByRole("button", { name: /^Today/ }));
+    await settle(900);
+    const before = await titles();
+    if (!before.length) return fail("todos carry: no tasks to test with");
+    const title = before[0];
+    await carry(title, /^Next week/, "todos-carry");
+    if ((await titles()).includes(title)) fail("todos carry: a task dropped on Next week stayed in Today");
+    if (await page.getByLabel("Task name").count()) fail("todos carry: letting go of a carried task opened it");
+    await press(nav.getByRole("button", { name: /^Next week/ }));
+    await page.locator("main ul li", { hasText: title }).waitFor({ timeout: 5000 }).catch(() => fail("todos carry: the task did not arrive in Next week"));
+    await settle(600);
+    // and back, so every screen size starts from the same lists
+    await carry(title, /^Today/);
+    await press(nav.getByRole("button", { name: /^Today/ }));
+    await page.locator("main ul li", { hasText: title }).waitFor({ timeout: 5000 }).catch(() => fail("todos carry: the task did not come back to Today"));
+  });
   await step("todos add, tick, open", async () => {
     await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
     await settle(500);
