@@ -53,6 +53,37 @@ dismissed rail modules between sizes. It takes more than ten minutes: start it i
 read the screenshots in `<outDir>` as they appear, and wait for the summary line. When you change
 behaviour, change the matching assertions in it in the same commit.
 
+## The iOS app
+
+`ios/` is the native SwiftUI app for iPhone and iPad (see "The iOS app" in `README.md`). It is the
+same product as the web app, and it is kept in step with it by default, without being asked:
+
+- **Every change to the web app is also a change to the iOS app, in the same piece of work.** A new
+  or changed screen, control, flow, wording, empty state, design token or pattern in `src/app`,
+  `src/components`, `globals.css` or `DESIGN.md`, and any new or changed endpoint or field under
+  `/api/v1`, gets its counterpart in `ios/Subspace` (and its UI test in `ios/SubspaceUITests`)
+  before the work is called done. Each web screen has a folder of the same name there: `Feed`,
+  `Todos`, `Context`, `Following`, `Agents`, `Blocks` (page blocks and markdown), `Shell` (app bar,
+  sign-in, rail), `Design` (tokens and shared pieces), `Core` (REST client and models).
+- **Before starting any work, check that the app has not fallen behind.** Merge or rebase onto
+  `main`, then look at what changed there since the last commit that touched `ios/`
+  (`git log -1 --format=%H -- ios/` then `git diff <that>..origin/main --stat -- src DESIGN.md`).
+  If the web moved and `ios/` did not, bring the app up to date first, or say plainly in your
+  report what is still missing and why.
+- If a web change truly has no place in the app (a hover effect, a browser-only fix), say so in
+  the commit message rather than leaving it unsaid.
+- It follows `DESIGN.md` through `ios/Subspace/Design`: use `Theme` tokens, `.glass`,
+  `ConfirmDelete` and the other shared pieces there. The app decodes leniently, so a renamed field
+  does not crash it; it silently shows nothing. Check the model in `Core/Models.swift`.
+
+There is no Swift compiler or simulator in a Linux cloud container. The only way to compile and
+run the app from there is the `iOS` workflow (`.github/workflows/ios.yml`), which runs on a push
+that touches `ios/` or the server side the app depends on (`/api/v1`, `src/lib/core`, the schema,
+the seed): read the job log for compile errors and the test summary, and the
+`ios-ui-tests-iphone` and `ios-ui-tests-ipad` artifacts for screenshots. Each run takes several minutes of Mac runner time, so
+batch changes and re-read Swift carefully before pushing. When you change behaviour, change the
+matching UI test in `ios/SubspaceUITests` in the same commit.
+
 ## Lessons
 
 When something costs you time in this repo (a wrong assumption, a setup step that failed, a
@@ -65,6 +96,14 @@ being true. Read this list before starting work.
   controls for things that should simply appear when there is content (owner's call, Nov 2026).
 - Copying `.env.example` then running `ui-check` failed every login and locked sign-in with a 429.
   See "Running it locally" for the password and how to clear the lock.
+- iOS CI: a job's log cannot be read until the job ends, so a stalled step looks like silence.
+  `ios/scripts/ci-test.sh` runs the tests under a watchdog for that reason; keep it.
+- iOS CI: building with `CODE_SIGNING_ALLOWED=NO` made the simulator's UI test runner hang without
+  an error. Leave signing at its default for simulator builds.
+- iOS UI tests: after sign-in iOS shows "Save Password?" over the app and blocks every tap behind
+  it. `signIn()` in `SubspaceUITests/Support.swift` dismisses it; new tests should sign in through it.
+- iOS CI screenshots are downloaded from `productionresultssaN.blob.core.windows.net`; the cloud
+  environment must allow those hosts or the artifact link fails with a proxy 403.
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.

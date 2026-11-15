@@ -1,0 +1,103 @@
+name: iOS
+
+# Builds the iPhone and iPad app and drives it end to end, in the simulator, against a freshly
+# seeded Subspace running on the same machine. Runs when the app changes, and also when the server
+# side it depends on changes (the REST API, the rules behind it, the schema, the seeded data), so
+# a change on the web that the app has not followed shows up here as a failing run.
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+      - "src/app/api/v1/**"
+      - "src/lib/core/**"
+      - "src/lib/db.ts"
+      - "src/lib/blocks.ts"
+      - "scripts/seed.ts"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: UI tests (${{ matrix.device }})
+    runs-on: macos-26
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [iphone, ipad]
+    env:
+      DATABASE_URL: postgres://runner@localhost:5432/subspace
+      PROJECT: ios/Subspace.xcodeproj
+      DERIVED: ${{ github.workspace }}/.derived
+      OUT: ${{ github.workspace }}/ios-out
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode and simulators
+        run: |
+          xcodebuild -version
+          mkdir -p "$OUT"
+          pick() { xcrun simctl list devices available | grep -E "^ +$1 \(" | tail -1 | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}'; }
+          PHONE=$(pick "iPhone 17" || pick "iPhone 16")
+          PAD=$(pick "iPad Pro 11-inch \(M5\)" || pick "iPad Pro 11-inch \(M4\)" || pick "iPad \(A16\)")
+          echo "iPhone: $PHONE, iPad: $PAD"
+          test -n "$PHONE" && test -n "$PAD"
+          if [ "${{ matrix.device }}" = ipad ]; then echo "SIM=$PAD" >> "$GITHUB_ENV"; else echo "SIM=$PHONE" >> "$GITHUB_ENV"; fi
+
+      # Compile first: a build error should fail in two minutes, not after the server is set up.
+      - name: Build the app and its tests
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing -project "$PROJECT" -scheme Subspace -configuration Debug \
+            -destination "id=$SIM" -derivedDataPath "$DERIVED" \
+            > "$OUT/build.log" 2>&1 || {
+              echo "::group::Errors"
+              grep -E "error:|error: |: error|BUILD FAILED|The following build commands failed" -A2 "$OUT/build.log" | grep -v "^--$" | awk '!seen[$0]++' | head -300
+              echo "::endgroup::"
+              exit 1
+            }
+          grep -E "warning: " "$OUT/build.log" | awk '!seen[$0]++' | head -60 || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Postgres
+        run: |
+          brew install postgresql@16
+          echo "$(brew --prefix postgresql@16)/bin" >> "$GITHUB_PATH"
+          brew services start postgresql@16
+          for _ in $(seq 1 30); do "$(brew --prefix postgresql@16)/bin/pg_isready" -q && break; sleep 1; done
+
+      - name: Subspace server
+        run: |
+          npm ci
+          SUBSPACE_PASSWORD=subspace npm run build
+
+      - name: UI tests
+        run: ios/scripts/ci-test.sh "${{ matrix.device }}" "$SIM"
+
+      - name: Logs when something failed
+        if: failure() || cancelled()
+        run: |
+          # the steps that led up to each failed expectation
+          for f in "$OUT"/test-*.log; do grep -B22 -E "error: -\[" "$f" | cut -c1-190 | tail -120; done || true
+          for f in "$OUT"/server-*.log; do tail -15 "$f"; done || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-ui-tests-${{ matrix.device }}
+          path: |
+            ios-out/**/*.jpg
+            ios-out/**/*.txt
+            ios-out/*.log
+          retention-days: 14
