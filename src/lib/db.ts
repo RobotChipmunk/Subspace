@@ -313,6 +313,9 @@ const MIGRATIONS: string[] = [
   // that way may sit in logs and settings screens, so they are cancelled. Tokens made since, which
   // were only ever accepted as a header, keep working.
   `UPDATE agents SET token_hash = NULL WHERE url_token AND token_hash IS NOT NULL`,
+  // Bookmarks: posts the owner marked to come back to, and when. The feed can show only these.
+  `ALTER TABLE posts ADD COLUMN IF NOT EXISTS bookmarked_at timestamptz;
+   CREATE INDEX IF NOT EXISTS posts_bookmarked ON posts (channel, id DESC) WHERE bookmarked_at IS NOT NULL AND parent_id IS NULL`,
 ];
 
 async function migrate() {
