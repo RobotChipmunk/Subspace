@@ -38,10 +38,21 @@ async function waitFor(css, ms = 30000) {
 }
 const click = (el) => wd("POST", `/element/${el}/click`, {});
 /** Keys pressed one at a time, as on a keyboard, with a human gap between them. */
+let keyMode = "actions";
 async function type(text, gap = 55) {
-  const actions = [];
-  for (const ch of text) actions.push({ type: "keyDown", value: ch }, { type: "keyUp", value: ch }, { type: "pause", duration: gap });
-  await wd("POST", "/actions", { actions: [{ type: "key", id: "keyboard", actions }] });
+  if (keyMode === "actions") {
+    const actions = [];
+    for (const ch of text) actions.push({ type: "keyDown", value: ch }, { type: "keyUp", value: ch }, { type: "pause", duration: gap });
+    await wd("POST", "/actions", { actions: [{ type: "key", id: "keyboard", actions }] });
+    await wd("DELETE", "/actions").catch(() => {});
+  } else {
+    // a word at a time into whatever has the keyboard
+    for (const piece of text.match(/\S*\s*|[\s\S]/g).filter(Boolean)) {
+      const active = (await wd("GET", "/element/active"))[ELEMENT];
+      await wd("POST", `/element/${active}/value`, { text: piece });
+      await sleep(gap * 2);
+    }
+  }
 }
 const ENTER = "";
 let shots = 0;
@@ -167,9 +178,21 @@ async function run(name, title, { mention, background }) {
   try {
     await wd("POST", "/url", { url: `${BASE}/login` });
     const pw = await waitFor("input[type=password]", 60000);
+    // Which way of pressing keys reaches the page in this Safari?
     await click(pw);
-    await type(process.env.SUBSPACE_PASSWORD || "subspace");
-    await type(ENTER);
+    await type("abc");
+    let got = await js("return document.querySelector('input[type=password]').value");
+    if (got !== "abc") {
+      keyMode = "sendKeys";
+      await type("abc");
+      got = await js("return document.querySelector('input[type=password]').value");
+    }
+    console.log(`keys: ${keyMode}, field holds "${got}"`);
+    // The production build marks its session cookie Secure, which Safari will not keep for
+    // http://localhost, so sign in from here and hand the page the session.
+    const login = await (await fetch(`${BASE}/api/v1/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: process.env.SUBSPACE_PASSWORD || "subspace" }) })).json();
+    await wd("POST", "/cookie", { cookie: { name: "ss_session", value: login.token, path: "/" } });
+    await wd("POST", "/url", { url: `${BASE}/todos` });
     await waitFor("nav[aria-label=Apps]", 60000);
     console.log("signed in;", await js("return navigator.userAgent + ' | ' + innerWidth + 'x' + innerHeight"));
 
