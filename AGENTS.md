@@ -65,3 +65,6 @@ being true. Read this list before starting work.
   controls for things that should simply appear when there is content (owner's call, Nov 2026).
 - Copying `.env.example` then running `ui-check` failed every login and locked sign-in with a 429.
   See "Running it locally" for the password and how to clear the lock.
+- In development React mounts every component twice, so a hook's cleanup runs once on a component
+  that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
+  `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.
