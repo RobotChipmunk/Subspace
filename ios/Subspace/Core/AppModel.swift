@@ -57,6 +57,8 @@ final class AppModel {
     /// A task the todos screen should open as soon as it can; it clears this once it has.
     var pendingTodoID: String?
     var railSheet = false
+    /// True while the feed's comments panel is open beside it; the docked rail steps aside.
+    var commentsBeside = false
 
     /// Which direct conversations have been read is remembered on this device.
     private(set) var directSeen: [String: String]

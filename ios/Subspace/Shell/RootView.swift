@@ -37,7 +37,7 @@ struct ShellView: View {
         @Bindable var app = app
         GeometryReader { geo in
             let wide = sizeClass == .regular
-            let docked = geo.size.width >= Self.railDockWidth && !app.rail.isEmpty
+            let docked = geo.size.width >= Self.railDockWidth && !app.rail.isEmpty && !app.commentsBeside
             ZStack {
                 screens
                     .padding(.leading, wide ? 84 : 0)

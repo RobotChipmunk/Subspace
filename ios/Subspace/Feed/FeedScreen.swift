@@ -31,6 +31,8 @@ struct FeedScreen: View {
                 model.setViewport(geo.size.height)
             }
             .onChange(of: beside) { _, now in model.beside = now }
+            // While comments are open beside the feed they take the docked rail's place.
+            .onChange(of: beside && model.commentsOpen && app.tab == .feed, initial: true) { _, now in app.commentsBeside = now }
             .onChange(of: geo.size.height) { _, now in model.setViewport(now) }
             .sheet(isPresented: sheetBinding(beside)) {
                 FeedCommentsPanel(model: model, sheet: true)
