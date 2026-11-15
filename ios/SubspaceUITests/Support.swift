@@ -34,6 +34,11 @@ class SubspaceTestCase: XCTestCase {
             password.typeText(Self.password)
             app.buttons["login.submit"].tap()
             if app.buttons["nav.feed"].waitForExistence(timeout: 25) { break }
+            if !password.exists {
+                // signed in, just slowly
+                XCTAssertTrue(app.buttons["nav.feed"].waitForExistence(timeout: 40), "Signing in did not reach the app")
+                break
+            }
             shot("sign-in-attempt-\(attempt)")
             if attempt == 2 { XCTFail("Signing in did not reach the app") }
             password.tap()
@@ -47,7 +52,7 @@ class SubspaceTestCase: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for owner in [springboard, app!] {
             let notNow = owner.buttons["Not Now"]
-            if notNow.waitForExistence(timeout: owner === springboard ? 6 : 1) {
+            if notNow.waitForExistence(timeout: owner === springboard ? 12 : 1) {
                 notNow.tap()
                 waitToVanish(notNow, "the Save Password prompt")
                 return
@@ -69,9 +74,37 @@ class SubspaceTestCase: XCTestCase {
         app.typeText(text)
     }
 
+    /// Starts the app already signed in, with a session fetched straight from the server. Signing
+    /// in by hand is ShellTests' job; every other test begins from here.
     func launchSignedIn() {
+        guard let token = Self.sessionToken() else {
+            launch()
+            signIn()
+            return
+        }
+        app.launchEnvironment["SUBSPACE_TOKEN"] = token
         launch()
-        signIn()
+        XCTAssertTrue(app.buttons["nav.feed"].waitForExistence(timeout: 60), "The app did not open signed in")
+    }
+
+    private static var cachedToken: String?
+
+    private static func sessionToken() -> String? {
+        if let cachedToken { return cachedToken }
+        guard let url = URL(string: server + "/api/v1/auth/login") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["password": password])
+        let done = DispatchSemaphore(value: 0)
+        var token: String?
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            if let data, let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { token = reply["token"] as? String }
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 20)
+        cachedToken = token
+        return token
     }
 
     func go(_ tab: String) {

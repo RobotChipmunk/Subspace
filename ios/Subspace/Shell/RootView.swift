@@ -47,6 +47,16 @@ struct ShellView: View {
                         if !wide && !keyboardUp { Color.clear.frame(height: 76) }
                     }
 
+                // Content scrolls up behind the status bar; soften it there so the clock stays readable.
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .mask(LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom))
+                    .frame(height: geo.safeAreaInsets.top + 14)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+
                 if docked {
                     RailView(sheet: false)
                         .frame(width: Self.railWidth)

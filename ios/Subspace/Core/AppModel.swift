@@ -74,6 +74,10 @@ final class AppModel {
             defaults.removeObject(forKey: "server")
             defaults.removeObject(forKey: "direct_seen")
         }
+        // UI tests that are not about sign-in start with a session already in hand.
+        #if DEBUG
+        if let token = env["SUBSPACE_TOKEN"], !token.isEmpty { Keychain.write("token", token) }
+        #endif
         server = env["SUBSPACE_SERVER"] ?? defaults.string(forKey: "server") ?? ""
         directSeen = (defaults.dictionary(forKey: "direct_seen") as? [String: String]) ?? [:]
         api.baseURL = Self.url(for: server)

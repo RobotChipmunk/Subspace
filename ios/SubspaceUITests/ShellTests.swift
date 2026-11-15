@@ -22,7 +22,8 @@ final class ShellTests: SubspaceTestCase {
     }
 
     func testEveryScreenOpensFromTheAppBar() {
-        launchSignedIn()
+        launch()
+        signIn()
         for tab in ["feed", "todos", "context", "following", "agents"] {
             go(tab)
             XCTAssertTrue(app.buttons["nav.\(tab)"].isSelected, "\(tab) should be the selected screen")
@@ -31,7 +32,8 @@ final class ShellTests: SubspaceTestCase {
     }
 
     func testSessionSurvivesRelaunch() {
-        launchSignedIn()
+        launch()
+        signIn()
         app.terminate()
         launch(reset: false)
         expect(app.buttons["nav.feed"], "the app, still signed in after relaunch", timeout: 20)
