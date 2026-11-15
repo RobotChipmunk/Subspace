@@ -1,0 +1,73 @@
+name: Safari typing
+
+# Types a long note into a task in real Mobile Safari (an iPad simulator), against a freshly
+# seeded Subspace on the same machine. The notes editor behaves differently under the iOS keyboard
+# than in any desktop browser, so this is the only place a typing fault on iPad shows up.
+on:
+  push:
+    paths:
+      - ".github/workflows/safari.yml"
+      - "scripts/safari-probe.cjs"
+      - "src/components/Editor.tsx"
+      - "src/components/MentionInput.tsx"
+      - "src/components/Floating.tsx"
+  workflow_dispatch:
+
+concurrency:
+  group: safari-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  type:
+    name: Type a note on iPad
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgres://runner@localhost:5432/subspace
+      OUT: ${{ github.workspace }}/safari-out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Postgres
+        run: |
+          brew install postgresql@16
+          echo "$(brew --prefix postgresql@16)/bin" >> "$GITHUB_PATH"
+          brew services start postgresql@16
+          for _ in $(seq 1 30); do "$(brew --prefix postgresql@16)/bin/pg_isready" -q && break; sleep 1; done
+
+      - name: Subspace server
+        run: |
+          npm ci
+          SUBSPACE_PASSWORD=subspace npm run build
+          mkdir -p "$OUT"
+          E2E_LOG="$OUT/server.log" ios/scripts/e2e-server.sh
+
+      - name: Safari in the simulator
+        run: |
+          xcodebuild -version
+          sudo safaridriver --enable
+          nohup safaridriver --port 4444 > "$OUT/safaridriver.log" 2>&1 &
+          sleep 3
+
+      - name: Type a long note
+        run: node scripts/safari-probe.cjs "$OUT"
+
+      - name: Logs when something failed
+        if: failure() || cancelled()
+        run: |
+          tail -30 "$OUT/safaridriver.log" || true
+          tail -30 "$OUT/server.log" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safari-typing
+          path: safari-out
+          retention-days: 14
