@@ -1,0 +1,95 @@
+name: iOS
+
+# Builds the iPhone and iPad app and drives it end to end, in the simulator, against a freshly
+# seeded Subspace running on the same machine. Runs when the app or this file changes.
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and UI tests
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: postgres://runner@localhost:5432/subspace
+      PROJECT: ios/Subspace.xcodeproj
+      DERIVED: ${{ github.workspace }}/.derived
+      OUT: ${{ github.workspace }}/.ios-out
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode and simulators
+        run: |
+          xcodebuild -version
+          mkdir -p "$OUT"
+          pick() { xcrun simctl list devices available | grep -E "^ +$1 \(" | tail -1 | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}'; }
+          PHONE=$(pick "iPhone 17" || pick "iPhone 16")
+          PAD=$(pick "iPad Pro 11-inch \(M5\)" || pick "iPad Pro 11-inch \(M4\)" || pick "iPad \(A16\)")
+          echo "iPhone: $PHONE, iPad: $PAD"
+          test -n "$PHONE" && test -n "$PAD"
+          echo "PHONE=$PHONE" >> "$GITHUB_ENV"
+          echo "PAD=$PAD" >> "$GITHUB_ENV"
+
+      # Compile first: a build error should fail in two minutes, not after the server is set up.
+      - name: Build the app and its tests
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing -project "$PROJECT" -scheme Subspace -configuration Debug \
+            -destination "id=$PHONE" -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO \
+            > "$OUT/build.log" 2>&1 || {
+              echo "::group::Errors"
+              grep -E "error:|error: |: error|BUILD FAILED|The following build commands failed" -A2 "$OUT/build.log" | grep -v "^--$" | awk '!seen[$0]++' | head -300
+              echo "::endgroup::"
+              exit 1
+            }
+          grep -E "warning: " "$OUT/build.log" | awk '!seen[$0]++' | head -60 || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Postgres
+        run: |
+          brew install postgresql@16
+          echo "$(brew --prefix postgresql@16)/bin" >> "$GITHUB_PATH"
+          brew services start postgresql@16
+          for _ in $(seq 1 30); do "$(brew --prefix postgresql@16)/bin/pg_isready" -q && break; sleep 1; done
+
+      - name: Subspace server
+        run: |
+          npm ci
+          SUBSPACE_PASSWORD=subspace npm run build
+
+      - name: UI tests on iPhone
+        run: ios/scripts/ci-test.sh iphone "$PHONE"
+
+      - name: UI tests on iPad
+        if: success() || failure()
+        run: ios/scripts/ci-test.sh ipad "$PAD"
+
+      - name: Server log
+        if: failure()
+        run: tail -80 "$OUT"/server-*.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-ui-tests
+          path: |
+            .ios-out/**/*.png
+            .ios-out/**/*.jpg
+            .ios-out/*.log
+            .ios-out/*.txt
+          retention-days: 14

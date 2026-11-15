@@ -1,0 +1,234 @@
+import SwiftUI
+import Observation
+
+enum AppTab: String, CaseIterable, Identifiable {
+    case feed, todos, context, following, agents
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .feed: return "Feed"
+        case .todos: return "Todos"
+        case .context: return "Context"
+        case .following: return "Following"
+        case .agents: return "Agents"
+        }
+    }
+
+    /// SF Symbol standing in for the web app's icon.
+    var icon: String {
+        switch self {
+        case .feed: return "sparkle"
+        case .todos: return "checkmark.circle"
+        case .context: return "book"
+        case .following: return "dot.radiowaves.left.and.right"
+        case .agents: return "person.2"
+        }
+    }
+}
+
+/// A page opened over whatever is on screen.
+struct PageTarget: Identifiable, Hashable {
+    let id: String
+}
+
+/// Everything the whole app shares: the session, who is who, the rail, and where to go.
+@MainActor
+@Observable
+final class AppModel {
+    let api = API()
+
+    // Session
+    var signedIn = false
+    var server: String
+
+    // Shared data, refreshed in the background
+    var me: Agent?
+    var agents: [Agent] = []
+    var guests: [Agent] = []
+    var trackers: [Tracker] = []
+    var direct: [String: String] = [:]
+    var rail: [RailModule] = []
+
+    // Navigation
+    var tab: AppTab = .feed
+    /// A page shown as a sheet over the current screen. `PageView(pageID:)` draws it.
+    var presentedPage: PageTarget?
+    /// A task the todos screen should open as soon as it can; it clears this once it has.
+    var pendingTodoID: String?
+    var railSheet = false
+
+    /// Which direct conversations have been read is remembered on this device.
+    private(set) var directSeen: [String: String]
+
+    private var poll: Task<Void, Never>?
+    private var sentTimezone: String?
+
+    init() {
+        let env = ProcessInfo.processInfo.environment
+        let defaults = UserDefaults.standard
+        if env["SUBSPACE_RESET"] == "1" {
+            Keychain.write("token", nil)
+            defaults.removeObject(forKey: "server")
+            defaults.removeObject(forKey: "direct_seen")
+        }
+        server = env["SUBSPACE_SERVER"] ?? defaults.string(forKey: "server") ?? ""
+        directSeen = (defaults.dictionary(forKey: "direct_seen") as? [String: String]) ?? [:]
+        api.baseURL = Self.url(for: server)
+        api.token = Keychain.read("token")
+        signedIn = api.token != nil && api.baseURL != nil
+        api.onUnauthorized = { [weak self] in self?.signOut() }
+        if signedIn { start() }
+    }
+
+    /// Accepts what people type: "my.subspace.app", "localhost:3000", "https://…".
+    static func url(for text: String) -> URL? {
+        var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if !s.contains("://") {
+            let local = s.hasPrefix("localhost") || s.hasPrefix("127.") || s.hasPrefix("192.168.") || s.hasPrefix("10.") || s.hasSuffix(".local") || s.contains(".local:")
+            s = (local ? "http://" : "https://") + s
+        }
+        while s.hasSuffix("/") { s.removeLast() }
+        guard let u = URL(string: s + "/"), u.host != nil else { return nil }
+        return u
+    }
+
+    func signIn(server: String, password: String) async throws {
+        guard let url = Self.url(for: server) else { throw APIError(status: 0, message: "Enter the address of your Subspace.") }
+        api.baseURL = url
+        api.token = nil
+        let reply: JSONValue = try await api.send("POST", "auth/login", body: ["password": password])
+        guard let token = reply["token"]?.string else { throw APIError(status: 0, message: "Sign-in did not finish. Try again.") }
+        api.token = token
+        Keychain.write("token", token)
+        self.server = server
+        UserDefaults.standard.set(server, forKey: "server")
+        withAnimation(.ssSoft) { signedIn = true }
+        start()
+    }
+
+    func signOut() {
+        poll?.cancel()
+        poll = nil
+        api.token = nil
+        Keychain.write("token", nil)
+        me = nil
+        agents = []
+        guests = []
+        trackers = []
+        direct = [:]
+        rail = []
+        presentedPage = nil
+        railSheet = false
+        tab = .feed
+        withAnimation(.ssSoft) { signedIn = false }
+    }
+
+    /// Keeps the shared data fresh while signed in, every 30 seconds like the web app.
+    private func start() {
+        poll?.cancel()
+        poll = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refresh()
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+
+    func refresh() async {
+        async let a: Void = refreshMe()
+        async let b: Void = refreshRail()
+        _ = await (a, b)
+    }
+
+    func refreshMe() async {
+        guard signedIn, let r: MeResponse = try? await api.get("me") else { return }
+        me = r.me
+        agents = r.agents
+        guests = r.guests ?? []
+        trackers = r.trackers ?? []
+        direct = r.direct ?? [:]
+        // Todos follow the owner's local calendar, so keep the server in step with this device.
+        let tz = TimeZone.current.identifier
+        if sentTimezone != tz {
+            sentTimezone = tz
+            try? await api.send("PATCH", "me", body: ["timezone": tz])
+        }
+    }
+
+    func refreshRail() async {
+        struct R: Codable { var modules: [RailModule] }
+        guard signedIn, let r: R = try? await api.get("rail") else { return }
+        if r.modules != rail { withAnimation(.ssSoft) { rail = r.modules } }
+        if rail.isEmpty { railSheet = false }
+    }
+
+    func dismissRail(_ id: String) async {
+        withAnimation(.ssSoft) { rail.removeAll { $0.id == id } }
+        try? await api.send("DELETE", "rail/\(id)")
+        await refreshRail()
+    }
+
+    /// Anyone by id: the owner, an agent or a guest.
+    func agent(_ id: String?) -> Agent? {
+        guard let id else { return nil }
+        return agents.first { $0.id == id } ?? guests.first { $0.id == id }
+    }
+
+    func tracker(_ id: String?) -> Tracker? {
+        guard let id else { return nil }
+        return trackers.first { $0.id == id }
+    }
+
+    /// Lower-case handles that count as a mention.
+    var handles: [String] { agents.map { $0.handle.lowercased() } }
+
+    /// The most serious thing waiting in the rail: "error", "warning" or "info".
+    var railLevel: String {
+        if rail.contains(where: { $0.level == "error" }) { return "error" }
+        if rail.contains(where: { $0.level == "warning" }) { return "warning" }
+        return "info"
+    }
+
+    // Direct messages: unread marks
+
+    func directUnread(_ agentID: String) -> Bool {
+        guard let at = direct[agentID] else { return false }
+        return at > (directSeen[agentID] ?? "")
+    }
+
+    var anyDirectUnread: Bool { direct.keys.contains { directUnread($0) } }
+
+    func markDirectRead(_ agentID: String, at: String) {
+        guard (directSeen[agentID] ?? "") < at else { return }
+        directSeen[agentID] = at
+        UserDefaults.standard.set(directSeen, forKey: "direct_seen")
+    }
+
+    // Links
+
+    /// Opens an address from content: a page ("/page/<id>"), a task ("/todos?open=<id>"),
+    /// another screen ("/feed") or the web.
+    func open(_ link: String) {
+        if link.hasPrefix("/page/") {
+            let id = String(link.dropFirst(6)).components(separatedBy: CharacterSet(charactersIn: "?#/")).first ?? ""
+            if !id.isEmpty { presentedPage = PageTarget(id: id) }
+            return
+        }
+        if link.hasPrefix("/todos") {
+            if let id = URLComponents(string: link)?.queryItems?.first(where: { $0.name == "open" })?.value { pendingTodoID = id }
+            railSheet = false
+            presentedPage = nil
+            withAnimation(.ssSpring) { tab = .todos }
+            return
+        }
+        if link.hasPrefix("/"), let t = AppTab(rawValue: String(link.dropFirst()).components(separatedBy: CharacterSet(charactersIn: "?#/")).first ?? "") {
+            railSheet = false
+            presentedPage = nil
+            withAnimation(.ssSpring) { tab = t }
+            return
+        }
+        if let url = api.resolve(link) { UIApplication.shared.open(url) }
+    }
+}
