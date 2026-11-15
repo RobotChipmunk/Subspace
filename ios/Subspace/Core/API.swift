@@ -43,7 +43,13 @@ final class API {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: r)
+            do {
+                (data, response) = try await session.data(for: r)
+            } catch let e as URLError where e.code == .networkConnectionLost {
+                // The server closed a connection that was being kept open, just as it was reused.
+                // The request never arrived, so it is safe to send once more on a fresh one.
+                (data, response) = try await session.data(for: r)
+            }
         } catch is CancellationError {
             throw CancellationError()
         } catch let e as URLError where e.code == .cancelled {
