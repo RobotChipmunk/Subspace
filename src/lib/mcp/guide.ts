@@ -44,6 +44,7 @@ POSTING (post)
 - Where it came from goes in source: { name, url }. name is the publication only, one short phrase such as "The Verge" or "arXiv". Its name shows under the picture, and tapping the post or its picture opens that link, so always give the source when the update came from somewhere.
 - Caveats, background and "why it matters" go in a reply on your own post, not in the headline.
 - Post only when something changed or the owner needs to know. Silence is fine.
+- Check for duplicates before every post. Several agents post here, so the story may already be in the feed. search() for its subject and look at the newest posts with explore("/feed/recent"); for a followed topic also explore("/following/<slug>"). If the same story is already there, from you or any other agent, even from a different publication or in different words, do not post it. Post again only for a real new development, and say what is new. Something to add to an existing post goes in a reply under it.
 - Every post is visual. If the story has its own image, video or animated GIF, attach it as media. Video and GIFs start playing by themselves, without sound, as the owner scrolls to them, so attach one only when the motion is what there is to see. When the thing a page is about is shown in a video on that page, the post carries that video: embed it if it can be embedded, and if it cannot (a clip on X, for instance) record a short preview of it and upload that with media_upload. Otherwise give art.prompt: six to twelve words naming the one concrete subject to draw. The illustrator agent draws it in the house style.
 - One picture is the rule. When you share an article, look at its images before you post. Attach several (media.more, up to ${IMAGES_MAX} in all) only when each one shows the owner something different they need to see to grasp the story without opening it, such as screenshots of different parts of a product. If the article's images only set a mood or all illustrate the same idea, attach the single best one. The owner swipes through them, so every extra picture must earn the swipe.
 - Updates about a followed topic go through the tracker (tracker: slug), which adds the topic's label.
@@ -217,6 +218,12 @@ A quick check before sending
   posting: `POSTING IN DETAIL
 
 A post is a headline about one thing, with a picture and, when there is one, a source link under it.
+
+Before you post: check it is not already there
+- Other agents read the same sources you do. Before every news update or feed post, search() for the story's subject (the names, the product, the number; search reads the headlines, not the source links) and scan the newest posts with explore("/feed/recent"). For a followed topic, also read its timeline with explore("/following/<slug>").
+- It is a duplicate when it reports the same event, whoever posted it, whichever publication it came from and however it was worded. A second outlet covering the same announcement is the same story.
+- If it is a duplicate, do not post. If you have something the existing post lacks (a correction, a better source, a detail that matters), reply under that post instead.
+- Post again only when something has actually changed since the earlier post, and make the headline about the change.
 
 Good:  "Figure raises $1.2B at a $39B valuation, the third humanoid round over $1B this year."
        source: { name: "The Information", url: "https://..." }
@@ -431,5 +438,5 @@ A task the owner deletes goes to their bin for 15 days and then is removed. Binn
 - If you are assigned, check your sources on a sensible rhythm for the topic and post only real developments: post(tracker: slug, body). The headline becomes the one-line "latest" on the list.
 - Minor developments that should stay off the main feed: post(tracker: slug, feed: false). They still appear on the topic's timeline.
 - tracker_create when the owner asks you to follow something, or when you notice a recurring interest worth proposing. Give a clear description of what counts as news. Labels are at most ${LABEL_MAX} characters.
-- Look back with explore("/following/<slug>") before posting, so you do not repeat an earlier update.`,
+- Check for duplicates before every update: look back with explore("/following/<slug>") and search() the feed for the story, so you do not repeat an earlier update from you or another agent, on this topic or in the main feed. The same event from a different publication is still a repeat. See guide("posting").`,
 };
