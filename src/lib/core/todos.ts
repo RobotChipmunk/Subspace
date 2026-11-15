@@ -6,7 +6,7 @@ export type Todo = {
   id: string;
   title: string;
   notes: string;
-  /** guest: added by a guest and not yet placed on a day by the owner. */
+  /** guest: on a guest's list and not yet placed on a day by the owner. */
   scope: "day" | "week" | "backlog" | "guest";
   date: string | null;
   position: number;
@@ -14,11 +14,35 @@ export type Todo = {
   done_at: string | null;
   ai_unseen: boolean;
   created_by: string;
-  /** Set when the task belongs to a guest's shared list ("From Meredith"). The guest can see and edit it wherever it is. */
+  /**
+   * Set when the task belongs to a guest's shared list ("From Meredith"). It is a category, not a
+   * place: the task stays in that list whatever day it is given, and the guest can see and edit it.
+   */
   guest_id: string | null;
+  /** How often the task comes round again. Finishing it creates the next one, counted from the day it was finished. */
+  repeat: Repeat | null;
+  /** On a finished repeating task: the task that was created to follow it. */
+  next_id: string | null;
+  /** The day that following task is on, while it exists. */
+  next_date?: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export const REPEATS = ["daily", "weekly", "biweekly", "monthly", "yearly"] as const;
+export type Repeat = (typeof REPEATS)[number];
+
+/** The day a repeating task comes round again, counted from the day it was finished. Month ends are kept in range (31 January gives 28 February). */
+export function nextDate(from: string, repeat: Repeat): string {
+  if (repeat === "daily") return addDays(from, 1);
+  if (repeat === "weekly") return addDays(from, 7);
+  if (repeat === "biweekly") return addDays(from, 14);
+  const [y, m, d] = from.split("-").map(Number);
+  const ny = repeat === "yearly" ? y + 1 : m === 12 ? y + 1 : y;
+  const nm = repeat === "yearly" ? m : m === 12 ? 1 : m + 1;
+  const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  return `${ny}-${String(nm).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}
 
 export type Folder = { key: string; label: string; hint?: string; count: number; guest?: string };
 /** How long a deleted task can still be brought back. */
@@ -26,7 +50,8 @@ export const BIN_DAYS = 15;
 export type BinnedTodo = { id: string; title: string; done: boolean; has_notes: boolean; deleted_at: string; days_left: number };
 
 const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const LIST_COLS = "id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, created_at, updated_at, (notes <> '') AS has_notes";
+const NEXT_DATE = "(SELECT n.date FROM todos n WHERE n.id = todos.next_id AND n.deleted_at IS NULL) AS next_date";
+const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}`;
 
 /** Unfinished tasks never get left behind: past days roll to today, past weeks roll to this week. */
 async function rollover(today: string) {
@@ -46,8 +71,8 @@ type Spec = { where: string; params: unknown[]; add: { scope: string; date: stri
 /** Where a view's tasks live, and where a task added to that view should go. */
 function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec {
   const { today, monday, saturday, sunday, nextMonday } = cal;
-  // a guest's tasks that the owner has not yet placed on a day
-  if (view.startsWith("guest:")) return { where: "scope = 'guest' AND guest_id = $1", params: [view.slice(6)], add: { scope: "guest", date: null, guest_id: view.slice(6) } };
+  // everything on a guest's list, placed on a day or not; a task added here starts without a day
+  if (view.startsWith("guest:")) return { where: "guest_id = $1", params: [view.slice(6)], add: { scope: "guest", date: null, guest_id: view.slice(6) } };
   if (view === "today") return { where: "scope = 'day' AND date = $1", params: [today], add: { scope: "day", date: today } };
   if (view === "tomorrow") return viewSpec(addDays(today, 1), cal);
   if (view === "week")
@@ -64,9 +89,11 @@ function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec
       params: [nextMonday, addDays(nextMonday, 6)],
       add: { scope: "week", date: nextMonday },
     };
+  // dated beyond next week: nothing else shows these until their week comes
+  if (view === "later") return { where: "((scope = 'day' AND date > $1) OR (scope = 'week' AND date > $2))", params: [addDays(nextMonday, 6), nextMonday], add: { scope: "day", date: addDays(nextMonday, 7) } };
   if (view === "backlog") return { where: "scope = 'backlog'", params: [], add: { scope: "backlog", date: null } };
   if (/^\d{4}-\d{2}-\d{2}$/.test(view)) return { where: "scope = 'day' AND date = $1", params: [view], add: { scope: "day", date: view } };
-  throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, backlog or a YYYY-MM-DD date.`);
+  throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, later, backlog or a YYYY-MM-DD date.`);
 }
 
 export async function folders(): Promise<{ today: string; folders: Folder[]; bin: number }> {
@@ -81,13 +108,15 @@ export async function folders(): Promise<{ today: string; folders: Folder[]; bin
   for (let d = cal.dow + 1; d <= 5; d++) list.push({ key: addDays(cal.monday, d - 1), label: d === cal.dow + 1 ? "Tomorrow" : DAY_NAMES[d], hint: d === cal.dow + 1 ? DAY_NAMES[d] : undefined });
   if (cal.dow <= 5) list.push({ key: "weekend", label: "Weekend" });
   else if (cal.dow === 6) list.push({ key: cal.sunday, label: "Tomorrow", hint: "Sunday" });
-  list.push({ key: "next_week", label: "Next week" }, { key: "backlog", label: "Backlog" });
+  list.push({ key: "next_week", label: "Next week" }, { key: "later", label: "Later" }, { key: "backlog", label: "Backlog" });
   for (const g of await listGuests()) list.push({ key: `guest:${g.id}`, label: `From ${g.name}`, guest: g.id });
 
   const out: Folder[] = [];
   for (const f of list) {
     const spec = viewSpec(f.key, cal);
     const r = await q1<{ n: number }>(`SELECT count(*)::int AS n FROM todos WHERE deleted_at IS NULL AND NOT done AND ${spec.where}`, spec.params);
+    // "Later" is there only while something is dated that far ahead
+    if (f.key === "later" && !r?.n) continue;
     out.push({ ...f, count: r?.n ?? 0 });
   }
   const bin = (await q1<{ n: number }>("SELECT count(*)::int AS n FROM todos WHERE deleted_at IS NOT NULL"))!.n;
@@ -98,17 +127,20 @@ export async function listTodos(view: string) {
   const cal = await calendar();
   await rollover(cal.today);
   const spec = viewSpec(view, cal);
-  // Finished tasks stay visible in backlog only for a day so the list keeps moving.
-  const doneClause = view === "backlog" ? "AND (NOT done OR done_at > now() - interval '1 day')" : "";
+  // Finished tasks stay visible in the undated lists only for a day so they keep moving.
+  const guest = view.startsWith("guest:");
+  const doneClause = view === "backlog" || guest ? "AND (NOT done OR done_at > now() - interval '1 day')" : "";
+  // A guest's list spans every day: what still needs a day comes first, then by day, with the backlog last.
+  const order = guest ? "(scope = 'guest') DESC, (scope = 'backlog'), date, scope DESC, position, id" : "date NULLS FIRST, scope DESC, position, id";
   const todos = await q<Todo & { has_notes: boolean }>(
-    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ORDER BY date NULLS FIRST, scope DESC, position, id`,
+    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ORDER BY ${order}`,
     spec.params,
   );
   return { view, today: cal.today, todos };
 }
 
 export async function getTodo(id: string): Promise<Todo> {
-  const t = await q1<Todo>("SELECT * FROM todos WHERE id = $1", [id]);
+  const t = await q1<Todo>(`SELECT *, ${NEXT_DATE} FROM todos WHERE id = $1`, [id]);
   if (!t) throw notFound("No such todo");
   return t;
 }
@@ -150,7 +182,26 @@ async function afterWrite(actor: Agent, t: Todo, type: string, summary: string, 
   await logEvent({ actor: actor.id, type, entity_type: "todo", entity_id: t.id, summary, mentions, data: { scope: t.scope, date: t.date } });
 }
 
-export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string }) {
+function readRepeat(v: unknown): Repeat | null {
+  if (v === null || v === "" || v === "none" || v === "never") return null;
+  if (!REPEATS.includes(v as Repeat)) throw bad(`Unknown repeat "${v}". Use ${REPEATS.join(", ")} or none.`);
+  return v as Repeat;
+}
+
+/** The next round of a repeating task that has just been finished: the same task, on its next day. */
+async function createNext(actor: Agent, t: Todo, today: string): Promise<string> {
+  const id = newId("t");
+  const date = nextDate(today, t.repeat!);
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, guest_id, repeat) VALUES ($1,$2,$3,'day',$4,$5,$6,$7,$8)", [
+    id, t.title, t.notes, date, await nextPosition("day", date), t.created_by, t.guest_id, t.repeat,
+  ]);
+  const next = await getTodo(id);
+  await indexDoc("todo", id, next.title, next.notes);
+  await logEvent({ actor: actor.id, type: "todo.created", entity_type: "todo", entity_id: id, summary: `${t.title} (repeats ${t.repeat})`, mentions: [], data: { scope: "day", date, repeat_of: t.id } });
+  return id;
+}
+
+export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null }) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Todo needs a title.");
   const cal = await calendar();
@@ -159,8 +210,9 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   const id = newId("t");
   if (input.notes) guardBlocks(actor, input.notes);
   const notes = input.notes ? (actor.kind === "agent" ? markAgentText(input.notes, actor.handle) : input.notes) : "";
-  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)", [
-    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null,
+  const repeat = input.repeat === undefined ? null : readRepeat(input.repeat);
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", [
+    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat,
   ]);
   const t = await getTodo(id);
   await afterWrite(actor, t, "todo.created", title, await findMentions(notes));
@@ -178,6 +230,8 @@ export async function updateTodo(
     notes_append?: string;
     notes_replace?: { find: string; replace: string };
     seen?: boolean;
+    /** daily, weekly, biweekly, monthly, yearly; null or "none" to stop repeating */
+    repeat?: string | null;
   },
 ) {
   const before = await getTodo(id);
@@ -195,14 +249,27 @@ export async function updateTodo(
     set("title", patch.title.trim().slice(0, 300));
     summary = patch.title.trim();
   }
+  const repeat = patch.repeat === undefined ? before.repeat : readRepeat(patch.repeat);
+  if (repeat !== before.repeat) set("repeat", repeat);
+  // made after the update, so the next round carries any new title or notes from the same change
+  let makeNext = false;
   if (patch.done !== undefined && patch.done !== before.done) {
     set("done", patch.done);
     set("done_at", patch.done ? new Date().toISOString() : null);
     type = patch.done ? "todo.completed" : "todo.reopened";
+    const next = before.next_id ? await q1<{ done: boolean }>("SELECT done FROM todos WHERE id = $1", [before.next_id]) : null;
+    if (patch.done) makeNext = !!repeat && !next;
+    else if (next && !next.done) {
+      // ticked by mistake and unticked: the round it created goes too, so nothing is doubled
+      await q("DELETE FROM todos WHERE id = $1", [before.next_id]);
+      await unindexDoc("todo", before.next_id!);
+      set("next_id", null);
+    }
   }
   if (patch.view) {
     const { add } = viewSpec(patch.view, await calendar());
     // Only a task already shared with a guest can go back to their list; moving another task there would show it to them.
+    // Moving one there takes it off its day. Giving it a day never takes it off the list: guest_id is left alone.
     if (add.guest_id && add.guest_id !== before.guest_id) throw bad("Only tasks from that person can be moved to their list.");
     if (add.scope !== before.scope || add.date !== before.date) {
       set("scope", add.scope);
@@ -243,7 +310,11 @@ export async function updateTodo(
 
   if (sets.length === 1) return before;
   await q(`UPDATE todos SET ${sets.join(", ")} WHERE id = $1`, params);
-  const t = await getTodo(id);
+  let t = await getTodo(id);
+  if (makeNext) {
+    await q("UPDATE todos SET next_id = $2 WHERE id = $1", [id, await createNext(actor, t, todayIn(await timezone()))]);
+    t = await getTodo(id);
+  }
   // Routine typing in notes by the owner isn't news; everything else is logged.
   const quiet = actor.kind === "human" && type === "todo.updated" && notes !== undefined && sets.length === 2;
   const onlySeen = patch.seen && sets.length === 2;

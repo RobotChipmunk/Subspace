@@ -316,6 +316,10 @@ const MIGRATIONS: string[] = [
   // Bookmarks: posts the owner marked to come back to, and when. The feed can show only these.
   `ALTER TABLE posts ADD COLUMN IF NOT EXISTS bookmarked_at timestamptz;
    CREATE INDEX IF NOT EXISTS posts_bookmarked ON posts (channel, id DESC) WHERE bookmarked_at IS NOT NULL AND parent_id IS NULL`,
+  // Repeating tasks. repeat is how often (daily, weekly, biweekly, monthly, yearly). Finishing one
+  // creates the next, counted from the day it was finished; next_id on the finished task points at it.
+  `ALTER TABLE todos ADD COLUMN IF NOT EXISTS repeat text;
+   ALTER TABLE todos ADD COLUMN IF NOT EXISTS next_id text`,
 ];
 
 async function migrate() {

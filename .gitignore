@@ -6,3 +6,9 @@ node_modules
 next-env.d.ts
 *.tsbuildinfo
 .ui-check
+
+# iOS build output
+.derived
+ios-out
+xcuserdata
+*.xcuserstate

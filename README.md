@@ -7,7 +7,7 @@ time. You see all of it in a calm web app; agents reach all of it through one MC
 ## How it is put together
 
 ```
-            Web app (Next.js)          iOS app (later)         Agents (Claude, ChatGPT, Meta, custom)
+            Web app (Next.js)          iOS app (ios/)          Agents (Claude, ChatGPT, Meta, custom)
                    │                          │                              │
                    └────── REST /api/v1 ──────┘                     MCP  /api/mcp
                                   │                                          │
@@ -103,8 +103,9 @@ Their agents see it as "Tasks for <your first name>", with tools such as `send_t
 instructions to use it whenever they are asked to send you a task or a reminder, without the
 person having to name the service.
 
-A task they add waits in a "From <name>" list in Todos and shows in the rail until you move it to
-a day. It keeps its tag afterwards, so they can see where it went and when it is done.
+A task they add joins a "From <name>" list in Todos and shows in the rail until you move it to
+a day. It stays in that list afterwards, as well as under its day, and keeps its tag, so they can
+see where it went and when it is done.
 
 ## Pages and blocks
 
@@ -162,7 +163,38 @@ Set `SUBSPACE_WAKE_<HANDLE>_URL` and `SUBSPACE_WAKE_<HANDLE>_TOKEN`; Subspace PO
 bearer token, at most once every two minutes per agent. For Claude, use the API trigger of a
 Claude Code scheduled task (`src/lib/core/wake.ts`).
 
-## For the iOS app
+## The iOS app
 
-`POST /api/v1/auth/login` returns a session token; send it as `Authorization: Bearer <token>` to
-any `/api/v1` endpoint. The endpoints are listed in `src/app/api/v1/[...path]/route.ts`.
+A native SwiftUI app for iPhone and iPad lives in `ios/`. It is a client of the same REST API as
+the web app: `POST /api/v1/auth/login` returns a session token, kept in the keychain and sent as
+`Authorization: Bearer <token>` to every `/api/v1` endpoint (listed in
+`src/app/api/v1/[...path]/route.ts`). There is no second backend and no data stored on the device
+beyond the session and which direct messages have been read.
+
+- Open `ios/Subspace.xcodeproj` in Xcode 16 or later and run the `Subspace` scheme. It needs iOS 17
+  or later and no packages. On first launch, enter the address of your Subspace and its password.
+- `ios/Subspace/Core` is the REST client, the models and the shared state; `Design` is the design
+  system of `DESIGN.md` in Swift (tokens, glass, avatars, Confirm delete); `Shell` is sign-in, the
+  app bar and the Now rail; each screen has its own folder. Files added to these folders join the
+  build on their own.
+- Plain `http://` works only for local addresses (`localhost`, `192.168.…`, `*.local`); anything
+  else must be `https://`.
+
+### Testing it end to end
+
+`ios/SubspaceUITests` drives the real app in the simulator against a real, freshly seeded server:
+sign-in, every screen, and the main things you can do on each. `.github/workflows/ios.yml` runs
+it on an iPhone and an iPad simulator on every push that touches `ios/` or the server side the app
+depends on (the REST API, `src/lib/core`, the schema, the seed), and keeps the screenshots
+as the `ios-ui-tests-iphone` and `ios-ui-tests-ipad` artifacts of the run. On a Mac, with Postgres running:
+
+```sh
+export DATABASE_URL=postgres://localhost:5432/subspace
+ios/scripts/e2e-server.sh      # empties that database, seeds it, serves it on localhost:3000
+xcodebuild test -project ios/Subspace.xcodeproj -scheme Subspace \
+  -destination 'platform=iOS Simulator,name=iPhone 17'
+ios/scripts/e2e-server.sh stop
+```
+
+The tests change data, so the script resets the database each time it starts. Never point it at
+a database you care about.
