@@ -78,7 +78,9 @@ private struct TodosGroupView: View {
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 4)
-        .background(lit ? Theme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // lit the way a folder is when a task is held over it
+        .background(lit ? Theme.solid : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(lit ? Theme.accent : Color.clear, lineWidth: 1.5))
         .padding(.horizontal, -8)
         .padding(.top, key.isEmpty ? 0 : 12)
         .padding(.bottom, 4)

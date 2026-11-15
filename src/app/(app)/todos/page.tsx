@@ -180,6 +180,22 @@ function Bin() {
   );
 }
 
+const plusDays = (date: string, n: number) => new Date(Date.parse(date + "T12:00:00Z") + n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * The days a week list always shows as sections, with or without tasks, so a task can be carried
+ * onto any of them: today to Sunday in "This week", Monday to Sunday in "Next week", what is left
+ * of Saturday and Sunday in "Weekend".
+ */
+function daySections(view: string, today?: string): string[] {
+  if (!today || !(view === "week" || view === "next_week" || view === "weekend")) return [];
+  const dow = (new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7; // Monday is 0
+  const monday = plusDays(today, -dow);
+  const from = view === "next_week" ? 7 : view === "weekend" ? Math.max(5, dow) : dow;
+  const to = view === "next_week" ? 13 : 6;
+  return Array.from({ length: to - from + 1 }, (_, i) => plusDays(monday, from + i));
+}
+
 /** Where a task added to "Weekend" goes: Saturday, or today when it is already Sunday. */
 function weekendDay(today: string): string {
   const d = new Date(today + "T12:00:00Z");
@@ -398,8 +414,10 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
       map.set(k, [...(map.get(k) ?? []), r]);
     }
     if (multi && !map.has("any") && view !== "weekend" && view !== "later") map.set("any", []);
+    // every day still to come has its section, empty or not, so a task can be carried onto it
+    if (rows) for (const day of daySections(view, today)) if (!map.has(day)) map.set(day, []);
     return [...map.entries()].sort(([a], [b]) => (a === "any" ? -1 : b === "any" ? 1 : a.localeCompare(b)));
-  }, [rows, view, multi]);
+  }, [rows, view, multi, today]);
 
   async function toggle(r: Row) {
     setRows((rs) => rs!.map((x) => (x.id === r.id ? { ...x, done: !r.done } : x)));
@@ -500,7 +518,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
       </header>
 
       {groups.map(([key, items]) => (
-        <div key={key} data-group={key || undefined} data-over={overGroup === key || undefined} className={`-mx-2 mb-2 rounded-2xl px-2 pb-1 transition-colors duration-300 ${key ? "mt-3 pt-2" : ""} ${overGroup === key ? "bg-accent-soft" : ""}`}>
+        <div key={key} data-group={key || undefined} data-over={overGroup === key || undefined} className={`-mx-2 mb-2 rounded-2xl px-2 pb-1 ${key ? "mt-3 pt-2" : ""} ${overGroup === key ? "drop-target" : ""}`}>
           {key && (
             <h2 className={`mb-1 px-1 text-[12.5px] font-semibold uppercase tracking-[0.06em] transition-colors duration-300 ${overGroup === key ? "text-accent" : "text-ink3"}`}>
               {key === "any" ? "Any day" : key === today ? "Today" : view !== "later" ? dayName(key) : key.endsWith("w") ? `Week of ${longDate(key.slice(0, 10)).replace(/^\S+\s/, "")}` : longDate(key)}

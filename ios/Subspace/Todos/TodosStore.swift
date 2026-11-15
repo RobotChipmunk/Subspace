@@ -80,6 +80,11 @@ final class TodosStore {
             map["any"] = []
             order.append("any")
         }
+        // every day still to come has its section, empty or not, so a task can be carried onto it
+        for day in daySections where map[day] == nil {
+            map[day] = []
+            order.append(day)
+        }
         let sorted = order.sorted { a, b in
             if a == "any" { return b != "any" }
             if b == "any" { return false }
@@ -88,6 +93,21 @@ final class TodosStore {
         var out: [TodosGroup] = []
         for key in sorted {
             out.append(TodosGroup(key: key, items: map[key] ?? []))
+        }
+        return out
+    }
+
+    /// The days a week list always shows as sections, with or without tasks: today to Sunday in
+    /// "This week", Monday to Sunday in "Next week", what is left of Saturday and Sunday in "Weekend".
+    private var daySections: [String] {
+        guard view == "week" || view == "next_week" || view == "weekend" else { return [] }
+        guard let today, let monday = TodosDates.monday(today), let done = TodosDates.days(from: monday, to: today) else { return [] }
+        let from = view == "next_week" ? 7 : (view == "weekend" ? max(5, done) : done)
+        let to = view == "next_week" ? 13 : 6
+        guard from <= to else { return [] }
+        var out: [String] = []
+        for offset in from...to {
+            if let day = TodosDates.adding(offset, to: monday) { out.append(day) }
         }
         return out
     }
