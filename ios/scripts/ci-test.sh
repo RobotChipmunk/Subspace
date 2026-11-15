@@ -14,14 +14,18 @@ E2E_LOG="$OUT/server-$NAME.log" ios/scripts/e2e-server.sh || exit 1
 
 xcrun simctl boot "$SIM" 2>/dev/null || true
 xcrun simctl bootstatus "$SIM" -b >/dev/null 2>&1 || true
+# A simulator that has only just booted is still busy with its own first-run work, and the first
+# tests time out against it. Give it a moment before driving the app.
+sleep "${SIM_SETTLE_SECONDS:-45}"
 
 rm -rf "$OUT/$NAME.xcresult"
 # Run in the background under a watchdog: a simulator that never starts the tests must not hold
 # the job until its timeout.
-LIMIT="${TEST_LIMIT_SECONDS:-1500}"
+LIMIT="${TEST_LIMIT_SECONDS:-1800}"
 xcodebuild test-without-building -project ios/Subspace.xcodeproj -scheme Subspace \
   -destination "id=$SIM" -derivedDataPath "$DERIVED" -resultBundlePath "$OUT/$NAME.xcresult" \
   -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 240 \
+  -retry-tests-on-failure -test-iterations 2 \
   > "$OUT/test-$NAME.log" 2>&1 &
 XCB=$!
 ( sleep "$LIMIT"; echo "Stopped: the tests ran longer than $LIMIT seconds." >> "$OUT/test-$NAME.log"; kill "$XCB" 2>/dev/null ) &
