@@ -58,9 +58,9 @@ jobs:
           echo "SIM=$SIM" >> "$GITHUB_ENV"
           # safaridriver gives up after two minutes, and a simulator's first boot takes longer:
           # boot it, open Safari once and let it settle before asking for a session.
-          xcrun simctl boot "$SIM"
+          xcrun simctl boot "$SIM" || true
           xcrun simctl bootstatus "$SIM" -b
-          xcrun simctl openurl "$SIM" http://localhost:3000/login
+          for _ in 1 2 3; do xcrun simctl openurl "$SIM" http://localhost:3000/login && break; sleep 20; done || true
           sleep 45
           sudo safaridriver --enable
           nohup safaridriver --port 4444 > "$OUT/safaridriver.log" 2>&1 &
