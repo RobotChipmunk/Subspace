@@ -107,3 +107,7 @@ being true. Read this list before starting work.
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.
+- iOS CI: a failed UI test is run once more before it counts (`-retry-tests-on-failure`), because a
+  loaded simulator sometimes cannot launch or quit the app. A test that fails twice is a real
+  failure; one that passed on the second go shows in the summary as failed then passed. Tests
+  change data, so write each one to cope with its own half-finished first attempt.
