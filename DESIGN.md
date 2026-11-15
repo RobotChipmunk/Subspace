@@ -162,7 +162,8 @@ Patterns:
   first tap arms it into a red pill with the action's name; the second tap does it; it disarms
   after 4 seconds, on Escape, or on a tap elsewhere. Use it for every destructive action.
 - **Moving a task** (todos): drag it onto a list in the folders (beside the tasks on a wide
-  screen, above them on a phone), or open it and use "Move to". Both offer the same lists.
+  screen, above them on a phone), or open it and use "Move to". Both offer the same lists. For
+  any other day, open it and use the date pill.
 - **Recently deleted** (todos): a deleted task leaves its list at once and waits in a bin for 15
   days, where it can be restored or deleted for good. The bin's entry in the list of folders
   shows only while it holds something. Prefer this pattern, confirm then recoverable, for
@@ -180,6 +181,23 @@ Patterns:
 - **Waiting tasks in the rail**: a task another person added shows as a rail module labelled
   "From <name>" until it is given a day. It has place buttons (Today, Tomorrow, This week, Open)
   instead of Dismiss, so it cannot be cleared without being placed.
+- **Date pill and month calendar** (`DatePicker.tsx`): a quiet pill naming a date (calendar icon,
+  "Today", "Thu, Dec 17", "No date"); tapping it drops one month open beneath it on a solid 22px
+  panel, in the manner of the iOS picker: month name with accent arrows, a Monday-first grid of
+  36px day circles, today in accent, the chosen day filled. Days already past are dimmed and
+  cannot be chosen; stepping a month slides the grid the way the owner is moving, and the panel
+  keeps one height. Choosing a day closes it and saves at once. Use it wherever a date is set.
+- **Repeat** (todo detail): a pill beside the date that opens the system menu (Never, Every day,
+  Every week, Every 2 weeks, Every month, Every year); it turns `accent-soft` while set, and one
+  meta line beneath says what finishing will do. A repeating row carries a small repeat icon.
+- **Next one added** (`NextNote` in `todos/page.tsx`): finishing a repeating task adds the next
+  one, counted from the day it was finished, not from its date. The finished task then carries
+  one meta line, in its row and in its detail: "Next one added for <day>" with an accent "Open"
+  that goes to the new task, where its date can be changed. Unticking takes the next one away
+  again. Use this pattern, a quiet line where the action happened, for anything created as a
+  side effect.
+- **Later** (todos): a list of tasks dated beyond next week, grouped by day. Like the bin, it
+  is listed only while it holds something, and nothing is added to it directly.
 - **Menus and pickers** (`Floating.tsx`): anchored to their control, flip to stay on screen,
   dismiss on outside tap.
 - **Editor** (`Editor.tsx`): markdown as you type; agent text marked; blocks are single units.

@@ -1,13 +1,14 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { AlignLeft, ChevronLeft, Plus, Undo2 } from "lucide-react";
+import { AlignLeft, ChevronLeft, Plus, Repeat as RepeatIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
+import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
 import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
-import type { BinnedTodo, Folder, Todo } from "@/lib/core/todos";
+import type { BinnedTodo, Folder, Repeat, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
 type Folders = { today: string; folders: Folder[]; bin: number };
@@ -15,6 +16,26 @@ const BIN = "bin";
 
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+const shortDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+
+const REPEAT_LABELS: [Repeat, string][] = [["daily", "Every day"], ["weekly", "Every week"], ["biweekly", "Every 2 weeks"], ["monthly", "Every month"], ["yearly", "Every year"]];
+
+/** On a finished repeating task: one quiet line saying when it comes round again, with a way to open that one. */
+function NextNote({ date, today, onOpen, className = "" }: { date: string; today?: string; onOpen: () => void; className?: string }) {
+  return (
+    <motion.span initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }} transition={soft} data-next className={`inline-flex w-full items-center gap-1.5 text-[12.5px] text-ink3 ${className}`}>
+      <RepeatIcon size={12} className="flex-none" />
+      <span className="min-w-0">Next one added for {placeLabel({ scope: "day", date }, today) || shortDate(date)}</span>
+      <button
+        onClick={(e) => (e.stopPropagation(), onOpen())}
+        onPointerDown={(e) => e.stopPropagation()}
+        className="-my-1.5 flex-none rounded-full px-2 py-1.5 font-medium text-accent transition-colors hover:bg-accent-soft"
+      >
+        Open
+      </button>
+    </motion.span>
+  );
+}
 
 /** Where a task on a person's list has been put, in a word or two. Nothing while it still waits for a day. */
 function placeLabel(r: Pick<Row, "scope" | "date">, today?: string): string {
@@ -25,7 +46,7 @@ function placeLabel(r: Pick<Row, "scope" | "date">, today?: string): string {
   if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
   if (days > 1 && days < 7) return dayName(r.date);
-  return new Date(r.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return shortDate(r.date);
 }
 
 /** The small tag on a task that came from a guest ("From Meredith"). */
@@ -104,7 +125,7 @@ export default function TodosPage() {
         <AnimatePresence mode="wait" initial={false}>
           {openId ? (
             <motion.div key="detail" initial={{ opacity: 0, x: 28 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 28 }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
-              <Detail id={openId} backLabel={folder?.label ?? "Back"} folders={f?.folders ?? []} onBack={() => setOpenId(null)} />
+              <Detail key={openId} id={openId} backLabel={folder?.label ?? "Back"} folders={f?.folders ?? []} today={f?.today} onOpen={setOpenId} onBack={() => setOpenId(null)} />
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
@@ -187,11 +208,13 @@ function TodoRow({
   r,
   tag,
   place,
+  today,
   dragging,
   away,
   accepts,
   onToggle,
   onOpen,
+  onOpenNext,
   onCarry,
   onDropped,
 }: {
@@ -199,6 +222,8 @@ function TodoRow({
   tag: boolean;
   /** on a person's list: the day the task has been given, shown quietly at the end of the row */
   place?: string;
+  today?: string;
+  onOpenNext: (id: string) => void;
   dragging: React.MutableRefObject<boolean>;
   /** true while the carried row has left the list sideways: the list stops reordering under it */
   away: React.MutableRefObject<boolean>;
@@ -319,7 +344,9 @@ function TodoRow({
           {tag && <FromTag id={r.guest_id} />}
           {/* someone else changed this task since you last opened it: the dot sits right after the words */}
           {r.ai_unseen && <span title="Changed since you last looked" aria-label="Changed since you last looked" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
+          {r.done && r.next_id && r.next_date && <NextNote date={r.next_date} today={today} onOpen={() => onOpenNext(r.next_id!)} className="mt-0.5" />}
         </span>
+        {r.repeat && !r.done && <RepeatIcon size={14} aria-label="Repeats" className="mt-[6px] flex-none text-ink3" />}
         {place && <span data-place className="mt-[4px] flex-none whitespace-nowrap text-[12.5px] text-ink3">{place}</span>}
         {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
       </div>
@@ -348,13 +375,14 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   const refreshCounts = () => globalMutate("todos/folders");
 
   const groups = useMemo(() => {
-    const multi = view === "week" || view === "next_week" || view === "weekend";
+    const multi = view === "week" || view === "next_week" || view === "weekend" || view === "later";
     const map = new Map<string, Row[]>();
     for (const r of rows ?? []) {
-      const k = !multi ? "" : r.scope === "week" ? "any" : r.date!;
+      // "Later" spans many weeks, so a task set for a week (not a day) is filed under that week
+      const k = !multi ? "" : r.scope !== "week" ? r.date! : view === "later" ? r.date + "w" : "any";
       map.set(k, [...(map.get(k) ?? []), r]);
     }
-    if (multi && !map.has("any") && view !== "weekend") map.set("any", []);
+    if (multi && !map.has("any") && view !== "weekend" && view !== "later") map.set("any", []);
     return [...map.entries()].sort(([a], [b]) => (a === "any" ? -1 : b === "any" ? 1 : a.localeCompare(b)));
   }, [rows, view]);
 
@@ -396,7 +424,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   /** The lists a task may be carried to: the same ones its "Move to" menu offers, less the one it is in. */
   const accepts = (r: Row, key: string) => {
     const to = folders.find((x) => x.key === key);
-    return !!to && key !== view && key !== "week" && !r.id.startsWith("new_") && (!to.guest || to.guest === r.guest_id);
+    return !!to && key !== view && key !== "week" && key !== "later" && !r.id.startsWith("new_") && (!to.guest || to.guest === r.guest_id);
   };
 
   /** A task let go over another list: it leaves this one at once, unless this view also shows the day it went to. A person's list keeps its tasks whatever day they are given. */
@@ -426,7 +454,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   }
 
   const title = folder?.label ?? "";
-  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : folder?.guest ? "Tasks stay here after you give them a day." : undefined;
+  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : view === "later" ? "Dated beyond next week." : folder?.guest ? "Tasks stay here after you give them a day." : undefined;
   const openCount = rows?.filter((r) => !r.done).length ?? 0;
 
   return (
@@ -440,7 +468,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
         <div key={key} className="mb-2">
           {key && (
             <h2 className="mb-1 mt-5 px-1 text-[12.5px] font-semibold uppercase tracking-[0.06em] text-ink3">
-              {key === "any" ? "Any day" : key === today ? "Today" : dayName(key)}
+              {key === "any" ? "Any day" : key === today ? "Today" : view !== "later" ? dayName(key) : key.endsWith("w") ? `Week of ${longDate(key.slice(0, 10)).replace(/^\S+\s/, "")}` : longDate(key)}
             </h2>
           )}
           <Reorder.Group axis="y" values={items} onReorder={(o) => !away.current && reorder(key, o)} as="ul">
@@ -451,6 +479,8 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
                   r={r}
                   tag={!!r.guest_id && !folder?.guest}
                   place={folder?.guest ? placeLabel(r, data?.today ?? today) : undefined}
+                  today={data?.today ?? today}
+                  onOpenNext={onOpen}
                   dragging={dragging}
                   away={away}
                   accepts={(k) => accepts(r, k)}
@@ -467,7 +497,8 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
 
       {rows && rows.length === 0 && !adding && <p className="px-1 py-6 text-ink3">Nothing here.</p>}
 
-      <div className="mt-1 flex items-center gap-3 px-1">
+      {/* "Later" has no day of its own to add to: a task gets there by being given a date */}
+      <div className={`mt-1 flex items-center gap-3 px-1 ${view === "later" ? "hidden" : ""}`}>
         {adding ? (
           <motion.form initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} onSubmit={(e) => (e.preventDefault(), add())} className="flex flex-1 items-center gap-3">
             <span className="check opacity-40" />
@@ -483,7 +514,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   );
 }
 
-function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: string; folders: Folder[]; onBack: () => void }) {
+function Detail({ id, backLabel, folders, today, onOpen, onBack }: { id: string; backLabel: string; folders: Folder[]; today?: string; onOpen: (id: string) => void; onBack: () => void }) {
   const { agent } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
   // While notes typed here are waiting to be saved, background refreshes are held back: nothing
@@ -531,7 +562,7 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
             className="h-8 cursor-pointer appearance-none rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 outline-none transition-colors hover:bg-fill2"
           >
             <option value="">Move to…</option>
-            {folders.filter((x) => x.key !== "week" && (!x.guest || x.guest === todo.guest_id)).map((x) => (
+            {folders.filter((x) => x.key !== "week" && x.key !== "later" && (!x.guest || x.guest === todo.guest_id)).map((x) => (
               <option key={x.key} value={x.key}>
                 {x.label}
               </option>
@@ -560,6 +591,30 @@ function Detail({ id, backLabel, folders, onBack }: { id: string; backLabel: str
           className={`min-w-0 flex-1 resize-none overflow-hidden text-[26px] font-bold leading-[1.25] tracking-[-0.025em] ${todo.done ? "text-ink3" : ""}`}
         />
       </div>
+      {/* when it is for, and whether it comes round again */}
+      <div className="ml-[40px] mt-2.5 flex flex-wrap items-center gap-1.5">
+        {today && <DatePill label={placeLabel(todo, today) || "No date"} value={todo.scope === "day" ? todo.date : null} today={today} onPick={(d) => patch({ view: d })} />}
+        <label className={`relative flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${todo.repeat ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
+          <RepeatIcon size={14} />
+          {todo.repeat ? REPEAT_LABELS.find(([k]) => k === todo.repeat)?.[1] : "Repeat"}
+          <select aria-label="Repeat" value={todo.repeat ?? ""} onChange={(e) => patch({ repeat: e.target.value || null })} className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+            <option value="">Never</option>
+            {REPEAT_LABELS.map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {todo.repeat && !todo.done && <p className="ml-[40px] mt-2 text-[13px] text-ink3">When you finish it, the next one is added {todo.repeat === "daily" ? "for the day after" : `${{ weekly: "a week", biweekly: "two weeks", monthly: "a month", yearly: "a year" }[todo.repeat]} from that day`}.</p>}
+      <AnimatePresence initial={false}>
+        {todo.done && todo.next_id && todo.next_date && (
+          <motion.div key="next" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="ml-[40px] overflow-hidden">
+            <NextNote date={todo.next_date} today={today} onOpen={async () => (await flush(), onOpen(todo.next_id!))} className="pt-2 text-[13px]" />
+          </motion.div>
+        )}
+      </AnimatePresence>
       {creator && creator.kind !== "human" && (
         <div className="ml-[40px] mt-1.5 flex items-center gap-1.5 text-[13px] text-ink2">
           <Avatar agent={creator} size={16} /> Added by {creator.name}
