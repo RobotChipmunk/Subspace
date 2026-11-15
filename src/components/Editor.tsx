@@ -18,6 +18,7 @@ import { BlockView } from "./blocks/BlockView";
 import type { Agent } from "@/lib/core/util";
 import { Floating } from "./Floating";
 import { MentionMenu, useMentionMatches } from "./MentionInput";
+import { TypingTraceReport, useTypingTrace } from "./TypingTrace";
 
 /** Text written by an agent. Stored in the markdown as <ins data-agent="handle">…</ins> until reviewed. */
 const AgentEdit = Mark.create({
@@ -320,6 +321,12 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
     },
   });
 
+  // Temporary: a record of keyboard, focus and editor activity for the iPad typing fault.
+  const trace = useTypingTrace(editor);
+  trace.note("render");
+  useEffect(() => trace.note("agents"), [agents]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => trace.note(value === lastEmitted.current ? "value=" : "value!"), [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
   live.current = {
     matches,
     active,
@@ -365,6 +372,7 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
           </motion.div>
         )}
       </AnimatePresence>
+      {trace.report && <TypingTraceReport report={trace.report} onClose={trace.close} />}
       <EditorContent editor={editor} />
       <label className="absolute -top-9 right-0 z-[1] grid h-8 w-8 cursor-pointer place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink2" title="Add an image">
         <ImagePlus size={16} />

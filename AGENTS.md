@@ -117,3 +117,9 @@ being true. Read this list before starting work.
   loaded simulator sometimes cannot launch or quit the app. A test that fails twice is a real
   failure; one that passed on the second go shows in the summary as failed then passed. Tests
   change data, so write each one to cope with its own half-finished first attempt.
+- Mobile Safari cannot be typed into from automation: safaridriver on an iPad simulator delivers
+  `keydown` and `keypress` but never inserts text, so it says nothing about the iOS keyboard. A
+  typing fault that only shows on iPad needs evidence from the device (see `TypingTrace.tsx`).
+- Blaming an iPad typing fault on a guess cost three rounds. Chromium, even forced down the
+  editor's iOS paths, types into the notes editor without fault; do not ship a fix for one until
+  something has shown the cause.
