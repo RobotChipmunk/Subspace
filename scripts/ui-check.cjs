@@ -571,6 +571,63 @@ async function run(profile) {
     await press(page.getByRole("button", { name: /^Today$/ }).last());
     await settle(600);
   });
+  await step("todo date and repeat", async () => {
+    const title = `Water the plants ${profile.name}`;
+    const send = (url, method, body) => page.evaluate(([u, m, b]) => fetch(u, { method: m, headers: { "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined }).then((r) => r.json()), [url, method, body]);
+    const task = await send("/api/v1/todos", "POST", { title, view: "today" });
+    await page.reload();
+    await settle(1500);
+    await press(page.locator(".todo-row", { hasText: title }).getByText(title));
+    // the date pill drops a month calendar open in place
+    const pill = page.getByRole("button", { name: /^Date:/ });
+    await pill.waitFor({ timeout: 5000 });
+    if ((await pill.innerText()).trim() !== "Today") fail("todo date: the pill does not say Today for a task on today");
+    await press(pill);
+    const cal = page.locator("[data-calendar]");
+    await cal.waitFor({ timeout: 5000 });
+    await settle(500);
+    await reachable(cal, "month calendar");
+    if (!(await cal.locator("button[aria-pressed=true]").count())) fail("todo date: the task's day is not marked in the calendar");
+    if (await cal.getByRole("button", { name: "Previous month" }).isEnabled()) fail("todo date: the calendar steps back into a month that is over");
+    await noSidewaysScroll("month calendar");
+    await shot("todo-calendar");
+    await press(cal.getByRole("button", { name: "Next month" }));
+    await press(cal.getByRole("button", { name: "Next month" }));
+    await settle(700);
+    await press(cal.locator("button:enabled", { hasText: /^17$/ }));
+    await settle(900);
+    if (await cal.count()) fail("todo date: the calendar stayed open after a day was chosen");
+    if (!/17/.test(await pill.innerText())) fail("todo date: the pill does not show the chosen day");
+    // a date beyond next week has a list of its own, there only while it holds something
+    const later = page.locator("[data-folder=later]");
+    await later.waitFor({ timeout: 6000 }).catch(() => fail("todo date: no Later list for a task dated far ahead"));
+    // repeating: finishing it adds the next one, counted from today, and says so in place
+    await page.getByLabel("Repeat").selectOption("weekly");
+    await page.getByText(/a week from that day/).waitFor({ timeout: 5000 });
+    await press(page.getByRole("checkbox", { name: "Done" }));
+    const note = page.locator("[data-next]");
+    await note.waitFor({ timeout: 5000 }).catch(() => fail("todo repeat: nothing says the next task was added"));
+    await settle(600);
+    await reachable(note.getByRole("button", { name: "Open" }), "open the next task");
+    await noSidewaysScroll("todo repeat");
+    await shot("todo-repeat-done");
+    const done = await send(`/api/v1/todos/${task.id}`, "GET");
+    const today = (await send("/api/v1/todos/folders", "GET")).today;
+    const want = new Date(Date.parse(today + "T12:00:00Z") + 7 * 86400000).toISOString().slice(0, 10);
+    if (done.next_date !== want) fail(`todo repeat: the next task is on ${done.next_date}, expected ${want} (a week from the day it was finished, not from its date)`);
+    await press(note.getByRole("button", { name: "Open" }));
+    await settle(1200);
+    if (await page.getByRole("checkbox", { name: "Done" }).getAttribute("aria-checked") !== "false") fail("todo repeat: Open did not show the new, unfinished task");
+    if ((await page.getByLabel("Task name").inputValue()) !== title) fail("todo repeat: the next task has a different name");
+    await reachable(page.getByRole("button", { name: /^Date:/ }), "date pill on the next task");
+    // unticking the first takes the next one away again, so a slip is not doubled
+    await send(`/api/v1/todos/${task.id}`, "PATCH", { done: false });
+    if ((await send(`/api/v1/todos/${done.next_id}`, "GET")).id) fail("todo repeat: unticking left the next task behind");
+    await send(`/api/v1/todos/${task.id}`, "DELETE");
+    await send(`/api/v1/todos/${task.id}?forever=1`, "DELETE");
+    await page.reload();
+    await settle(1500);
+  });
 
   // ---------- Context ----------
   await step("context browse and edit", async () => {
@@ -911,9 +968,37 @@ async function run(profile) {
     // the person has a list of their own in Todos
     await press(page.getByRole("link", { name: "Todos", exact: true }));
     await page.waitForURL("**/todos");
-    await page.getByRole("button", { name: `From ${name}` }).waitFor({ timeout: 5000 });
-    await page.getByRole("button", { name: `From ${name}` }).scrollIntoViewIfNeeded();
-    await reachable(page.getByRole("button", { name: `From ${name}` }), "From list in todos");
+    // in the list of folders: a waiting task of theirs is also a button, in the rail
+    const fromList = page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: `From ${name}` });
+    await fromList.waitFor({ timeout: 5000 });
+    await fromList.scrollIntoViewIfNeeded();
+    await reachable(fromList, "From list in todos");
+    // the list is a category: a task in it waits in the rail, then keeps its place here once it has a day
+    const fromKey = await fromList.getAttribute("data-folder");
+    const long = `Book the plumber for the upstairs bathroom before the tiles arrive ${name}`;
+    const send = (url, method, body) => page.evaluate(([u, m, b]) => fetch(u, { method: m, headers: { "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined }).then((r) => r.json()), [url, method, body]);
+    const task = await send("/api/v1/todos", "POST", { title: long, view: fromKey });
+    await page.reload();
+    await settle(1500);
+    if (wide) {
+      // a long title in the rail runs to a second line and no further
+      const railTitle = page.locator(`[data-rail-module$="${task.id}"] button span.font-medium`).last();
+      await railTitle.waitFor({ timeout: 6000 });
+      const lines = await railTitle.evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
+      if (lines !== 2) fail(`rail: a long title takes ${lines} lines closed, expected 2`);
+      await shot("rail-two-lines");
+    }
+    await send(`/api/v1/todos/${task.id}`, "PATCH", { view: "today" });
+    await press(fromList);
+    const kept = page.locator(".todo-row", { hasText: long });
+    await kept.waitFor({ timeout: 6000 }).catch(() => fail("people: a task given a day left the person's list"));
+    if ((await kept.locator("[data-place]").innerText().catch(() => "")) !== "Today") fail("people: a placed task does not show its day in the person's list");
+    await noSidewaysScroll("person's list");
+    await shot("person-list");
+    await press(page.locator("[data-folder=today]"));
+    await page.locator(".todo-row", { hasText: long }).waitFor({ timeout: 6000 }).catch(() => fail("people: a task given a day is not under that day"));
+    await send(`/api/v1/todos/${task.id}`, "DELETE");
+    await send(`/api/v1/todos/${task.id}?forever=1`, "DELETE");
     await press(page.getByRole("link", { name: "Agents", exact: true }));
     await page.waitForURL("**/agents");
     await settle(900);

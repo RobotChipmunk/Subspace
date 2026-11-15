@@ -104,6 +104,12 @@ being true. Read this list before starting work.
   it. `signIn()` in `SubspaceUITests/Support.swift` dismisses it; new tests should sign in through it.
 - iOS CI screenshots are downloaded from `productionresultssaN.blob.core.windows.net`; the cloud
   environment must allow those hosts or the artifact link fails with a proxy 403.
+- Tailwind's `line-clamp-*` sets `display`, so `block` on the same element switches the clamp off
+  and the text runs on. Give the element one or the other, and measure the lines in `ui-check`.
+- A task waiting in the rail is a button whose name starts "From <name>", the same as that
+  person's folder. In `ui-check`, find folders inside the "Lists" navigation or by `data-folder`.
+- Do not change files or run heavy commands while `ui-check` is running: one run here doubled a
+  typed task and failed five steps that passed on a quiet rerun.
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.

@@ -2,7 +2,8 @@ import Foundation
 
 // Shapes only the todos screen reads. They mirror src/lib/core/todos.ts.
 
-/// One entry of `todos/folders`: a day, a span of days, the backlog or a guest's waiting list.
+/// One entry of `todos/folders`: a day, a span of days, the backlog or a guest's list (every task
+/// from that person, with or without a day).
 struct TodosFolder: Codable, Identifiable, Hashable {
     var key: String
     var label: String
@@ -47,6 +48,42 @@ struct TodosGroup: Identifiable {
     var id: String { key }
 }
 
+/// One choice of how often a task comes round again.
+struct TodosRepeatOption: Identifiable {
+    let key: String
+    let label: String
+    var id: String { key }
+}
+
+/// How often a task repeats, in the words the web uses.
+enum TodosRepeat {
+    static let options: [TodosRepeatOption] = [
+        TodosRepeatOption(key: "daily", label: "Every day"),
+        TodosRepeatOption(key: "every_3_days", label: "Every 3 days"),
+        TodosRepeatOption(key: "weekly", label: "Every week"),
+        TodosRepeatOption(key: "biweekly", label: "Every 2 weeks"),
+        TodosRepeatOption(key: "monthly", label: "Every month"),
+        TodosRepeatOption(key: "yearly", label: "Every year"),
+    ]
+
+    static func label(_ key: String?) -> String? {
+        guard let key else { return nil }
+        return options.first { $0.key == key }?.label
+    }
+
+    /// What finishing a repeating task will do.
+    static func hint(_ key: String) -> String {
+        switch key {
+        case "daily": return "When you finish it, the next one is added for the day after."
+        case "every_3_days": return "When you finish it, the next one is added three days from that day."
+        case "weekly": return "When you finish it, the next one is added a week from that day."
+        case "biweekly": return "When you finish it, the next one is added two weeks from that day."
+        case "monthly": return "When you finish it, the next one is added a month from that day."
+        default: return "When you finish it, the next one is added a year from that day."
+        }
+    }
+}
+
 /// Calendar days as the server writes them ("2026-11-14"), handled without the device's time zone.
 enum TodosDates {
     private static let utc: TimeZone = TimeZone(secondsFromGMT: 0) ?? TimeZone.current
@@ -79,6 +116,65 @@ enum TodosDates {
         f.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
         return f
     }()
+
+    private static let shortFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeZone = utc
+        f.setLocalizedDateFormatFromTemplate("EEEMMMd")
+        return f
+    }()
+
+    private static let monthDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeZone = utc
+        f.setLocalizedDateFormatFromTemplate("MMMMd")
+        return f
+    }()
+
+    /// The zone plain days are read in, for a date picker that must agree with `string(_:)`.
+    static var zone: TimeZone { utc }
+
+    /// A Monday-first calendar in that zone, like the task lists.
+    static let pickerCalendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = utc
+        c.firstWeekday = 2
+        return c
+    }()
+
+    /// "Thu, Dec 17".
+    static func shortDate(_ text: String) -> String {
+        guard let d = date(text) else { return text }
+        return shortFormatter.string(from: d)
+    }
+
+    /// "December 7".
+    static func monthDay(_ text: String) -> String {
+        guard let d = date(text) else { return text }
+        return monthDayFormatter.string(from: d)
+    }
+
+    /// Whole days from one day to another; negative when `to` is earlier.
+    static func days(from: String, to: String) -> Int? {
+        guard let a = date(from), let b = date(to) else { return nil }
+        return calendar.dateComponents([.day], from: a, to: b).day
+    }
+
+    /// Where a task has been put, in a word or two: "Today", "Thursday", "Thu, Dec 17", "This week",
+    /// "Backlog". Empty while it still waits for a day. The same words as `placeLabel` on the web.
+    static func placeLabel(scope: String, date: String?, today: String?) -> String {
+        if scope == "backlog" { return "Backlog" }
+        guard scope != "guest", let date, let today, let gap = days(from: today, to: date) else { return "" }
+        if scope == "week" {
+            if gap <= 0 { return "This week" }
+            if gap <= 7 { return "Next week" }
+            return "Week of " + monthDay(date)
+        }
+        if gap == 0 { return "Today" }
+        if gap == 1 { return "Tomorrow" }
+        if gap > 1 && gap < 7 { return dayName(date) }
+        return shortDate(date)
+    }
 
     static func isDate(_ text: String) -> Bool {
         text.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil

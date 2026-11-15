@@ -13,6 +13,7 @@ struct TodosDetail: View {
     @State private var titleLoaded: Bool = false
     @State private var notes: String? = nil
     @State private var editing: Bool = false
+    @State private var showCalendar: Bool = false
     @State private var sentSeen: Bool = false
     @State private var problem: String? = nil
     @State private var saver = TodosSaver()
@@ -25,6 +26,7 @@ struct TodosDetail: View {
             TodosProblem(text: problem)
             if let todo, let notes {
                 heading(todo)
+                schedule(todo)
                 origin(todo)
                 notesArea(notes)
             } else if problem == nil {
@@ -108,6 +110,86 @@ struct TodosDetail: View {
                     if !on { Task { await commitTitle() } }
                 }
         }
+    }
+
+    /// When it is for, and whether it comes round again. The date pill opens a month calendar in
+    /// place; choosing a day there saves at once.
+    private func schedule(_ todo: Todo) -> some View {
+        let label = TodosDates.placeLabel(scope: todo.scope, date: todo.date, today: store.today)
+        let dateText = label.isEmpty ? "No date" : label
+        let rule = todo.`repeat`
+        let nextID = todo.done ? todo.next_id : nil
+        let nextDate = todo.done ? todo.next_date : nil
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(.ssSoft) { showCalendar.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                        Text(dateText).lineLimit(1)
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(showCalendar ? Theme.accent : Theme.ink2)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 36)
+                    .background(showCalendar ? Theme.accentSoft : Theme.fill, in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Date: \(dateText)")
+                .accessibilityIdentifier("todos.detail.date")
+
+                TodosRepeatMenu(rule: rule) { value in
+                    Task { await setRepeat(value) }
+                }
+            }
+            if showCalendar, let today = store.today {
+                monthCalendar(todo, today: today)
+                    .transition(.opacity)
+            }
+            if let rule, !todo.done {
+                Text(TodosRepeat.hint(rule))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let nextID, let nextDate {
+                TodosNextNote(date: nextDate, today: store.today) {
+                    Task { await openNext(nextID) }
+                }
+                .transition(.opacity)
+            }
+        }
+        .padding(.leading, 42)
+        .padding(.top, 10)
+    }
+
+    /// The system's own month calendar, Monday first, with days already past not offered.
+    private func monthCalendar(_ todo: Todo, today: String) -> some View {
+        let first = TodosDates.date(today) ?? Date()
+        let onDay = todo.scope == "day" ? todo.date : nil
+        let shown = max(TodosDates.date(onDay ?? today) ?? first, first)
+        let selection = Binding<Date>(
+            get: { shown },
+            set: { picked in
+                let day = TodosDates.string(picked)
+                if day == onDay { return }
+                Task { await pickDate(day) }
+            }
+        )
+        return DatePicker("Date", selection: selection, in: first..., displayedComponents: .date)
+            .datePickerStyle(.graphical)
+            .labelsHidden()
+            .tint(Theme.accent)
+            .environment(\.calendar, TodosDates.pickerCalendar)
+            .environment(\.timeZone, TodosDates.zone)
+            .padding(8)
+            .frame(maxWidth: 340)
+            .background(Theme.solid, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+            .shadow(color: Theme.shadowLift, radius: 18, y: 8)
+            .accessibilityIdentifier("todos.detail.calendar")
     }
 
     @ViewBuilder private func origin(_ todo: Todo) -> some View {
@@ -213,7 +295,7 @@ struct TodosDetail: View {
     /// The same choices as the web's "Move to" picker.
     private func moveOptions(_ todo: Todo) -> [TodosFolder] {
         store.folders.filter { folder in
-            folder.key != "week" && (folder.guest == nil || folder.guest == todo.guest_id)
+            folder.key != "week" && folder.key != "later" && (folder.guest == nil || folder.guest == todo.guest_id)
         }
     }
 
@@ -345,6 +427,29 @@ struct TodosDetail: View {
         store.closeDetail()
     }
 
+    /// A day chosen in the calendar: the task goes there and stays open.
+    private func pickDate(_ day: String) async {
+        let wasWaiting = todo?.scope == "guest"
+        withAnimation(.ssSoft) { showCalendar = false }
+        guard await patch(["view": day]) != nil else { return }
+        // a guest's waiting task now has a day: its module leaves the rail
+        if wasWaiting { await app.refreshRail() }
+        await store.refreshFolders()
+    }
+
+    private func setRepeat(_ value: String?) async {
+        _ = await patch(["repeat": value ?? "none"])
+    }
+
+    /// Goes to the task that was added to follow this one, where its date can be changed.
+    private func openNext(_ next: String) async {
+        titleFocused = false
+        notesFocused = false
+        await saver.flush()
+        await commitTitle()
+        store.open(next)
+    }
+
     private func remove() async {
         await saver.flush()
         do {
@@ -390,6 +495,44 @@ private struct TodosMoveMenu: View {
         }
         .accessibilityLabel("Move to. Now: \(place)")
         .accessibilityIdentifier("todos.detail.move")
+    }
+}
+
+/// Whether the task comes round again, and how often. Accent while it does.
+private struct TodosRepeatMenu: View {
+    var rule: String?
+    var pick: (String?) -> Void
+
+    var body: some View {
+        let on = rule != nil
+        let title = TodosRepeat.label(rule) ?? "Repeat"
+        Menu {
+            Button {
+                pick(nil)
+            } label: {
+                if on { Text("Never") } else { Label("Never", systemImage: "checkmark") }
+            }
+            ForEach(TodosRepeat.options) { option in
+                Button {
+                    pick(option.key)
+                } label: {
+                    if option.key == rule { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "repeat")
+                Text(title).lineLimit(1)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(on ? Theme.accent : Theme.ink2)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 36)
+            .background(on ? Theme.accentSoft : Theme.fill, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Repeat. Now: \(on ? title : "Never")")
+        .accessibilityIdentifier("todos.detail.repeat")
     }
 }
 

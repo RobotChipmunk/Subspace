@@ -103,8 +103,9 @@ Their agents see it as "Tasks for <your first name>", with tools such as `send_t
 instructions to use it whenever they are asked to send you a task or a reminder, without the
 person having to name the service.
 
-A task they add waits in a "From <name>" list in Todos and shows in the rail until you move it to
-a day. It keeps its tag afterwards, so they can see where it went and when it is done.
+A task they add joins a "From <name>" list in Todos and shows in the rail until you move it to
+a day. It stays in that list afterwards, as well as under its day, and keeps its tag, so they can
+see where it went and when it is done.
 
 ## Pages and blocks
 

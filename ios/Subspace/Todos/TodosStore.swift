@@ -46,7 +46,10 @@ final class TodosStore {
         return folders.first { $0.key == key }
     }
 
-    private var isMulti: Bool { view == "week" || view == "next_week" || view == "weekend" }
+    private var isMulti: Bool { view == "week" || view == "next_week" || view == "weekend" || view == "later" }
+
+    /// "Later" has no day of its own to add to: a task gets there by being given a date.
+    var canAdd: Bool { view != "later" }
 
     func rowKey(_ id: String) -> String {
         keys[id] ?? id
@@ -54,7 +57,8 @@ final class TodosStore {
 
     func groupKey(_ todo: Todo) -> String {
         if !isMulti { return "" }
-        if todo.scope == "week" { return "any" }
+        // "Later" spans many weeks, so a task set for a week (not a day) is filed under that week
+        if todo.scope == "week" { return view == "later" ? (todo.date ?? "") + "w" : "any" }
         return todo.date ?? "any"
     }
 
@@ -70,7 +74,7 @@ final class TodosStore {
             }
             map[key]?.append(row)
         }
-        if isMulti && view != "weekend" && map["any"] == nil {
+        if isMulti && view != "weekend" && view != "later" && map["any"] == nil {
             map["any"] = []
             order.append("any")
         }
@@ -89,6 +93,9 @@ final class TodosStore {
     func groupTitle(_ key: String) -> String {
         if key == "any" { return "Any day" }
         if key == today { return "Today" }
+        if view == "later" {
+            return key.hasSuffix("w") ? "Week of " + TodosDates.monthDay(String(key.dropLast())) : TodosDates.longDate(key)
+        }
         return TodosDates.dayName(key)
     }
 
@@ -97,7 +104,8 @@ final class TodosStore {
         if view == "today", let today { return TodosDates.longDate(today) }
         if TodosDates.isDate(view) { return TodosDates.longDate(view) }
         if view == "backlog" { return "No date. Pull from here when you have room." }
-        if folder?.guest != nil { return "Waiting for a day. Open one and move it when you are ready." }
+        if view == "later" { return "Dated beyond next week." }
+        if folder?.guest != nil { return "Tasks stay here after you give them a day." }
         guard let rows else { return nil }
         let open = rows.filter { !$0.done }.count
         if open > 0 { return "\(open) to do" }
@@ -113,8 +121,9 @@ final class TodosStore {
         case "backlog":
             return "backlog"
         case "week":
-            guard let today, let date = todo.date else { return "week" }
-            return TodosDates.monday(today) == date ? "week" : "next_week"
+            guard let today, let date = todo.date, let monday = TodosDates.monday(today) else { return "week" }
+            if date == monday { return "week" }
+            return date == TodosDates.adding(7, to: monday) ? "next_week" : "later"
         default:
             guard let date = todo.date else { return nil }
             if date == today { return "today" }
@@ -123,7 +132,10 @@ final class TodosStore {
             let saturday = TodosDates.adding(5, to: monday)
             let sunday = TodosDates.adding(6, to: monday)
             if date == saturday || date == sunday { return "weekend" }
-            return TodosDates.monday(date) == monday ? "week" : "next_week"
+            if TodosDates.monday(date) == monday { return "week" }
+            // past the end of next week
+            if let last = TodosDates.adding(13, to: monday), date > last { return "later" }
+            return "next_week"
         }
     }
 
@@ -371,15 +383,16 @@ final class TodosStore {
     }
 
     /// Whether the row being carried can be put on this list. The same rule as the web: not the
-    /// list it is on, not "This week", and a guest's list only for that guest's own task.
+    /// list it is on, not "This week" or "Later", and a guest's list only for that guest's own task.
     func accepts(_ key: String) -> Bool {
-        guard let id = draggingID, !id.hasPrefix("new_"), key != view, key != "week" else { return false }
+        guard let id = draggingID, !id.hasPrefix("new_"), key != view, key != "week", key != "later" else { return false }
         guard let row = (rows ?? []).first(where: { $0.id == id }), let folder = folders.first(where: { $0.key == key }) else { return false }
         return folder.guest == nil || folder.guest == row.guest_id
     }
 
     /// The carried row was let go over a list in the folders: it moves there. It leaves this list
-    /// at once and is saved behind; if that fails it comes back.
+    /// at once and is saved behind; if that fails it comes back. A person's list keeps its tasks
+    /// whatever day they are given, so there the row stays and only its day changes.
     func dropOnFolder(_ key: String) {
         guard accepts(key), let id = draggingID, let api = app?.api else {
             endDrag()
@@ -387,10 +400,13 @@ final class TodosStore {
         }
         let before = rows
         let wasWaiting = (rows ?? []).first(where: { $0.id == id })?.scope == "guest"
+        let stays = folder?.guest != nil
         draggingID = nil
         dragAt = nil
         generation += 1
-        withAnimation(.ssSoft) { rows = (rows ?? []).filter { $0.id != id } }
+        if !stays {
+            withAnimation(.ssSoft) { rows = (rows ?? []).filter { $0.id != id } }
+        }
         Task {
             do {
                 try await api.send("PATCH", "todos/\(id)", body: ["view": key])
@@ -401,6 +417,7 @@ final class TodosStore {
                 withAnimation(.ssSoft) { rows = before }
                 problem = error.localizedDescription
             }
+            if stays { await refreshList() }
             await refreshFolders()
         }
     }
