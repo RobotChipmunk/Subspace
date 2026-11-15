@@ -212,6 +212,8 @@ function TodoRow({
   dragging,
   away,
   accepts,
+  acceptsGroup,
+  onCarryGroup,
   onToggle,
   onOpen,
   onOpenNext,
@@ -228,16 +230,20 @@ function TodoRow({
   /** true while the carried row has left the list sideways: the list stops reordering under it */
   away: React.MutableRefObject<boolean>;
   accepts: (folder: string) => boolean;
+  /** whether the row may be let go on this section of the list it is in (another day of the week) */
+  acceptsGroup: (group: string) => boolean;
+  onCarryGroup: (group: string | null) => void;
   onToggle: () => void;
   onOpen: () => void;
   onCarry: (folder: string | null) => void;
-  onDropped: (folder: string | null) => void;
+  onDropped: (folder: string | null, group: string | null) => void;
 }) {
   const controls = useDragControls();
   const el = useRef<HTMLLIElement>(null);
   const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; start: PointerEvent } | null>(null);
   const lifted = useRef(false);
   const over = useRef<string | null>(null);
+  const overGroup = useRef<string | null>(null);
   const [up, setUp] = useState(false);
   // how far the carried row has stepped back: 0 in the list, 1 away from it, 2 over a list it can land in
   const [out, setOut] = useState(0);
@@ -314,22 +320,29 @@ function TodoRow({
       onDragStart={() => (dragging.current = true)}
       onDrag={(e, info) => {
         const at = e as PointerEvent;
-        const hit = document.elementsFromPoint(at.clientX, at.clientY).map((n) => n.closest("[data-folder]")).find(Boolean);
-        const key = hit?.getAttribute("data-folder") ?? null;
+        const under = document.elementsFromPoint(at.clientX, at.clientY);
+        const key = under.map((n) => n.closest("[data-folder]")).find(Boolean)?.getAttribute("data-folder") ?? null;
         const to = key && accepts(key) ? key : null;
         if (to !== over.current) onCarry((over.current = to));
-        away.current = !!to || Math.abs(info.offset.x) > AWAY_PX;
+        // within the list: another section (another day) takes the row in, its own section reorders as usual
+        const section = to ? null : (under.map((n) => n.closest("[data-group]")).find(Boolean)?.getAttribute("data-group") ?? null);
+        const group = section !== null && acceptsGroup(section) ? section : null;
+        if (group !== overGroup.current) onCarryGroup((overGroup.current = group));
+        away.current = !!to || group !== null || Math.abs(info.offset.x) > AWAY_PX;
         setOut(to ? 2 : away.current ? 1 : 0);
       }}
       onDragEnd={() => {
         const to = over.current;
+        const group = overGroup.current;
         over.current = null;
+        overGroup.current = null;
         away.current = false;
         setOut(0);
         onCarry(null);
+        onCarryGroup(null);
         release();
         setTimeout(() => (dragging.current = false), 50);
-        onDropped(to);
+        onDropped(to, group);
       }}
       className="todo-row relative -mx-2 flex cursor-grab touch-pan-y select-none items-start gap-3 rounded-2xl px-3 active:cursor-grabbing"
     >
@@ -362,6 +375,8 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   const [draft, setDraft] = useState("");
   const dragging = useRef(false);
   const away = useRef(false);
+  // the section of this list a carried task is held over, lit as the day it will land on
+  const [overGroup, setOverGroup] = useState<string | null>(null);
 
   // Tasks typed here that the server has not answered for yet. They show at once and stay put.
   const unsaved = useRef<Row[]>([]);
@@ -374,8 +389,8 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
 
   const refreshCounts = () => globalMutate("todos/folders");
 
+  const multi = view === "week" || view === "next_week" || view === "weekend" || view === "later";
   const groups = useMemo(() => {
-    const multi = view === "week" || view === "next_week" || view === "weekend" || view === "later";
     const map = new Map<string, Row[]>();
     for (const r of rows ?? []) {
       // "Later" spans many weeks, so a task set for a week (not a day) is filed under that week
@@ -384,7 +399,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
     }
     if (multi && !map.has("any") && view !== "weekend" && view !== "later") map.set("any", []);
     return [...map.entries()].sort(([a], [b]) => (a === "any" ? -1 : b === "any" ? 1 : a.localeCompare(b)));
-  }, [rows, view]);
+  }, [rows, view, multi]);
 
   async function toggle(r: Row) {
     setRows((rs) => rs!.map((x) => (x.id === r.id ? { ...x, done: !r.done } : x)));
@@ -427,6 +442,26 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
     return !!to && key !== view && key !== "week" && key !== "later" && !r.id.startsWith("new_") && (!to.guest || to.guest === r.guest_id);
   };
 
+  /** The section a row is filed under in a list with sections; "" in a list without. */
+  const groupOf = (r: Row) => (!multi ? "" : r.scope !== "week" ? r.date! : view === "later" ? r.date + "w" : "any");
+
+  /**
+   * The sections of this list a task may be carried to: any but its own, a week in "Later" (no
+   * single day to land on) and a day already past (it would only roll forward again).
+   */
+  const acceptsGroup = (r: Row, key: string) => multi && !r.id.startsWith("new_") && key !== groupOf(r) && !key.endsWith("w") && (key === "any" || !today || key >= today);
+
+  /** A task let go over another section: it joins that day (or "Any day") at the end, at once, and is saved behind. */
+  async function moveToGroup(r: Row, key: string) {
+    const to = key === "any" ? view : key;
+    setRows((rs) => [...rs!.filter((x) => x.id !== r.id), { ...r, scope: key === "any" ? "week" : "day", date: key === "any" ? (rs!.find((x) => x.scope === "week")?.date ?? r.date) : key }]);
+    try {
+      await api(`todos/${r.id}`, { method: "PATCH", body: { view: to } });
+    } finally {
+      globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
+    }
+  }
+
   /** A task let go over another list: it leaves this one at once, unless this view also shows the day it went to. A person's list keeps its tasks whatever day they are given. */
   async function move(r: Row, to: string) {
     if (!(view === "week" || view === "next_week" || view === "weekend" || folder?.guest)) {
@@ -465,9 +500,9 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
       </header>
 
       {groups.map(([key, items]) => (
-        <div key={key} className="mb-2">
+        <div key={key} data-group={key || undefined} data-over={overGroup === key || undefined} className={`-mx-2 mb-2 rounded-2xl px-2 pb-1 transition-colors duration-300 ${key ? "mt-3 pt-2" : ""} ${overGroup === key ? "bg-accent-soft" : ""}`}>
           {key && (
-            <h2 className="mb-1 mt-5 px-1 text-[12.5px] font-semibold uppercase tracking-[0.06em] text-ink3">
+            <h2 className={`mb-1 px-1 text-[12.5px] font-semibold uppercase tracking-[0.06em] transition-colors duration-300 ${overGroup === key ? "text-accent" : "text-ink3"}`}>
               {key === "any" ? "Any day" : key === today ? "Today" : view !== "later" ? dayName(key) : key.endsWith("w") ? `Week of ${longDate(key.slice(0, 10)).replace(/^\S+\s/, "")}` : longDate(key)}
             </h2>
           )}
@@ -484,10 +519,12 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
                   dragging={dragging}
                   away={away}
                   accepts={(k) => accepts(r, k)}
+                  acceptsGroup={(k) => acceptsGroup(r, k)}
+                  onCarryGroup={setOverGroup}
                   onCarry={onCarry}
                   onToggle={() => !r.id.startsWith("new_") && toggle(r)}
                   onOpen={() => !r.id.startsWith("new_") && onOpen(r.id)}
-                  onDropped={(to) => (to ? move(r, to) : setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id).filter((x) => !x.startsWith("new_")) } }), rs)))}
+                  onDropped={(to, group) => (to ? move(r, to) : group !== null ? moveToGroup(r, group) : setRows((rs) => (api("todos/reorder", { body: { ids: rs!.map((x) => x.id).filter((x) => !x.startsWith("new_")) } }), rs)))}
                 />
               ))}
             </AnimatePresence>

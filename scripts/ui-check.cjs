@@ -447,6 +447,54 @@ async function run(profile) {
     await press(nav.getByRole("button", { name: /^Today/ }));
     await page.locator("main ul li", { hasText: title }).waitFor({ timeout: 5000 }).catch(() => fail("todos carry: the task did not come back to Today"));
   });
+  await step("todos carry between sections", async () => {
+    // In a list with sections (the days of a week) a task carried onto another section moves to that day.
+    const nav = page.getByRole("navigation", { name: "Lists" });
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const today = (await get("/api/v1/todos/folders")).today;
+    const title = "Draft Q1 goals";
+    await press(nav.getByRole("button", { name: /^This week/ }));
+    await settle(1200);
+    const row = page.locator("main ul li", { hasText: title });
+    const inGroup = (key) => page.locator(`[data-group="${key}"] li`, { hasText: title });
+    if (!(await inGroup("any").count())) return fail("todos sections: the seeded week task is not under Any day");
+    const mid = (loc) => loc.evaluate((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left }))(e.getBoundingClientRect()));
+    async function carry(key, shotName) {
+      const from = await mid(row);
+      from.x = from.left + 110;
+      const group = page.locator(`[data-group="${key}"]`);
+      const to = await mid(group.locator("h2"));
+      const at = (i) => [from.x, from.y + ((to.y - from.y) * i) / 24];
+      let cdp;
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      if (profile.touch) {
+        cdp = await page.context().newCDPSession(page);
+        await touch("touchStart", from.x, from.y);
+        await page.waitForTimeout(450); // up or down is a scroll until the row has been held
+        for (let i = 1; i <= 24; i++) (await touch("touchMove", ...at(i)), await page.waitForTimeout(25));
+      } else {
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        for (let i = 1; i <= 24; i++) (await page.mouse.move(...at(i)), await page.waitForTimeout(20));
+      }
+      await page.waitForTimeout(400);
+      if ((await group.getAttribute("data-over")) !== "true") fail(`todos sections: holding a task over the "${key}" section did not light it`);
+      if (shotName) (await noSidewaysScroll("todos sections"), await shot(shotName));
+      if (profile.touch) (await touch("touchEnd", 0, 0), await cdp.detach());
+      else await page.mouse.up();
+      await settle(1500);
+    }
+    await carry(today, "todos-carry-section");
+    if (!(await inGroup(today).count())) fail("todos sections: a task dropped on Today's section is not under it");
+    if (await page.getByLabel("Task name").count()) fail("todos sections: letting go of a carried task opened it");
+    const moved = (await get("/api/v1/todos?view=today")).todos.some((t) => t.title === title);
+    if (!moved) fail("todos sections: a task dropped on Today's section was not saved on today");
+    // and back, so every screen size starts from the same lists
+    await carry("any");
+    if (!(await inGroup("any").count())) fail("todos sections: a task dropped on Any day is not under it");
+    const back = (await get("/api/v1/todos?view=week")).todos.find((t) => t.title === title);
+    if (!back || back.scope !== "week") fail("todos sections: a task dropped on Any day was not saved for the week");
+  });
   await step("todos add, tick, open", async () => {
     await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
     await settle(500);

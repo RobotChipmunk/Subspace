@@ -105,7 +105,9 @@ Patterns:
 - **Carry.** A lifted row moves freely. Held over a place it can go (a list in the todo folders),
   that place lights up (`.drop-target`: accent on an opaque surface) and the row fades back so the
   target reads clearly; letting go moves it there. Away from the list it stops trading places with
-  its neighbours. On touch, pulling a row sideways lifts it at once; up or down still scrolls.
+  its neighbours. In a list with sections (the days of a week) another section is such a place
+  too: it lights in `accent-soft` with its heading in accent, and the row lands at its end on that
+  day. A day already past, and a whole week in "Later", take nothing. On touch, pulling a row sideways lifts it at once; up or down still scrolls.
 - **Emphasis is rare.** One small flourish at the moment it matters (the bin's shake as it arms).
   Never loop attention-seeking motion.
 - **Make room, do not cover.** A panel that opens beside the content slides in from its edge with
