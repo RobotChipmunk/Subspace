@@ -103,6 +103,24 @@ final class TodosTests: SubspaceTestCase {
         shot("13-todos-repeat-next")
     }
 
+    func testDragATaskToAnotherSection() {
+        launchSignedIn()
+        go("todos")
+        expect(app.buttons["todos.folder.week"], "the This week folder").tap()
+        // Seeded for the week with no day, so it sits under "Any day".
+        let task = expect(row("Draft Q1 goals"), "a seeded task under Any day")
+        let onToday = expect(row("Book parent-teacher conference"), "a seeded task under Today")
+
+        // Lift it and let it go over a task of another section: it moves to that day.
+        task.press(forDuration: 1.2, thenDragTo: onToday, withVelocity: .slow, thenHoldForDuration: 0.6)
+        Thread.sleep(forTimeInterval: 1.5)
+        shot("14-todos-dragged-to-section")
+
+        app.buttons["todos.folder.today"].tap()
+        expect(row("Draft Q1 goals"), "the task on Today, after being dropped on Today's section")
+        shot("14-todos-section-day")
+    }
+
     func testDragATaskOntoAnotherList() {
         launchSignedIn()
         go("todos")

@@ -51,16 +51,23 @@ private struct TodosGroupView: View {
     var body: some View {
         let tagged = store.folder?.guest == nil
         let today = store.today
+        let key = group.key
+        // a carried task held over this section: it lights as the day the task will land on
+        let lit = !key.isEmpty && store.targetGroup == key
         VStack(alignment: .leading, spacing: 0) {
-            if !group.key.isEmpty {
-                Text(store.groupTitle(group.key).uppercased())
+            if !key.isEmpty {
+                Text(store.groupTitle(key).uppercased())
                     .font(.system(size: 12.5, weight: .semibold))
                     .tracking(0.75)
-                    .foregroundStyle(Theme.ink3)
+                    .foregroundStyle(lit ? Theme.accent : Theme.ink3)
                     .padding(.horizontal, 4)
-                    .padding(.top, 20)
+                    .padding(.top, 8)
                     .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("todos.group.\(key)")
+                    .onDrop(of: [UTType.text], delegate: TodosDrop(entered: { store.dragOverGroup(key) }, dropped: { store.endDrag() }))
             }
             ForEach(keyed) { item in
                 // on a person's list a task says which day it has been given
@@ -69,7 +76,14 @@ private struct TodosGroupView: View {
                     .transition(.opacity)
             }
         }
-        .padding(.bottom, 8)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 4)
+        // lit the way a folder is when a task is held over it
+        .background(lit ? Theme.solid : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(lit ? Theme.accent : Color.clear, lineWidth: 1.5))
+        .padding(.horizontal, -8)
+        .padding(.top, key.isEmpty ? 0 : 12)
+        .padding(.bottom, 4)
     }
 }
 

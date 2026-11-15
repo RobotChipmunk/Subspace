@@ -27,6 +27,8 @@ final class TodosStore {
     var openID: String? = nil
     var problem: String? = nil
     var draggingID: String? = nil
+    /// The section of this list (another day of the week) the carried row is held over.
+    var targetGroup: String? = nil
 
     /// Tasks typed here that the server has not answered for yet.
     @ObservationIgnored private var unsaved: [Todo] = []
@@ -78,6 +80,11 @@ final class TodosStore {
             map["any"] = []
             order.append("any")
         }
+        // every day still to come has its section, empty or not, so a task can be carried onto it
+        for day in daySections where map[day] == nil {
+            map[day] = []
+            order.append(day)
+        }
         let sorted = order.sorted { a, b in
             if a == "any" { return b != "any" }
             if b == "any" { return false }
@@ -86,6 +93,21 @@ final class TodosStore {
         var out: [TodosGroup] = []
         for key in sorted {
             out.append(TodosGroup(key: key, items: map[key] ?? []))
+        }
+        return out
+    }
+
+    /// The days a week list always shows as sections, with or without tasks: today to Sunday in
+    /// "This week", Monday to Sunday in "Next week", what is left of Saturday and Sunday in "Weekend".
+    private var daySections: [String] {
+        guard view == "week" || view == "next_week" || view == "weekend" else { return [] }
+        guard let today, let monday = TodosDates.monday(today), let done = TodosDates.days(from: monday, to: today) else { return [] }
+        let from = view == "next_week" ? 7 : (view == "weekend" ? max(5, done) : done)
+        let to = view == "next_week" ? 13 : 6
+        guard from <= to else { return [] }
+        var out: [String] = []
+        for offset in from...to {
+            if let day = TodosDates.adding(offset, to: monday) { out.append(day) }
         }
         return out
     }
@@ -369,13 +391,41 @@ final class TodosStore {
     func beginDrag(_ id: String) {
         draggingID = id
         dragAt = Date()
+        targetGroup = nil
+    }
+
+    /// Whether the row being carried can be put on this section of the list it is in. The same
+    /// rule as the web: not its own section, not a whole week in "Later" (no single day to land
+    /// on) and not a day already past (it would only roll forward again).
+    func acceptsGroup(_ key: String) -> Bool {
+        guard isMulti, let id = draggingID, !id.hasPrefix("new_"), !key.isEmpty, !key.hasSuffix("w") else { return false }
+        guard let row = (rows ?? []).first(where: { $0.id == id }), groupKey(row) != key else { return false }
+        if key == "any" { return true }
+        guard let today else { return true }
+        return key >= today
+    }
+
+    /// The lifted row has come over a section: if it can go there, that section lights up.
+    func dragOverGroup(_ key: String) {
+        let next: String? = acceptsGroup(key) ? key : nil
+        if next != nil { dragAt = Date() }
+        if next != targetGroup {
+            withAnimation(.ssSpring) { targetGroup = next }
+        }
     }
 
     /// The lifted row has come over another row of the same group: it takes that place.
     func dragEntered(_ target: String) {
         guard let moving = draggingID, moving != target, var list = rows else { return }
         guard let from = list.firstIndex(where: { $0.id == moving }), let to = list.firstIndex(where: { $0.id == target }) else { return }
-        guard groupKey(list[from]) == groupKey(list[to]) else { return }
+        // a row of another section: the carried row is over that section, not trading places
+        guard groupKey(list[from]) == groupKey(list[to]) else {
+            dragOverGroup(groupKey(list[to]))
+            return
+        }
+        if targetGroup != nil {
+            withAnimation(.ssSpring) { targetGroup = nil }
+        }
         dragAt = Date()
         let item = list.remove(at: from)
         list.insert(item, at: to)
@@ -403,6 +453,7 @@ final class TodosStore {
         let stays = folder?.guest != nil
         draggingID = nil
         dragAt = nil
+        targetGroup = nil
         generation += 1
         if !stays {
             withAnimation(.ssSoft) { rows = (rows ?? []).filter { $0.id != id } }
@@ -422,8 +473,51 @@ final class TodosStore {
         }
     }
 
+    /// The carried row was let go over another section: it joins that day (or "Any day") at the
+    /// end, at once, and is saved behind; if that fails it goes back.
+    private func moveToGroup(_ key: String) {
+        guard let id = draggingID, let api = app?.api, var list = rows, let index = list.firstIndex(where: { $0.id == id }) else {
+            draggingID = nil
+            dragAt = nil
+            return
+        }
+        let before = rows
+        let target = key == "any" ? view : key
+        var row = list.remove(at: index)
+        if key == "any" {
+            row.scope = "week"
+            row.date = list.first(where: { $0.scope == "week" })?.date ?? row.date
+        } else {
+            row.scope = "day"
+            row.date = key
+        }
+        list.append(row)
+        draggingID = nil
+        dragAt = nil
+        generation += 1
+        withAnimation(.ssSoft) { rows = list }
+        Task {
+            do {
+                try await api.send("PATCH", "todos/\(id)", body: ["view": target])
+                problem = nil
+            } catch {
+                withAnimation(.ssSoft) { rows = before }
+                problem = error.localizedDescription
+            }
+            await refreshList()
+            await refreshFolders()
+        }
+    }
+
     func endDrag() {
         guard draggingID != nil else { return }
+        if let key = targetGroup {
+            withAnimation(.ssSpring) { targetGroup = nil }
+            if acceptsGroup(key) {
+                moveToGroup(key)
+                return
+            }
+        }
         draggingID = nil
         dragAt = nil
         generation += 1
