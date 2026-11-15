@@ -6,7 +6,7 @@ export type Todo = {
   id: string;
   title: string;
   notes: string;
-  /** guest: added by a guest and not yet placed on a day by the owner. */
+  /** guest: on a guest's list and not yet placed on a day by the owner. */
   scope: "day" | "week" | "backlog" | "guest";
   date: string | null;
   position: number;
@@ -14,7 +14,10 @@ export type Todo = {
   done_at: string | null;
   ai_unseen: boolean;
   created_by: string;
-  /** Set when the task belongs to a guest's shared list ("From Meredith"). The guest can see and edit it wherever it is. */
+  /**
+   * Set when the task belongs to a guest's shared list ("From Meredith"). It is a category, not a
+   * place: the task stays in that list whatever day it is given, and the guest can see and edit it.
+   */
   guest_id: string | null;
   created_at: string;
   updated_at: string;
@@ -46,8 +49,8 @@ type Spec = { where: string; params: unknown[]; add: { scope: string; date: stri
 /** Where a view's tasks live, and where a task added to that view should go. */
 function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec {
   const { today, monday, saturday, sunday, nextMonday } = cal;
-  // a guest's tasks that the owner has not yet placed on a day
-  if (view.startsWith("guest:")) return { where: "scope = 'guest' AND guest_id = $1", params: [view.slice(6)], add: { scope: "guest", date: null, guest_id: view.slice(6) } };
+  // everything on a guest's list, placed on a day or not; a task added here starts without a day
+  if (view.startsWith("guest:")) return { where: "guest_id = $1", params: [view.slice(6)], add: { scope: "guest", date: null, guest_id: view.slice(6) } };
   if (view === "today") return { where: "scope = 'day' AND date = $1", params: [today], add: { scope: "day", date: today } };
   if (view === "tomorrow") return viewSpec(addDays(today, 1), cal);
   if (view === "week")
@@ -98,10 +101,13 @@ export async function listTodos(view: string) {
   const cal = await calendar();
   await rollover(cal.today);
   const spec = viewSpec(view, cal);
-  // Finished tasks stay visible in backlog only for a day so the list keeps moving.
-  const doneClause = view === "backlog" ? "AND (NOT done OR done_at > now() - interval '1 day')" : "";
+  // Finished tasks stay visible in the undated lists only for a day so they keep moving.
+  const guest = view.startsWith("guest:");
+  const doneClause = view === "backlog" || guest ? "AND (NOT done OR done_at > now() - interval '1 day')" : "";
+  // A guest's list spans every day: what still needs a day comes first, then by day, with the backlog last.
+  const order = guest ? "(scope = 'guest') DESC, (scope = 'backlog'), date, scope DESC, position, id" : "date NULLS FIRST, scope DESC, position, id";
   const todos = await q<Todo & { has_notes: boolean }>(
-    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ORDER BY date NULLS FIRST, scope DESC, position, id`,
+    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ORDER BY ${order}`,
     spec.params,
   );
   return { view, today: cal.today, todos };
@@ -203,6 +209,7 @@ export async function updateTodo(
   if (patch.view) {
     const { add } = viewSpec(patch.view, await calendar());
     // Only a task already shared with a guest can go back to their list; moving another task there would show it to them.
+    // Moving one there takes it off its day. Giving it a day never takes it off the list: guest_id is left alone.
     if (add.guest_id && add.guest_id !== before.guest_id) throw bad("Only tasks from that person can be moved to their list.");
     if (add.scope !== before.scope || add.date !== before.date) {
       set("scope", add.scope);

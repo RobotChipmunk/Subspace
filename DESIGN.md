@@ -127,6 +127,8 @@ Patterns:
 
 - **App bar** (`Shell.tsx`): icons only, one glass pill; left on wide screens, bottom on phones.
 - **Rows** (todos, links, rail): no dividers; hover fill; title, one secondary line, one meta line.
+  A row that stands for something in another place (a task in a person's list) names that place
+  in a word or two at its end, in meta type.
 - **Cards** (`.glass`): feed posts, context nodes, pages.
 - **Pictures on a post** (`Pictures` in `feed/page.tsx`): one picture is the rule. Up to six are
   swiped sideways in one frame that takes the first picture's shape; a picture of a clearly
@@ -151,7 +153,8 @@ Patterns:
   filled accent on `accent-soft` while on; off by default, held in the address as
   `?view=bookmarked`) narrows the feed to bookmarked posts; a post whose bookmark is removed there
   leaves at once.
-- **Rail** (`Rail.tsx`): two lines per module (timing, title); expands in place; errors first in
+- **Rail** (`Rail.tsx`): a timing line and a title per module, the title clamped to two lines
+  until the module is opened; expands in place; errors first in
   red, warnings in amber. There is no toggle: from 1100px it docks on its own whenever it has
   modules and is absent when it has none. Below that, a Now button with a count appears in the nav
   only while there are modules, and opens the rail as a sheet.
@@ -170,6 +173,10 @@ Patterns:
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
 - **From tag** (`FromTag` in `todos/page.tsx`): an `accent-soft` pill reading "From <name>" on a
   task another person added. Shown on rows outside that person's own list and in the task detail.
+- **A person's list** (todos, "From <name>"): a category, not a place. It holds every unfinished
+  task from that person, with or without a day; giving a task a day adds it to that day and
+  leaves it here, with the day at the end of its row. Tasks still waiting for a day come first.
+  Moving a task onto the list takes it off its day.
 - **Waiting tasks in the rail**: a task another person added shows as a rail module labelled
   "From <name>" until it is given a day. It has place buttons (Today, Tomorrow, This week, Open)
   instead of Dismiss, so it cannot be cleared without being placed.

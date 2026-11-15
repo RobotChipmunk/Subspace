@@ -16,6 +16,18 @@ const BIN = "bin";
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
+/** Where a task on a person's list has been put, in a word or two. Nothing while it still waits for a day. */
+function placeLabel(r: Pick<Row, "scope" | "date">, today?: string): string {
+  if (r.scope === "backlog") return "Backlog";
+  if (r.scope === "guest" || !r.date || !today) return "";
+  const days = Math.round((Date.parse(r.date + "T12:00:00Z") - Date.parse(today + "T12:00:00Z")) / 86_400_000);
+  if (r.scope === "week") return days <= 0 ? "This week" : days <= 7 ? "Next week" : `Week of ${new Date(r.date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days > 1 && days < 7) return dayName(r.date);
+  return new Date(r.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
 /** The small tag on a task that came from a guest ("From Meredith"). */
 function FromTag({ id }: { id: string | null }) {
   const { agent } = useMe();
@@ -174,6 +186,7 @@ const AWAY_PX = 48;
 function TodoRow({
   r,
   tag,
+  place,
   dragging,
   away,
   accepts,
@@ -184,6 +197,8 @@ function TodoRow({
 }: {
   r: Row;
   tag: boolean;
+  /** on a person's list: the day the task has been given, shown quietly at the end of the row */
+  place?: string;
   dragging: React.MutableRefObject<boolean>;
   /** true while the carried row has left the list sideways: the list stops reordering under it */
   away: React.MutableRefObject<boolean>;
@@ -305,6 +320,7 @@ function TodoRow({
           {/* someone else changed this task since you last opened it: the dot sits right after the words */}
           {r.ai_unseen && <span title="Changed since you last looked" aria-label="Changed since you last looked" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
         </span>
+        {place && <span data-place className="mt-[4px] flex-none whitespace-nowrap text-[12.5px] text-ink3">{place}</span>}
         {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
       </div>
     </Reorder.Item>
@@ -356,7 +372,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
     // Show it straight away, exactly where it will live; the server's copy replaces it silently.
     // the same place the server will file it, so it does not jump between groups when saved
     const day = /^\d{4}-/.test(view) ? view : view === "today" ? today : view === "weekend" && today ? weekendDay(today) : null;
-    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, scope: view === "backlog" ? "backlog" : day ? "day" : "week", date: day ?? null } as unknown as Row;
+    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, scope: view === "backlog" ? "backlog" : folder?.guest ? "guest" : day ? "day" : "week", guest_id: folder?.guest ?? null, date: day ?? null } as unknown as Row;
     unsaved.current.push(temp);
     setRows((rs) => [...(rs ?? []), temp]);
     try {
@@ -383,9 +399,9 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
     return !!to && key !== view && key !== "week" && !r.id.startsWith("new_") && (!to.guest || to.guest === r.guest_id);
   };
 
-  /** A task let go over another list: it leaves this one at once, unless this view also shows the day it went to. */
+  /** A task let go over another list: it leaves this one at once, unless this view also shows the day it went to. A person's list keeps its tasks whatever day they are given. */
   async function move(r: Row, to: string) {
-    if (!(view === "week" || view === "next_week" || view === "weekend")) {
+    if (!(view === "week" || view === "next_week" || view === "weekend" || folder?.guest)) {
       setRows((rs) => rs!.filter((x) => x.id !== r.id));
       mutate((cur) => (cur ? { ...cur, todos: cur.todos.filter((x) => x.id !== r.id) } : cur), { revalidate: false });
     }
@@ -410,7 +426,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   }
 
   const title = folder?.label ?? "";
-  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : folder?.guest ? "Waiting for a day. Open one and move it when you are ready." : undefined;
+  const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : folder?.guest ? "Tasks stay here after you give them a day." : undefined;
   const openCount = rows?.filter((r) => !r.done).length ?? 0;
 
   return (
@@ -434,6 +450,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
                   key={keys.current.get(r.id) ?? r.id}
                   r={r}
                   tag={!!r.guest_id && !folder?.guest}
+                  place={folder?.guest ? placeLabel(r, data?.today ?? today) : undefined}
                   dragging={dragging}
                   away={away}
                   accepts={(k) => accepts(r, k)}

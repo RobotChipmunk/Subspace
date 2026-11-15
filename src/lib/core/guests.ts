@@ -4,8 +4,9 @@
  * theirs ("From Meredith"). Every query here is limited to the calling guest's id; that limit is
  * the whole boundary, so nothing in this file reads or writes a task without it.
  *
- * A task a guest adds waits in the owner's "From <name>" list (scope 'guest') and shows in the
- * rail until the owner places it on a day. It stays tagged afterwards, so the guest keeps seeing
+ * A task a guest adds joins the owner's "From <name>" list and stays in it for good. Until the
+ * owner places it on a day (scope 'guest') it also shows in the rail. Placed, it appears under
+ * that day as well and keeps its tag, so the guest keeps seeing
  * where it went and whether it is done.
  */
 import { checkBlocks } from "../blocks";

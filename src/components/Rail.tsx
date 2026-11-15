@@ -52,7 +52,7 @@ export function useRail() {
 export type RailState = ReturnType<typeof useRail>;
 
 /**
- * One module. Closed, it is two quiet lines: when, and what. Everything else
+ * One module. Closed, it is quiet: when, and what in at most two lines. Everything else
  * (picture, details, buttons) waits behind a tap.
  */
 /** For a task waiting for a day: one tap puts it on the list. It leaves the rail as soon as it has a place. */
@@ -98,7 +98,7 @@ function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean
               {m.level !== "info" && m.label && <span className="sr-only">{m.level}</span>}
             </span>
           )}
-          <span className={`block text-[14.5px] font-medium leading-snug ${open ? "" : "truncate"}`}>{m.title}</span>
+          <span className={`block text-[14.5px] font-medium leading-snug [overflow-wrap:anywhere] ${open ? "" : "line-clamp-2"}`}>{m.title}</span>
         </span>
         <ChevronDown size={15} className={`shrink-0 text-ink3 transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
       </button>
