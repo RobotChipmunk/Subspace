@@ -16,6 +16,8 @@ struct AgentsConversation: View {
     @State private var text = ""
     @State private var busy = false
     @State private var problem = ""
+    /// A page an answer points at, opened over the conversation.
+    @State private var page: PageTarget? = nil
     @FocusState private var typing: Bool
 
     private static let bottomID = "agents.messages.bottom"
@@ -31,6 +33,11 @@ struct AgentsConversation: View {
             composer(name: name)
         }
         .background(Theme.bg.ignoresSafeArea())
+        .sheet(item: $page) { target in
+            PageView(pageID: target.id)
+                .environment(app)
+                .presentationDragIndicator(.visible)
+        }
         .task {
             while !Task.isCancelled {
                 await load()
@@ -91,7 +98,8 @@ struct AgentsConversation: View {
                             post: item.element,
                             mine: item.element.author == meID,
                             gap: Self.gapLabel(list, item.offset),
-                            handles: handles
+                            handles: handles,
+                            onPage: { id in page = PageTarget(id: id) }
                         )
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
@@ -204,6 +212,7 @@ struct AgentsMessageRow: View {
     var mine: Bool
     var gap: String?
     var handles: [String]
+    var onPage: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -217,7 +226,7 @@ struct AgentsMessageRow: View {
                 .padding(mine ? .leading : .trailing, 44)
                 .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         }
-        .accessibilityIdentifier("agents.message.\(post.id)")
+        .accessibilityIdentifier("agents.bubble.\(post.id)")
     }
 
     private var bubble: some View {
@@ -230,7 +239,14 @@ struct AgentsMessageRow: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
             if let page = post.page {
-                PageCard(page: page)
+                // The card's own tap would open the page under this sheet, so it is opened over it instead.
+                Button {
+                    onPage(page.id)
+                } label: {
+                    PageCard(page: page).allowsHitTesting(false)
+                }
+                .buttonStyle(PressStyle(scale: 0.98))
+                .accessibilityLabel("Open page: \(page.title)")
             }
         }
         .padding(.horizontal, 14)
