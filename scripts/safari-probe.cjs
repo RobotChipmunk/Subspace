@@ -151,7 +151,17 @@ async function run(name, title, { mention, background }) {
 
 (async () => {
   const caps = { browserName: "safari", platformName: "iOS", "safari:useSimulator": true, "safari:deviceType": "iPad" };
-  const s = await wd("POST", "/session", { capabilities: { alwaysMatch: caps } });
+  if (process.env.SIM) caps["safari:deviceUDID"] = process.env.SIM;
+  let s;
+  for (let attempt = 1; !s; attempt++) {
+    try {
+      s = await wd("POST", "/session", { capabilities: { alwaysMatch: caps } });
+    } catch (e) {
+      console.log(`no session (attempt ${attempt}): ${e.message.slice(0, 300)}`);
+      if (attempt === 4) throw e;
+      await sleep(15000);
+    }
+  }
   session = s.sessionId;
   console.log("session", JSON.stringify(s.capabilities));
   try {
