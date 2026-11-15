@@ -242,7 +242,7 @@ function TodoRow({
       dragControls={controls}
       // nothing lies to the right, and travelling there would make the page scroll sideways
       dragConstraints={{ right: 0 }}
-      dragElastic={0.05}
+      dragElastic={0}
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: [1, 0.6, 0.18][out], height: "auto", scale: up ? 1.02 : 1, boxShadow: up ? "var(--shadow-lift)" : "0 0 0 rgba(0,0,0,0)", backgroundColor: up ? "var(--surface-solid)" : "rgba(0,0,0,0)", zIndex: up ? 5 : 0 }}
       exit={{ opacity: 0, height: 0 }}
