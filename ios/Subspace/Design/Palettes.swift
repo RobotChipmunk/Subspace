@@ -75,5 +75,10 @@ struct MeshView: View {
             }
         }
         .clipped()
+        // The gradients are drawn larger than the frame and clipped. Clipping does not shrink what
+        // can be touched, so without this the overflow would take taps meant for whatever is nearby.
+        .contentShape(Rectangle())
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

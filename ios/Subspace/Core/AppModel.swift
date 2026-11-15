@@ -137,7 +137,9 @@ final class AppModel {
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(for: .seconds(30))
+                // Until the first answer arrives, try again soon: without it nobody has a name.
+                let waiting = self?.me == nil
+                try? await Task.sleep(for: .seconds(waiting ? 3 : 30))
             }
         }
     }

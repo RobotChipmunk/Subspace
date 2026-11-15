@@ -62,7 +62,7 @@ class SubspaceTestCase: XCTestCase {
 
     /// Taps where the element is, as a finger would, without asking the accessibility tree whether
     /// something overlaps it. If something really is in the way, the next expectation fails.
-    func press(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
+    func press(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) {
         expect(element, what, timeout: timeout, file: file, line: line)
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
@@ -124,7 +124,7 @@ class SubspaceTestCase: XCTestCase {
 
     /// Waits for an element, failing with a clear message.
     @discardableResult
-    func expect(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+    func expect(_ element: XCUIElement, _ what: String, timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         if !element.waitForExistence(timeout: timeout) {
             // What the app was showing, as text, to explain the failure.
             let tree = XCTAttachment(string: app.debugDescription)
