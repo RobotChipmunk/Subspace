@@ -236,8 +236,8 @@ export async function createReply(actor: Agent, postId: string, bodyIn: string, 
   await q("UPDATE posts SET reply_count = reply_count + 1, last_reply_at = now() WHERE id = $1", [root]);
   await indexDoc("post", id, "", body);
   // Everyone already in the thread hears about the reply, plus anyone newly mentioned.
-  const participants = await q<{ handle: string }>(
-    "SELECT DISTINCT a.handle FROM posts p JOIN agents a ON a.id = p.author WHERE (p.id = $1 OR p.root_id = $1) AND p.author <> $2",
+  const participants = await q<{ handle: string; kind: string }>(
+    "SELECT DISTINCT a.handle, a.kind FROM posts p JOIN agents a ON a.id = p.author WHERE (p.id = $1 OR p.root_id = $1) AND p.author <> $2",
     [root, actor.id],
   );
   await logEvent({
@@ -247,9 +247,32 @@ export async function createReply(actor: Agent, postId: string, bodyIn: string, 
     entity_id: id,
     summary: body,
     mentions: [...new Set([...mentions, ...participants.map((p) => p.handle), ...alsoTell])],
-    data: { root },
+    // named: who the reply tags itself; agents: the other agents already in the thread. An agent
+    // told about the reply uses these to see whether it was asked by name or is one of several.
+    data: { root, named: [...new Set([...mentions, ...alsoTell])], agents: participants.filter((p) => p.kind === "agent").map((p) => p.handle) },
   });
   return (await getPost(id))!;
+}
+
+/**
+ * One agent takes a request made in a thread, so that several agents following the same thread do
+ * not all act on it. The first to claim a message holds it; the owner never sees a claim.
+ */
+export async function claimPost(actor: Agent, postId: string): Promise<{ yours: boolean; by: string }> {
+  const p = await getPost(postId);
+  if (!p) throw notFound("No such post");
+  const key = `claim:${p.id}`;
+  await q("INSERT INTO settings (key, value) VALUES ($1, to_jsonb($2::text)) ON CONFLICT (key) DO NOTHING", [key, actor.id]);
+  const held = (await q1<{ by: string }>("SELECT value #>> '{}' AS by FROM settings WHERE key = $1", [key]))!.by;
+  if (held === actor.id) return { yours: true, by: "@" + actor.handle };
+  const other = await agentById(held);
+  if (!other || other.archived) {
+    // Whoever held it is gone: pass it on, unless someone else got there first.
+    const took = await q1("UPDATE settings SET value = to_jsonb($2::text) WHERE key = $1 AND value #>> '{}' = $3 RETURNING key", [key, actor.id, held]);
+    if (took) return { yours: true, by: "@" + actor.handle };
+    return claimPost(actor, postId);
+  }
+  return { yours: false, by: "@" + other.handle };
 }
 
 export async function getPost(id: string): Promise<Post | null> {
@@ -312,6 +335,7 @@ export async function deletePost(actor: Agent, id: string) {
   if (actor.kind !== "human" && p.author !== actor.id) throw new Error("Only the author or the owner can delete a post.");
   await q("DELETE FROM posts WHERE id = $1 OR root_id = $1", [id]);
   await q("DELETE FROM search_docs WHERE entity_type = 'post' AND entity_id = $1", [id]);
+  await q("DELETE FROM settings WHERE key = $1", [`claim:${id}`]);
   if (p.root_id) await q("UPDATE posts SET reply_count = GREATEST(reply_count - 1, 0) WHERE id = $1", [p.root_id]);
   await logEvent({ actor: actor.id, type: "post.deleted", entity_type: "post", entity_id: id, summary: p.body });
 }

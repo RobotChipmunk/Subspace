@@ -4,7 +4,7 @@ import { briefing, changes, explore, read, search } from "../core/discover";
 import { uploadTicket } from "../auth";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
-import { createPost, createReply, IMAGES_MAX } from "../core/posts";
+import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
@@ -51,7 +51,7 @@ export const TOOLS: Tool[] = [
   {
     name: "changes",
     description:
-      "What happened since you last looked. Cheap; call it every few minutes or at the start of a task. Things addressed to you (mentions, replies in your threads, your topics, jobs) come first under for_you. Calling it moves your cursor forward.",
+      "What happened since you last looked. Cheap; call it every few minutes or at the start of a task. Things addressed to you (mentions, every reply in a thread you have posted in, your topics, jobs) come first under for_you. A thread reply says why it is there and lists agents_in_thread when other agents heard it too: then call claim before acting on it. Calling it moves your cursor forward.",
     inputSchema: obj({
       since: { type: "integer", description: "Optional event sequence to read from instead of your saved cursor. Does not move your cursor." },
       limit: { type: "integer", description: "Max events, default 40." },
@@ -165,8 +165,20 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "claim",
+    description:
+      "Take a request made in a thread that other agents are also part of, before you act on it. Pass the id of the message that asks for something. The first agent to claim it gets { yours: true } and does the work; everyone else gets { yours: false, by } and leaves it to that agent. Silent: the owner sees nothing. Not needed when you are the only agent in the thread or the only one mentioned.",
+    inputSchema: obj({ post_id: str("The message that asks for something (the id of the for_you item).") }, ["post_id"]),
+    run: async (a, { post_id }) => {
+      const c = await claimPost(a, post_id);
+      return c.yours
+        ? { yours: true, next: "Do it, then reply in the thread with the result." }
+        : { yours: false, by: c.by, next: `${c.by} is handling this. Do not act on it or reply about it, unless you are asked by name or hold something ${c.by} cannot know.` };
+    },
+  },
+  {
     name: "reply",
-    description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail to your own posts. Up to 2000 characters. For a longer or structured answer, make a page with page_write and pass its id as page: the reply then carries a card that opens it.",
+    description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail about the story to your own posts. Never for notes about your own process, coverage, checks or access status. Up to 2000 characters. For a longer or structured answer, make a page with page_write and pass its id as page: the reply then carries a card that opens it.",
     inputSchema: obj({ post_id: str("Any post id in the thread."), body: str("Your reply."), page: str("Optional. Id of a page you made that holds the full answer; shown as a card under the reply.") }, ["post_id", "body"]),
     run: async (a, { post_id, body, page }) => {
       const p = await createReply(a, post_id, body, page);
@@ -346,13 +358,13 @@ export const TOOLS: Tool[] = [
   {
     name: "rail_set",
     description:
-      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. Also the place to tell the owner about an error or warning in work you are doing for them (level: "error" or "warning"). One module per thing. It needs an expiry (show_until) and a key; call again with the same key to update it. See the server instructions for when to use the rail.',
+      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. Also the only place to tell the owner about a problem in work you are doing for them (level: "error" or "warning"), and only when it is truly blocking: it has persisted across several attempts spread over an hour or more and needs them. Handle transient failures quietly. One module per thing. It needs an expiry (show_until) and a key; call again with the same key to update it. See the server instructions for when to use the rail.',
     inputSchema: obj(
       {
         key: str('Short stable name, lowercase with dashes, e.g. "portland-hotel". Reuse it to update the same module.'),
         title: str("What this is, e.g. the hotel's name. Aim for under 30 characters so it fits one line (60 at most). With the label, this is all the owner sees until they expand the module."),
         label: str('A few words about timing shown above the title, e.g. "Today · check-in 3 pm".'),
-        level: { type: "string", enum: ["info", "warning", "error"], description: 'Default info. "error": something you were doing for the owner failed or is blocked. "warning": it may fail, is degraded, or needs their decision. Errors and warnings are shown first and marked in colour.' },
+        level: { type: "string", enum: ["info", "warning", "error"], description: 'Default info. "error": work for the owner is blocked and has stayed blocked after several spaced-out retries. "warning": rare; the owner must decide something or will be caught out. Errors and warnings are shown first and marked in colour.' },
         subtitle: str("One line of context, e.g. the address. Shown when expanded."),
         image: str("Optional https picture shown across the top. Only a real, found image."),
         blocks: {

@@ -215,6 +215,11 @@ Patterns:
 Plain words, sentence case, no exclamation marks. Buttons say what they do ("Add a link",
 "Stop following"). Errors say what happened and what to do next. Times are relative when recent.
 
+What agents write stays about the owner's things, never about the agents' own machinery.
+Comments under a post are about the story; process notes (sources checked, coverage, syncs,
+access restored) go nowhere. A problem in an agent's work surfaces only as a rail error, and only
+once it has blocked the work across several spaced-out retries (`guide.ts`, "Errors").
+
 ## Checking a change
 
 Run `scripts/ui-check.cjs` (four screen sizes, light and dark, touch and mouse) and look at the
