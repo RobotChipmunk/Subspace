@@ -107,9 +107,19 @@ class SubspaceTestCase: XCTestCase {
         return token
     }
 
-    func go(_ tab: String) {
-        press(app.buttons["nav.\(tab)"], "the \(tab) button in the app bar")
-        Thread.sleep(forTimeInterval: 0.4)
+    /// Opens a screen from the app bar, and makes sure it did open: a tap that lands while
+    /// something is still settling over the bar is lost, and every later step would then fail
+    /// with a message about the wrong thing.
+    func go(_ tab: String, file: StaticString = #filePath, line: UInt = #line) {
+        let button = app.buttons["nav.\(tab)"]
+        for _ in 0..<3 {
+            press(button, "the \(tab) button in the app bar", file: file, line: line)
+            let until = Date().addingTimeInterval(4)
+            while !button.isSelected && Date() < until { Thread.sleep(forTimeInterval: 0.3) }
+            if button.isSelected { break }
+        }
+        XCTAssertTrue(button.isSelected, "\(tab) should be the selected screen after tapping it in the app bar (app state \(app.state.rawValue))", file: file, line: line)
+        Thread.sleep(forTimeInterval: 0.3)
     }
 
     /// One of the todo lists ("today", "week", "next_week", "backlog", "bin", a date…), brought
@@ -122,6 +132,8 @@ class SubspaceTestCase: XCTestCase {
         let button = expect(app.buttons["todos.folder.\(key)"], "the \(key) list among the folders", file: file, line: line)
         let screen = app.windows.firstMatch.frame
         let margin: CGFloat = 12
+        // Beside the list (iPad) every folder is in view and there is nothing to slide or wait for.
+        if isPad && button.isHittable { return button }
         // choosing a list slides the strip by itself: let that finish before measuring
         Thread.sleep(forTimeInterval: 0.6)
         for _ in 0..<12 {
@@ -161,7 +173,8 @@ class SubspaceTestCase: XCTestCase {
             tree.lifetime = .keepAlways
             add(tree)
             shot("failed")
-            XCTFail("Expected \(what)", file: file, line: line)
+            // 4 is running in the foreground; anything else means the app was left or has stopped
+            XCTFail("Expected \(what) (app state \(app.state.rawValue))", file: file, line: line)
         }
         return element
     }
