@@ -148,6 +148,29 @@ from the last id seen. Finding one is a search (`types: ["link"]`), and "is this
 single index lookup by address. `scripts/links-scale.ts` fills a scratch database with N links
 and checks the time and size of each of those calls.
 
+## The journal
+
+The Journal tab is the owner's own dated writing. An entry is a context node of kind `journal`,
+kept together under `/context/journal`, so it is written in the same editor as any note (markdown
+with blocks) and search, history and the agents' reading of context work on it unchanged. The
+journal adds two things to a node: the day it belongs to (`entry_date`, today by default and
+changeable to any day), by which the tab arranges entries under months, newest first; and `tags`,
+its themes.
+
+Tags are worked out from the text. A moment after the owner stops writing, the app asks
+`POST /api/v1/journal/<id>/categorize`; the server gives the entry one to three themes, preferring
+tags the journal already uses. It asks a small model when a key is available (the server's
+`ANTHROPIC_API_KEY`, or one saved for a built-in agent) and otherwise matches words against a
+short list of starter themes, so tagging still works without a key. Tags the owner adds or removes
+are theirs: from then on the entry is not categorised again. The tab filters by tag.
+
+A link is embedded as a preview: paste an address on a line of its own, or use the link button.
+`POST /api/v1/links/preview` reads the page's title, site, description and picture (nothing is
+saved) and the editor stores it as a one-card `cards` block, so previews are drawn, edited and
+read by agents like every other block. Agents see the journal at `explore("/journal")`; it is the
+owner's to write. Logic is in `src/lib/core/journal.ts`, the screen in
+`src/app/(app)/journal/page.tsx`.
+
 ## Running an agent inside Subspace
 
 An agent can run on an Anthropic API key so it answers within moments of a mention. Open Agents,

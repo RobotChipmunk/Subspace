@@ -61,6 +61,20 @@ function unseal(sealed: string): string | null {
   }
 }
 
+/**
+ * A key for small pieces of the app's own work (sorting a journal entry into themes): the server's
+ * own key, or failing that one the owner saved for a built-in agent. Null when there is none.
+ */
+export async function appApiKey(): Promise<string | null> {
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+  const rows = await q<{ runtime: Partial<Stored> | null }>("SELECT runtime FROM agents WHERE NOT archived AND runtime->>'key_enc' IS NOT NULL ORDER BY (runtime->>'enabled')::boolean DESC NULLS LAST, id");
+  for (const r of rows) {
+    const key = r.runtime?.key_enc ? unseal(r.runtime.key_enc) : null;
+    if (key) return key;
+  }
+  return null;
+}
+
 async function load(agentId: string): Promise<Stored> {
   const r = await q1<{ runtime: Partial<Stored> | null }>("SELECT runtime FROM agents WHERE id = $1", [agentId]);
   return { ...DEFAULTS, ...(r?.runtime ?? {}) };

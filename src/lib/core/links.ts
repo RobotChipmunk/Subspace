@@ -129,6 +129,25 @@ function tidyTitle(title: string, site: string): string {
   return (cut || title).trim();
 }
 
+export type LinkPreview = { url: string; title: string; site: string; description?: string; image?: string };
+
+/**
+ * What a link looks like before anyone opens it: its page's title, site, a line about it and its
+ * picture. Nothing is saved. A page that cannot be read still gets a title made from its address.
+ */
+export async function previewLink(raw: string): Promise<LinkPreview> {
+  const { url, host } = normalizeUrl(raw);
+  const meta = await fetchMeta(url);
+  const site = (meta.site || host).slice(0, 60);
+  return {
+    url,
+    title: tidyTitle(meta.title || titleFromUrl(new URL(url), host), site).slice(0, 140),
+    site,
+    ...(meta.description ? { description: meta.description.slice(0, 300) } : {}),
+    ...(meta.image ? { image: meta.image } : {}),
+  };
+}
+
 const LINKS_AREA = "links";
 
 /** Links nobody has filed yet go in one top-level area. */

@@ -12,10 +12,11 @@ const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 /**
  * One month of days, in the manner of the iOS date picker: the month's name with arrows to step,
  * a grid of days, today in the accent colour and the chosen day in a filled circle. Days already
- * past cannot be chosen. Stepping a month slides the grid the way the owner is moving.
+ * past cannot be chosen, unless `past` is set (a journal entry belongs to a day gone by as readily
+ * as to today). Stepping a month slides the grid the way the owner is moving.
  */
-export function MonthCalendar({ value, today, onPick }: { value: string | null; today: string; onPick: (date: string) => void }) {
-  const start = value && value >= today ? value : today;
+export function MonthCalendar({ value, today, past, onPick }: { value: string | null; today: string; past?: boolean; onPick: (date: string) => void }) {
+  const start = value && (past || value >= today) ? value : today;
   const [ym, setYm] = useState({ y: +start.slice(0, 4), m: +start.slice(5, 7) - 1 });
   const [dir, setDir] = useState(0);
   const step = (n: number) => {
@@ -27,7 +28,7 @@ export function MonthCalendar({ value, today, onPick }: { value: string | null; 
   const lead = (first.getUTCDay() + 6) % 7;
   const days = new Date(Date.UTC(ym.y, ym.m + 1, 0)).getUTCDate();
   const cells: (number | null)[] = [...Array(lead).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
-  const canBack = iso(ym.y, ym.m, 1) > today;
+  const canBack = past || iso(ym.y, ym.m, 1) > today;
   const arrow = "grid h-9 w-9 place-items-center rounded-full text-accent transition-colors hover:bg-accent-soft disabled:text-ink3 disabled:opacity-40 disabled:hover:bg-transparent";
 
   return (
@@ -71,7 +72,7 @@ export function MonthCalendar({ value, today, onPick }: { value: string | null; 
               return (
                 <button
                   key={i}
-                  disabled={date < today}
+                  disabled={!past && date < today}
                   aria-pressed={on}
                   aria-label={new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
                   onClick={() => onPick(date)}
@@ -95,7 +96,7 @@ export function MonthCalendar({ value, today, onPick }: { value: string | null; 
 }
 
 /** A quiet pill naming a date; tapping it drops the month calendar open beneath it. */
-export function DatePill({ label, value, today, onPick }: { label: string; value: string | null; today: string; onPick: (date: string) => void }) {
+export function DatePill({ label, value, today, past, onPick }: { label: string; value: string | null; today: string; past?: boolean; onPick: (date: string) => void }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   return (
@@ -114,7 +115,7 @@ export function DatePill({ label, value, today, onPick }: { label: string; value
       {open && (
         <Floating anchor={() => btn.current?.getBoundingClientRect() ?? null} inside={() => btn.current} onDismiss={() => setOpen(false)}>
           <motion.div initial={{ opacity: 0, scale: 0.96, y: -6 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={spring} style={{ transformOrigin: "top left" }} role="dialog" aria-label="Choose a date">
-            <MonthCalendar value={value} today={today} onPick={(d) => (setOpen(false), onPick(d))} />
+            <MonthCalendar value={value} today={today} past={past} onPick={(d) => (setOpen(false), onPick(d))} />
           </motion.div>
         </Floating>
       )}

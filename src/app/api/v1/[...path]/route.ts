@@ -4,7 +4,8 @@ import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
 import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
-import { listLinks, saveLink } from "@/lib/core/links";
+import { categorize, createEntry, getEntry, listEntries } from "@/lib/core/journal";
+import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { activeModules, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
@@ -70,6 +71,17 @@ const routes: [string, RegExp, Handler][] = [
   // one page of saved links, newest first: everywhere, or inside one area (parent)
   ["GET", /^links$/, ({ url }) => listLinks({ limit: 50, before: url.searchParams.get("before"), parent: url.searchParams.get("parent") })],
   ["POST", /^links$/, ({ actor, body }) => saveLink(actor, body)],
+  // what a link looks like (title, site, description, picture) without saving it: for a preview in a document
+  ["POST", /^links\/preview$/, ({ body }) => previewLink(body.url)],
+
+  // The journal: one page of entries, newest day first, optionally only those with one tag. An entry is
+  // a context node, so its title, body, tags and entry_date are changed with PATCH context/<id> and it
+  // is removed with DELETE context/<id>.
+  ["GET", /^journal$/, ({ url }) => listEntries({ tag: url.searchParams.get("tag"), before: url.searchParams.get("before") })],
+  ["POST", /^journal$/, ({ actor, body }) => createEntry(actor, body)],
+  ["GET", /^journal\/([^/]+)$/, (_c, id) => getEntry(id)],
+  // work out an entry's tags from its text; a no-op once the owner has chosen tags themselves
+  ["POST", /^journal\/([^/]+)\/categorize$/, (_c, id) => categorize(id)],
 
   ["GET", /^trackers$/, async () => ({ trackers: await listTrackers() })],
   ["POST", /^trackers$/, ({ actor, body }) => createTracker(actor, body)],

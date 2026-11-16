@@ -63,7 +63,7 @@ same product as the web app, and it is kept in step with it by default, without 
   `src/components`, `globals.css` or `DESIGN.md`, and any new or changed endpoint or field under
   `/api/v1`, gets its counterpart in `ios/Subspace` (and its UI test in `ios/SubspaceUITests`)
   before the work is called done. Each web screen has a folder of the same name there: `Feed`,
-  `Todos`, `Context`, `Following`, `Agents`, `Blocks` (page blocks and markdown), `Shell` (app bar,
+  `Todos`, `Journal`, `Context`, `Following`, `Agents`, `Blocks` (page blocks and markdown), `Shell` (app bar,
   sign-in, rail), `Design` (tokens and shared pieces), `Core` (REST client and models).
 - **Before starting any work, check that the app has not fallen behind.** Merge or rebase onto
   `main`, then look at what changed there since the last commit that touched `ios/`
@@ -110,6 +110,9 @@ being true. Read this list before starting work.
   person's folder. In `ui-check`, find folders inside the "Lists" navigation or by `data-folder`.
 - Do not change files or run heavy commands while `ui-check` is running: one run here doubled a
   typed task and failed five steps that passed on a quiet rerun.
+- `Floating` mounts hidden and is placed a frame later, so `autoFocus` on a field inside it does
+  nothing and the keys go to whatever was tapped. Focus the field from an effect once it is open
+  (see the link field in `Editor.tsx`).
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.

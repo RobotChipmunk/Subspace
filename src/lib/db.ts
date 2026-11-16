@@ -320,6 +320,16 @@ const MIGRATIONS: string[] = [
   // creates the next, counted from the day it was finished; next_id on the finished task points at it.
   `ALTER TABLE todos ADD COLUMN IF NOT EXISTS repeat text;
    ALTER TABLE todos ADD COLUMN IF NOT EXISTS next_id text`,
+  // The journal: context nodes of kind 'journal', the owner's own dated writing. entry_date is the
+  // day an entry belongs to (the owner's calendar, changeable); tags are its themes. tags_by says
+  // who chose them ('auto' while Subspace categorises the entry, 'owner' once the owner has changed
+  // them, after which they are left alone); tags_for is a hash of the text they were worked out from.
+  `ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS entry_date date;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS tags_by text;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS tags_for text;
+   CREATE INDEX IF NOT EXISTS context_journal ON context_nodes (entry_date DESC, id DESC) WHERE kind = 'journal' AND NOT archived;
+   CREATE INDEX IF NOT EXISTS context_journal_tags ON context_nodes USING gin (tags) WHERE kind = 'journal' AND NOT archived`,
 ];
 
 async function migrate() {

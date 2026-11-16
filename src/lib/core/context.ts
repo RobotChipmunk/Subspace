@@ -10,12 +10,16 @@ export type ContextNode = {
   title: string;
   summary: string;
   body: string;
-  kind: "note" | "page" | "link";
+  kind: "note" | "page" | "link" | "journal";
   cover: string | null;
   /** Links only: the address, the site's name and a line on what the page is. */
   url: string | null;
   site: string | null;
   blurb: string | null;
+  /** Journal entries only: the day the entry belongs to, its themes, and who chose them ("auto" or "owner"). */
+  entry_date: string | null;
+  tags: string[];
+  tags_by: string | null;
   version: number;
   updated_by: string;
   archived: boolean;
@@ -23,7 +27,7 @@ export type ContextNode = {
   updated_at: string;
 };
 
-const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, version, updated_by, created_at, updated_at, length(body) AS body_chars";
+const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, entry_date, tags, tags_by, version, updated_by, created_at, updated_at, length(body) AS body_chars";
 export type ContextLite = Omit<ContextNode, "body" | "archived"> & { body_chars: number; child_count?: number };
 
 export async function getNode(ref: string): Promise<ContextNode> {
@@ -71,16 +75,26 @@ function guard(actor: Agent, body: string) {
 }
 
 /** What search looks through: for a link that includes its address, site and description. */
-const docText = (n: { summary: string; body: string; url?: string | null; site?: string | null; blurb?: string | null }) =>
+export const docText = (n: { summary: string; body: string; url?: string | null; site?: string | null; blurb?: string | null; tags?: string[] | null }) =>
   // the address is added as plain words too, so "ablaj" finds ablaj.com/products/...
-  [n.summary, n.blurb, n.site, n.url, n.url?.replace(/^https?:\/\//, "").replace(/[^\p{L}\p{N}]+/gu, " "), n.body].filter(Boolean).join("\n");
+  [n.summary, n.blurb, n.site, n.url, n.url?.replace(/^https?:\/\//, "").replace(/[^\p{L}\p{N}]+/gu, " "), n.tags?.join(", "), n.body].filter(Boolean).join("\n");
 
 /** Links are indexed as their own kind so a search can ask for links only. */
 const docType = (kind: string) => (kind === "link" ? "link" : "context");
 
+/** Tags as people write them: trimmed, at most 30 characters each, no repeats (whatever the capitals), at most six. */
+export function cleanTags(raw: unknown): string[] {
+  const out: string[] = [];
+  for (const t of Array.isArray(raw) ? raw : []) {
+    const tag = typeof t === "string" ? t.replace(/[\s,#]+/g, " ").trim().slice(0, 30).trim() : "";
+    if (tag && !out.some((o) => o.toLowerCase() === tag.toLowerCase())) out.push(tag);
+  }
+  return out.slice(0, 6);
+}
+
 const okCover = (c: unknown) => (typeof c === "string" && /^https:\/\//.test(c) && c.length < 2000 ? c : null);
 
-export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string; kind?: "note" | "page" | "link"; cover?: string; link?: { url: string; key: string; site: string; blurb: string } },
+export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string; kind?: "note" | "page" | "link" | "journal"; cover?: string; link?: { url: string; key: string; site: string; blurb: string }; journal?: { date: string; tags?: string[] } },
 ) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Context node needs a title.");
@@ -90,21 +104,23 @@ export async function createNode(actor: Agent, input: { parent?: string | null; 
   const body = input.body ?? "";
   guard(actor, body);
   const link = input.kind === "link" ? input.link : undefined;
-  const kind = link ? "link" : input.kind === "page" ? "page" : "note";
+  const journal = input.kind === "journal" ? input.journal : undefined;
+  const kind = link ? "link" : journal ? "journal" : input.kind === "page" ? "page" : "note";
   if (kind === "page" && !parent) throw bad("A page needs a parent. Put it under the context area it belongs to, in a folder for its topic.");
-  await q("INSERT INTO context_nodes (id, parent_id, path, title, summary, body, updated_by, kind, cover, url, url_key, site, blurb) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", [
+  await q("INSERT INTO context_nodes (id, parent_id, path, title, summary, body, updated_by, kind, cover, url, url_key, site, blurb, entry_date, tags, tags_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)", [
     id, parent?.id ?? null, path, title.slice(0, 120), (input.summary ?? "").slice(0, 400), body, actor.id, kind, okCover(input.cover),
     link?.url ?? null, link?.key ?? null, link?.site ?? null, link?.blurb ?? null,
+    journal?.date ?? null, journal?.tags ?? [], journal?.tags?.length ? "owner" : null,
   ]);
-  await indexDoc(docType(kind), id, title, docText({ summary: input.summary ?? "", body, url: link?.url, site: link?.site, blurb: link?.blurb }));
-  await logEvent({ actor: actor.id, type: kind === "link" ? "link.saved" : kind === "page" ? "page.created" : "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
+  await indexDoc(docType(kind), id, title, docText({ summary: input.summary ?? "", body, url: link?.url, site: link?.site, blurb: link?.blurb, tags: journal?.tags }));
+  await logEvent({ actor: actor.id, type: kind === "link" ? "link.saved" : kind === "page" ? "page.created" : kind === "journal" ? "journal.created" : "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
   return getNode(id);
 }
 
 export async function updateNode(
   actor: Agent,
   ref: string,
-  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string },
+  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string; tags?: string[]; entry_date?: string },
 ) {
   const before = await getNode(ref);
   if (patch.expect_version !== undefined && patch.expect_version !== before.version)
@@ -120,7 +136,14 @@ export async function updateNode(
   if (body.length > 400_000) throw bad("Node body is too long. Split it into child nodes.");
   if (body !== before.body) guard(actor, body);
   const cover = patch.cover === undefined ? before.cover : patch.cover === null ? null : okCover(patch.cover);
-  const kind = before.kind === "link" ? "link" : (patch.kind ?? before.kind);
+  // a link stays a link and a journal entry stays a journal entry, whatever is asked
+  const kind = before.kind === "link" || before.kind === "journal" ? before.kind : (patch.kind ?? before.kind);
+  const isEntry = before.kind === "journal";
+  // tags given here are a deliberate choice, so the entry is no longer categorised automatically
+  const tags = isEntry && patch.tags !== undefined ? cleanTags(patch.tags) : before.tags;
+  const tagsBy = isEntry && patch.tags !== undefined ? "owner" : before.tags_by;
+  if (patch.entry_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(patch.entry_date)) throw bad("entry_date must be a day written as YYYY-MM-DD.");
+  const entryDate = isEntry && patch.entry_date !== undefined ? patch.entry_date : before.entry_date;
   const blurb = before.kind === "link" && patch.about !== undefined ? patch.about.slice(0, 400) : before.blurb;
   const title = patch.title?.trim() || before.title;
   const summary = patch.summary !== undefined ? patch.summary.slice(0, 400) : before.summary;
@@ -136,7 +159,8 @@ export async function updateNode(
   }
 
   const changed = body !== before.body || title !== before.title || summary !== before.summary || cover !== before.cover || kind !== before.kind || blurb !== before.blurb;
-  if (!changed && path === before.path) return before;
+  const filed = tags.join("\n") !== before.tags.join("\n") || entryDate !== before.entry_date;
+  if (!changed && !filed && path === before.path) return before;
 
   if (changed) {
     await q("INSERT INTO context_revisions (node_id, version, title, summary, body, by) VALUES ($1,$2,$3,$4,$5,$6)", [
@@ -144,14 +168,14 @@ export async function updateNode(
     ]);
   }
   await q(
-    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10, blurb=$11 WHERE id=$1",
-    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind, blurb],
+    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10, blurb=$11, tags=$12, tags_by=$13, entry_date=$14 WHERE id=$1",
+    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind, blurb, tags, tagsBy, entryDate],
   );
   if (path !== before.path) {
     // Keep every descendant's address in step with its ancestor.
     await q("UPDATE context_nodes SET path = $2 || substr(path, $3) WHERE path LIKE $1", [before.path.replace(/[%_\\]/g, "\\$&") + "/%", path, before.path.length + 1]);
   }
-  await indexDoc(docType(kind), before.id, title, docText({ summary, body, url: before.url, site: before.site, blurb }));
+  await indexDoc(docType(kind), before.id, title, docText({ summary, body, url: before.url, site: before.site, blurb, tags }));
   const was = new Set(await findMentions(before.body));
   const mentions = (await findMentions(body)).filter((h) => !was.has(h));
   await logEvent({

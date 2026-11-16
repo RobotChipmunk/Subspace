@@ -129,6 +129,8 @@ Patterns:
 ## Components and patterns
 
 - **App bar** (`Shell.tsx`): icons only, one glass pill; left on wide screens, bottom on phones.
+  Six tabs: Feed, Todos, Journal, Context, Following, Agents. Targets are 48px, 44px on phones so
+  the six and the Now button fit a 390px screen.
 - **Rows** (todos, links, rail): no dividers; hover fill; title, one secondary line, one meta line.
   A row that stands for something in another place (a task in a person's list) names that place
   in a word or two at its end, in meta type.
@@ -190,6 +192,7 @@ Patterns:
   36px day circles, today in accent, the chosen day filled. Days already past are dimmed and
   cannot be chosen; stepping a month slides the grid the way the owner is moving, and the panel
   keeps one height. Choosing a day closes it and saves at once. Use it wherever a date is set.
+  Where a day gone by makes sense (a journal entry's day), `past` lets any day be chosen.
   In the iOS app the pill reveals the system's own graphical date picker in place beneath it.
 - **Repeat** (todo detail): a pill beside the date that opens the system menu (Never, Every day,
   Every 3 days, Every week, Every 2 weeks, Every month, Every year); it turns `accent-soft` while set, and one
@@ -202,6 +205,23 @@ Patterns:
   side effect.
 - **Later** (todos): a list of tasks dated beyond next week, grouped by day. Like the bin, it
   is listed only while it holds something, and nothing is added to it directly.
+- **Journal** (`journal/page.tsx`): the owner's own writing, arranged by time. The list sits
+  directly on the page under small month headings, newest first. A row names its day once, at
+  the left (the day number, in accent when it is today, over the short weekday; later entries of
+  the same day leave it blank), then the title, two lines of what the entry says, and its tags.
+  An entry opens in place of the list as one 26px glass panel: date pill, bin, title, tags, then
+  the editor. Enter in the title moves on to the writing.
+- **Tags** (journal): quiet chips, `fill` with `ink2` text, never coloured. On an entry each chip
+  carries a small remove button, and a "Tag" pill at the end opens into a field (known tags are
+  offered as the owner types; at most six). The app chooses an entry's tags from its text a moment
+  after writing stops, and says so in one meta line, "Tagged for you"; once the owner adds or
+  removes a tag the line goes and the app leaves them alone. Above the list the same chips, with
+  counts, filter it: one at a time, `accent-soft` while chosen, held in the address as `?tag=`.
+- **Link previews** (`Editor.tsx`, where `linkPreviews` is on: the journal): an address pasted on
+  a line of its own, or given to the link button beside the image button, becomes a preview: the
+  page's picture, title, a line about it and its site. It is a `cards` block with one item in the
+  `list` layout, not a new component, so it is edited, removed and drawn like any block. A page
+  that cannot be read still gets a preview, titled from its address.
 - **Menus and pickers** (`Floating.tsx`): anchored to their control, flip to stay on screen,
   dismiss on outside tap.
 - **Editor** (`Editor.tsx`): markdown as you type; agent text marked; blocks are single units.

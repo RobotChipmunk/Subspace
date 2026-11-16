@@ -12,6 +12,7 @@
 import { q, q1 } from "../db";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
+import { listEntries } from "./journal";
 import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule } from "./rail";
@@ -144,6 +145,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
               (SELECT count(*)::int FROM context_nodes WHERE NOT archived) AS context,
               (SELECT count(*)::int FROM context_nodes WHERE kind = 'page' AND NOT archived) AS pages,
               (SELECT count(*)::int FROM context_nodes WHERE kind = 'link' AND NOT archived) AS links,
+              (SELECT count(*)::int FROM context_nodes WHERE kind = 'journal' AND NOT archived) AS journal,
               (SELECT count(*)::int FROM trackers WHERE NOT archived) AS following,
               (SELECT count(*)::int FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()) AS rail,
               (SELECT count(*)::int FROM agents WHERE NOT archived AND kind <> 'guest') AS agents,
@@ -159,6 +161,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/context", title: "Context", about: "Shared long-term memory about the owner, their life and the agents' work. A tree you can reshape.", count: n!.context },
         { path: "/pages", title: "Pages", about: "Finished documents agents have made: research, shortlists, plans. Newest first; they live in the context tree.", count: n!.pages },
         { path: "/links", title: "Links", about: "Web links the owner saved, each with why they kept it and optional notes. Newest first; they live in the context tree.", count: n!.links },
+        { path: "/journal", title: "Journal", about: "The owner's own dated writing, each entry tagged with its themes. Newest day first; entries live in the context tree. Read it to understand them; it is theirs to write.", count: n!.journal },
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
         { path: "/rail", title: "Rail", about: "Timely modules shown beside the owner's screen right now (bookings, deadlines, today's details).", count: n!.rail },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
@@ -403,6 +406,19 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     );
   }
 
+  if (space === "journal") {
+    const page = await listEntries({ limit: PAGE, before: cursor });
+    return {
+      path: "/journal",
+      title: "Journal",
+      about: "What the owner wrote for themselves, newest day first. tags are the themes of an entry.",
+      count: page.total,
+      items: page.entries.map((e) => ({ id: e.id, title: e.title, day: e.entry_date, ...(e.tags.length ? { tags: e.tags } : {}), ...(e.excerpt ? { line: oneLine(e.excerpt, 140) } : {}) })),
+      next_cursor: page.next,
+      hint: 'read([id]) returns an entry in full. search(query, types: ["context"]) finds entries by what they say or by tag. The journal is the owner\'s own: do not add to it or edit it unless they ask.',
+    };
+  }
+
   throw notFound(`Nothing at "${rawPath}". Start from explore("/").`);
 }
 
@@ -420,7 +436,7 @@ const linkItem = (r: Record<string, unknown>, where = false): Item => ({
 
 const contextChild = (k: { path: string; title: string; summary: string; kind?: string; blurb?: string | null; child_count?: number; body_chars: number; updated_at: string }): Child => ({
   path: `/context/${k.path}`,
-  title: k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.title,
+  title: k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.kind === "journal" ? `${k.title} (journal entry)` : k.title,
   about: k.summary || k.blurb || undefined,
   ...(k.child_count ? { count: k.child_count } : {}),
   latest: k.updated_at,
