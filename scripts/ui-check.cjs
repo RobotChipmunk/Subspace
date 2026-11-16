@@ -44,7 +44,8 @@ async function run(profile) {
       if (r.width < 2 || r.height < 2) return "has no size";
       const vw = innerWidth, vh = innerHeight;
       if (r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1) return `extends outside the screen (${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)} in ${vw}x${vh})`;
-      for (const [fx, fy] of [[0.5, 0.5], [0.1, 0.2], [0.9, 0.8]]) {
+      // the outer points stay inside a fully round control: (0.9, 0.8) lies exactly on a circle's edge
+      for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.25], [0.85, 0.75]]) {
         const top = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
         // the dev server's own badge floats over the corner of the page; it is not part of the app
         if (top && !el.contains(top) && !top.contains(el) && top.tagName !== "NEXTJS-PORTAL") return `is covered or clipped (by <${top.tagName.toLowerCase()} class="${String(top.className).slice(0, 50)}">)`;

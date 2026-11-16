@@ -189,7 +189,7 @@ export async function writeMonth(ym: string): Promise<void> {
 export function monthLine(m: JournalMonth): string {
   if (m.summary) return m.summary;
   const lead = leadMood(m.moods);
-  return [lead ? `Mostly ${lead.toLowerCase()}` : "", m.tags.length ? `Themes: ${m.tags.join(", ")}` : ""].filter(Boolean).join(". ");
+  return [lead ? `Mostly ${lead.toLowerCase()}` : "", m.tags.length ? `Themes: ${m.tags.join(", ")}` : ""].filter(Boolean).map((s) => s + ".").join(" ");
 }
 
 /** The mood most entries share (the earliest of equals). */
@@ -211,7 +211,7 @@ const STARTERS: [string, RegExp][] = [
   ["Family", /\b(family|mom|mum|mother|dad|father|kids?|son|daughter|wife|husband|parents?|brother|sister|grand\w+)\b/gi],
   ["Friends", /\b(friends?|friendship|dinner with|caught up|party|neighbou?rs?)\b/gi],
   ["Travel", /\b(travel\w*|trips?|flight|flew|hotel|vacation|holiday|airport|road trip|abroad)\b/gi],
-  ["Money", /\b(money|budget\w*|invest\w*|savings?|salary|spend\w*|spent|mortgage|taxes)\b/gi],
+  ["Money", /\b(money|budget\w*|invest\w*|savings?|salary|mortgage|taxes)\b/gi],
   ["Gratitude", /\b(grateful|thankful|gratitude|appreciat\w*|lucky|blessed)\b/gi],
   ["Learning", /\b(reading|read|books?|course|class|study\w*|studied|learning|podcast|lecture)\b/gi],
   ["Technology", /\b(software|code|coding|programm\w*|apps?|computers?|bug|deploy\w*|server|database)\b/gi],
