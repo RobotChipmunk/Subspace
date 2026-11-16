@@ -44,9 +44,11 @@ async function run(profile) {
       if (r.width < 2 || r.height < 2) return "has no size";
       const vw = innerWidth, vh = innerHeight;
       if (r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1) return `extends outside the screen (${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)} in ${vw}x${vh})`;
-      for (const [fx, fy] of [[0.5, 0.5], [0.1, 0.2], [0.9, 0.8]]) {
+      // the outer points stay inside a fully round control: (0.9, 0.8) lies exactly on a circle's edge
+      for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.25], [0.85, 0.75]]) {
         const top = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
-        if (top && !el.contains(top) && !top.contains(el)) return `is covered or clipped (by <${top.tagName.toLowerCase()} class="${String(top.className).slice(0, 50)}">)`;
+        // the dev server's own badge floats over the corner of the page; it is not part of the app
+        if (top && !el.contains(top) && !top.contains(el) && top.tagName !== "NEXTJS-PORTAL") return `is covered or clipped (by <${top.tagName.toLowerCase()} class="${String(top.className).slice(0, 50)}">)`;
       }
       return null;
     });
@@ -111,7 +113,7 @@ async function run(profile) {
   }
 
   // Navigation is reachable everywhere.
-  for (const label of ["Feed", "Todos", "Context", "Following", "Agents"]) await reachable(page.getByRole("link", { name: label, exact: true }), `nav ${label}`);
+  for (const label of ["Feed", "Todos", "Journal", "Context", "Following", "Agents"]) await reachable(page.getByRole("link", { name: label, exact: true }), `nav ${label}`);
 
   // ---------- The rail ----------
   const wide = profile.viewport.width >= 1100;
@@ -718,6 +720,144 @@ async function run(profile) {
     await shot("context-search");
     await press(page.getByLabel("Clear"));
     await settle(500);
+  });
+
+  // ---------- Journal ----------
+  await step("journal", async () => {
+    await press(page.getByRole("link", { name: "Journal", exact: true }));
+    await page.waitForURL("**/journal");
+    await settle(1200);
+    await noSidewaysScroll("journal");
+    await shot("journal");
+    // arranged by time: a section per month, newest first, each day named once
+    const months = await page.locator("main section h2").allInnerTexts();
+    if (months.length < 2) fail(`journal: expected entries under at least two months, found ${months.length}`);
+    const days = await page.locator("[data-entry]").evaluateAll((rows) => rows.map((r) => r.querySelector("span")?.getAttribute("aria-label")).filter(Boolean));
+    if (new Set(days).size !== days.length) fail(`journal: a day is named more than once (${days.join(", ")})`);
+    const row = page.locator("[data-entry]", { hasText: "Sketching again" });
+    await reachable(row, "journal entry row");
+    if (!(await row.innerText()).includes("Creativity")) fail("journal: the sketching entry does not show its Creativity tag");
+    // from far away: each month says how it felt, each entry carries its mood and its gist
+    const glance = page.locator("[data-month-glance]").first();
+    await reachable(glance, "journal month at a glance");
+    if (!/Mostly \w+/.test(await glance.innerText())) fail("journal: the month does not name its prevailing mood");
+    if (!(await page.locator("[data-entry] [data-mood]").count())) fail("journal: no entry shows a mood");
+
+    // a tag narrows the list to its entries, and lets go again
+    const chips = page.getByRole("group", { name: "Tags" });
+    const chip = chips.getByRole("button", { name: /^Life lessons/ });
+    await reachable(chip, "journal tag chip");
+    await press(chip);
+    await page.locator("[data-entry]", { hasText: "Sketching again" }).waitFor({ state: "detached", timeout: 5000 }).catch(() => fail("journal: choosing a tag did not narrow the list"));
+    await reachable(page.locator("[data-entry]", { hasText: "A lesson from the roof" }), "journal entry under its tag");
+    await shot("journal-tag");
+    await press(chips.getByRole("button", { name: /^Life lessons/ }));
+    await page.locator("[data-entry]", { hasText: "Sketching again" }).waitFor({ timeout: 5000 });
+
+    // an entry with a link in it shows the link as a preview
+    await press(page.locator("[data-entry]", { hasText: "What the agents are for" }));
+    await page.getByLabel("Title").waitFor({ timeout: 5000 });
+    await settle(900);
+    await reachable(page.locator(".page-block a", { hasText: "The case for slow interfaces" }), "journal link preview");
+    await noSidewaysScroll("journal entry");
+    await shot("journal-entry");
+    await press(page.getByRole("button", { name: "Journal", exact: true }));
+    await settle(700);
+
+    // write one: the title, then the text; its tags arrive on their own a moment after writing stops
+    await press(page.getByRole("button", { name: "New entry" }));
+    await page.getByLabel("Title").waitFor({ timeout: 5000 });
+    await settle(700);
+    await page.keyboard.type("Check entry", { delay: 15 });
+    await page.keyboard.press("Enter");
+    await settle(300);
+    await page.keyboard.type("Thinking about how AI models and prompts change the way agents work for me.", { delay: 8 });
+    await page.locator('[data-tag="AI"]').waitFor({ timeout: 10000 }).catch(() => fail("journal: a new entry about AI was not tagged AI on its own"));
+    await page.getByText("Tagged for you").waitFor({ timeout: 3000 }).catch(() => fail("journal: tags chosen by the app are not marked as such"));
+    await page.locator("[data-gist]").waitFor({ timeout: 3000 }).catch(() => fail("journal: the entry was not given its gist"));
+    // the mood is the app's reading until the owner says otherwise
+    const moodPill = page.locator("label[data-mood]");
+    await reachable(moodPill, "journal mood pill");
+    if (!(await moodPill.getAttribute("data-mood"))) fail("journal: the entry was not given a mood");
+    await page.getByLabel("Mood").selectOption("Hopeful");
+    await page.locator('label[data-mood="Hopeful"]').waitFor({ timeout: 3000 }).catch(() => fail("journal: choosing a mood did not show it"));
+
+    // embed a link with the button
+    await reachable(page.getByLabel("Add a link"), "journal add a link button");
+    await press(page.getByLabel("Add a link"));
+    const field = page.getByLabel("Link to embed");
+    await field.waitFor({ timeout: 3000 });
+    await settle(300);
+    await reachable(field, "journal link field");
+    await page.keyboard.type("https://example.com/heat-pump-guide", { delay: 8 });
+    await page.keyboard.press("Enter");
+    await page.locator('.page-block a[href="https://example.com/heat-pump-guide"]').waitFor({ timeout: 10000 }).catch(() => fail("journal: the link was not embedded as a preview"));
+    // and by pasting an address on a line of its own
+    await press(page.locator(".ProseMirror > p").last());
+    await settle(300);
+    await page.locator(".ProseMirror").evaluate((el) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "https://example.com/slow-interfaces");
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await page.locator('.page-block a[href="https://example.com/slow-interfaces"]').waitFor({ timeout: 10000 }).catch(() => fail("journal: a pasted address did not become a preview"));
+    // a picture pasted in is uploaded and shown in place
+    await press(page.locator(".ProseMirror > p").last());
+    await settle(300);
+    await page.locator(".ProseMirror").evaluate((el) => {
+      const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFklEQVR4nGP8z8Dwn4EIwESMolGF+AEAr1YCDmxPhzQAAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
+      const data = new DataTransfer();
+      data.items.add(new File([png], "pasted.png", { type: "image/png" }));
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await page.locator('.ProseMirror img[src^="/api/media/"]').waitFor({ timeout: 10000 }).catch(() => fail("journal: a pasted picture was not added to the entry"));
+    await settle(600);
+    await noSidewaysScroll("journal new entry");
+
+    // any day can be chosen, also one gone by
+    await press(page.getByLabel(/^Date:/));
+    const cal = page.locator("[data-calendar]");
+    await reachable(cal, "journal calendar");
+    if (await cal.getByLabel("Previous month").isDisabled()) fail("journal: an entry cannot be moved to an earlier month");
+    await shot("journal-date");
+    await page.keyboard.press("Escape");
+    await settle(300);
+
+    // a tag of the owner's own; after that the app stops choosing
+    await press(page.getByRole("button", { name: "Tag", exact: true }));
+    await settle(200);
+    await reachable(page.getByLabel("New tag"), "journal new tag field");
+    await page.keyboard.type("Check tag", { delay: 15 });
+    await page.keyboard.press("Enter");
+    await page.locator('[data-tag="Check tag"]').waitFor({ timeout: 3000 });
+    await page.keyboard.press("Escape");
+    await settle(900);
+    if (await page.getByText("Tagged for you").count()) fail("journal: tags the owner changed still read as chosen by the app");
+    await reachable(page.getByLabel("Remove tag Check tag"), "journal remove tag button");
+    await shot("journal-new");
+    await press(page.getByLabel("Remove tag Check tag"));
+    await page.locator('[data-tag="Check tag"]').waitFor({ state: "detached", timeout: 3000 });
+    await settle(900);
+
+    // it is in the list under today, and can be deleted
+    await press(page.getByRole("button", { name: "Journal", exact: true }));
+    const mine = page.locator("[data-entry]", { hasText: "Check entry" });
+    await mine.first().waitFor({ timeout: 5000 });
+    if (!(await mine.first().innerText()).includes("AI")) fail("journal: the new entry lost its tag in the list");
+    if (!(await mine.first().innerText()).includes("Hopeful")) fail("journal: the mood the owner chose is not in the list");
+    if (!(await mine.first().locator("img").count())) fail("journal: an entry with a picture shows no thumbnail in the list");
+    await shot("journal-after");
+    await press(mine.first());
+    await page.getByLabel("Title").waitFor({ timeout: 5000 });
+    await settle(600);
+    const bin = page.locator("main .confirm-delete");
+    await reachable(bin, "journal delete button");
+    await press(bin);
+    await settle(400);
+    if ((await bin.getAttribute("data-armed")) !== "true") fail("journal: the delete control did not ask for confirmation");
+    await press(bin);
+    await page.locator("[data-entry]", { hasText: "Sketching again" }).waitFor({ timeout: 5000 });
+    if (await page.locator("[data-entry]", { hasText: "Check entry" }).count()) fail("journal: a deleted entry is still listed");
   });
 
   // ---------- Saved links ----------

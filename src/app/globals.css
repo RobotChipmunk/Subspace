@@ -676,6 +676,11 @@ html[data-typing] .art-mesh {
   }
 }
 
+/* A field that offers known values as you type (journal tags) shows no picker arrow of its own. */
+input[list]::-webkit-calendar-picker-indicator {
+  display: none !important;
+}
+
 /* ---------- The rail: blocks drawn small ---------- */
 .rail-sheet {
   background: var(--bg);

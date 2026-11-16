@@ -148,6 +148,38 @@ from the last id seen. Finding one is a search (`types: ["link"]`), and "is this
 single index lookup by address. `scripts/links-scale.ts` fills a scratch database with N links
 and checks the time and size of each of those calls.
 
+## The journal
+
+The Journal tab is the owner's own dated writing. An entry is a context node of kind `journal`,
+kept together under `/context/journal`, so it is written in the same editor as any note (markdown
+with blocks) and search, history and the agents' reading of context work on it unchanged. The
+journal adds two things to a node: the day it belongs to (`entry_date`, today by default and
+changeable to any day), by which the tab arranges entries under months, newest first; and `tags`,
+its themes.
+
+Tags are worked out from the text. A moment after the owner stops writing, the app asks
+`POST /api/v1/journal/<id>/categorize`; the server gives the entry one to three themes, preferring
+tags the journal already uses. It asks a small model when a key is available (the server's
+`ANTHROPIC_API_KEY`, or one saved for a built-in agent) and otherwise matches words against a
+short list of starter themes, so tagging still works without a key. Tags the owner adds or removes
+are theirs: from then on the entry is not categorised again. The tab filters by tag.
+
+Besides tags, reading an entry gives it a mood (one of the short list in `src/lib/moods.ts`; the
+owner can choose another) and its gist, one sentence kept as the node's summary. A month has a
+digest written from its entries' moods and gists (`journal_months`; it needs a model and is
+rewritten only when the month's entries change). The tab shows this under each month's heading,
+and agents read the journal the same way, from far to near: `explore("/journal")` lists the
+months with how each felt, `explore("/journal/2026-11")` gives a line per entry (day, mood,
+themes, gist), and `read([id])` returns one entry in full. `journal_write` lets an agent add an
+entry when the owner asks it to. Pictures are pasted or dropped into an entry like into any note.
+
+A link is embedded as a preview: paste an address on a line of its own, or use the link button.
+`POST /api/v1/links/preview` reads the page's title, site, description and picture (nothing is
+saved) and the editor stores it as a one-card `cards` block, so previews are drawn, edited and
+read by agents like every other block. Agents see the journal at `explore("/journal")`; it is the
+owner's to write. Logic is in `src/lib/core/journal.ts`, the screen in
+`src/app/(app)/journal/page.tsx`.
+
 ## Running an agent inside Subspace
 
 An agent can run on an Anthropic API key so it answers within moments of a mention. Open Agents,
@@ -155,6 +187,38 @@ press the bolt on an agent, paste a key and choose the model, effort and context
 is stored encrypted (AES-256-GCM, keyed from `SUBSPACE_SECRET` or, if unset, `SUBSPACE_PASSWORD`;
 changing that secret means saving the key again). The loop is in `src/lib/core/runtime.ts`: it
 gives the model the same tools the MCP server exposes, plus web search when enabled.
+
+## What agents did
+
+`events` records what changed. Two more tables record what agents asked for, so their work can be
+examined afterwards (`src/lib/core/audit.ts`):
+
+- `agent_calls`: one row per tool call, whether it came from an outside app over MCP or from a run
+  inside Subspace. It holds who called and through which app (`client`, `grant_id`), the tool and
+  whether it reads or writes, the arguments (long text cut short), whether it worked and the error
+  if not, how long it took, and what came back: how many things it listed (`result_count`), its
+  size, its first 4,000 characters, and `seen`, the ids of everything it showed the agent. `query`
+  and `path` are the search text and explore path lifted out of the arguments, and `refs` the ids
+  and context paths the call named. Unknown tools, refused input, connections opening and guide
+  pages read are rows too.
+- `agent_runs`: one row per run of a built-in agent (why it was started, model, steps, tokens,
+  calls and failures, how it ended, and the model's own words along the way) and per wake-up call
+  sent to an outside agent, with the reason it failed when it did. A run's calls carry its `run_id`.
+
+`npm run agent-log` prints a report from them (`-- --days 30`, `-- --agent claude`, `-- --errors`,
+`-- --run <id>`, `-- --json`): calls and failures per agent and app, tools by use, failures grouped
+by message, the paths agents browse, what they search for and the searches that found nothing,
+what they read in full most often, the notes, pages and journal entries nobody opened, mentions
+and what became of them (never seen, seen but no write naming it since, acted on), and recent runs
+and wake-ups. Anything else is a query away, for example what one agent was shown and when:
+
+```sql
+SELECT ts, tool, path, query, result_count FROM agent_calls
+WHERE agent_id = 'a_claude' AND seen @> ARRAY['c_…'] ORDER BY ts;
+```
+
+Rows are kept for 180 days. Recording never interrupts the work: a write to these tables that
+fails is logged to the console and the call carries on.
 
 ## Waking an agent when it is needed
 

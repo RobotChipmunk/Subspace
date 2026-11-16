@@ -3,6 +3,7 @@ import { createAgent } from "../src/lib/core/agents";
 import { openJobs, submitJob } from "../src/lib/core/art";
 import { deflateSync } from "node:zlib";
 import { createNode } from "../src/lib/core/context";
+import { categorize, createEntry } from "../src/lib/core/journal";
 import { saveLink } from "../src/lib/core/links";
 import { saveMedia } from "../src/lib/core/media";
 import { createPost, createReply } from "../src/lib/core/posts";
@@ -215,6 +216,19 @@ async function main() {
     why: "Saw it in the shop on 23rd",
     notes: "## What to remember\n\n- $240 in store, sometimes less online\n- The navy one, size M\n- They restock in spring",
   });
+
+  // ---- Journal: the owner's own dated writing, tagged from what it says ----
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
+  const entries: [number, string, string][] = [
+    [0, "What the agents are for", "Spent the morning watching the agents hand work to each other. The useful part of AI is not the model answering, it is the model remembering what I told it last week. Prompts matter less than context.\n\n" + block("cards", { layout: "list", items: [{ title: "The case for slow interfaces", subtitle: "Works in Progress", description: "Essay on why interfaces that wait for you age better than ones that chase you.", url: "https://example.com/slow-interfaces" }] }) + "\n\nWorth rereading before the next design pass."],
+    [1, "Sketching again", "Drew for an hour before breakfast, the first drawing in months. Ideas come while the hand is busy; the sketch was bad and the idea was good. Creativity seems to need a making habit more than inspiration."],
+    [4, "A lesson from the roof", "The roofer found the leak in ten minutes. I had put the call off for a year. Lesson learned, again: the mistake is rarely the problem, it is waiting. Note to self for next time."],
+    [38, "Walking the bridge", "Long walk across the St Johns bridge with Dad. He talked about his father for the first time in years. Grateful for a slow afternoon with family."],
+  ];
+  for (const [ago, title, body] of entries) {
+    const e = await createEntry(owner, { title, body, date: daysAgo(ago) });
+    await categorize(e.id);
+  }
 
   console.log("Seeded.");
   process.exit(0);

@@ -11,7 +11,7 @@ final class TodosTests: SubspaceTestCase {
         go("todos")
         expect(app.buttons["todos.folder.today"], "the Today folder")
         expect(app.buttons["todos.folder.backlog"], "the Backlog folder")
-        app.buttons["todos.folder.week"].tap()
+        folder("week").tap()
         let seeded = expect(row("Review robotics allocation"), "the seeded task in This week")
         shot("10-todos-week")
         seeded.tap()
@@ -25,7 +25,7 @@ final class TodosTests: SubspaceTestCase {
     func testAddWriteNotesCompleteDeleteAndRestore() {
         launchSignedIn()
         go("todos")
-        expect(app.buttons["todos.folder.backlog"], "the Backlog folder").tap()
+        folder("backlog").tap()
 
         // Add
         let title = "Buy stamps \(Int.random(in: 1000...9999))"
@@ -57,22 +57,21 @@ final class TodosTests: SubspaceTestCase {
         shot("11-todos-delete-armed")
         delete.tap()
         waitToVanish(row(title), "the deleted task")
-        let bin = expect(app.buttons["todos.folder.bin"], "Recently deleted, now that it holds something")
+        expect(app.buttons["todos.folder.bin"], "Recently deleted, now that it holds something")
         // On a phone the folders are one row that scrolls sideways, and the bin is at its far end.
-        if !isPad { app.buttons["todos.folder.today"].swipeLeft() }
-        press(bin, "Recently deleted, in view")
+        folder("bin").tap()
         expect(textContaining(title), "the deleted task in the bin")
         shot("11-todos-bin")
         let restore = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.restore.'")).firstMatch
         expect(restore, "Restore").tap()
-        press(app.buttons["todos.folder.backlog"], "the Backlog folder again")
+        folder("backlog").tap()
         expect(row(title), "the restored task back in Backlog")
     }
 
     func testDateCalendarAndRepeat() {
         launchSignedIn()
         go("todos")
-        expect(app.buttons["todos.folder.today"], "the Today folder").tap()
+        folder("today").tap()
         let title = "Water the plants \(Int.random(in: 1000...9999))"
         enter(title + "\n", into: app.textFields["todos.add"], "the add field")
         expect(row(title), "the new task in the list").tap()
@@ -106,17 +105,25 @@ final class TodosTests: SubspaceTestCase {
     func testDragATaskToAnotherSection() {
         launchSignedIn()
         go("todos")
-        expect(app.buttons["todos.folder.week"], "the This week folder").tap()
-        // Seeded for the week with no day, so it sits under "Any day".
-        let task = expect(row("Draft Q1 goals"), "a seeded task under Any day")
-        let onToday = expect(row("Book parent-teacher conference"), "a seeded task under Today")
+        folder("week").tap()
+        // Seeded for the week with no day, so it sits under "Any day" whatever the weekday.
+        expect(row("Draft Q1 goals"), "a seeded task under Any day")
+        expect(row("Book parent-teacher conference"), "a seeded task under Today")
 
-        // Lift it and let it go over a task of another section: it moves to that day.
-        task.press(forDuration: 1.2, thenDragTo: onToday, withVelocity: .slow, thenHoldForDuration: 0.6)
-        Thread.sleep(forTimeInterval: 1.5)
-        shot("14-todos-dragged-to-section")
+        // Lift it and let it go over a task of another section: it moves to that day. A loaded
+        // simulator sometimes does not lift the row (the press then only scrolls the page), so
+        // the carry is tried again, as a person would, before the result is judged.
+        for attempt in 1...3 {
+            folder("week").tap()
+            let task = expect(row("Draft Q1 goals"), "the task in This week")
+            let onToday = expect(row("Book parent-teacher conference"), "a seeded task under Today")
+            task.press(forDuration: 1.5, thenDragTo: onToday, withVelocity: .slow, thenHoldForDuration: 0.8)
+            Thread.sleep(forTimeInterval: 1.5)
+            shot("14-todos-dragged-to-section")
+            folder("today").tap()
+            if row("Draft Q1 goals").waitForExistence(timeout: attempt == 3 ? 1 : 10) { break }
+        }
 
-        app.buttons["todos.folder.today"].tap()
         expect(row("Draft Q1 goals"), "the task on Today, after being dropped on Today's section")
         shot("14-todos-section-day")
     }
@@ -124,16 +131,18 @@ final class TodosTests: SubspaceTestCase {
     func testDragATaskOntoAnotherList() {
         launchSignedIn()
         go("todos")
-        expect(app.buttons["todos.folder.today"], "the Today folder").tap()
+        folder("today").tap()
         let task = expect(row("Call the roofer back"), "a seeded task on Today")
-        let nextWeek = expect(app.buttons["todos.folder.next_week"], "the Next week folder")
+        // The list it is carried to must be on screen with the task before the finger goes down.
+        let nextWeek = folder("next_week")
+        XCTAssertTrue(nextWeek.isHittable, "Next week should be in view before a task is carried onto it")
 
         // Lift the task and let it go over another list in the folders.
-        task.press(forDuration: 1.2, thenDragTo: nextWeek, withVelocity: .slow, thenHoldForDuration: 0.6)
+        task.press(forDuration: 1.5, thenDragTo: nextWeek, withVelocity: .slow, thenHoldForDuration: 0.8)
         waitToVanish(row("Call the roofer back"), "the task, gone from Today once it is moved")
         shot("12-todos-dragged-away")
 
-        nextWeek.tap()
+        folder("next_week").tap()
         expect(row("Call the roofer back"), "the task on Next week")
         shot("12-todos-dragged-to-next-week")
     }

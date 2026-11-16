@@ -107,9 +107,50 @@ class SubspaceTestCase: XCTestCase {
         return token
     }
 
-    func go(_ tab: String) {
-        press(app.buttons["nav.\(tab)"], "the \(tab) button in the app bar")
-        Thread.sleep(forTimeInterval: 0.4)
+    /// Opens a screen from the app bar, and makes sure it did open: a tap that lands while
+    /// something is still settling over the bar is lost, and every later step would then fail
+    /// with a message about the wrong thing.
+    func go(_ tab: String, file: StaticString = #filePath, line: UInt = #line) {
+        let button = app.buttons["nav.\(tab)"]
+        for _ in 0..<3 {
+            press(button, "the \(tab) button in the app bar", file: file, line: line)
+            let until = Date().addingTimeInterval(4)
+            while !button.isSelected && Date() < until { Thread.sleep(forTimeInterval: 0.3) }
+            if button.isSelected { break }
+        }
+        XCTAssertTrue(button.isSelected, "\(tab) should be the selected screen after tapping it in the app bar (app state \(app.state.rawValue))", file: file, line: line)
+        Thread.sleep(forTimeInterval: 0.3)
+    }
+
+    /// One of the todo lists ("today", "week", "next_week", "backlog", "bin", a date…), brought
+    /// into view. On a phone the lists are one strip that scrolls sideways, and how long it is
+    /// depends on the weekday (a Monday has every day of the week in it), so a list may sit beyond
+    /// the edge of the screen, where it cannot be tapped or dropped on. This slides the strip until
+    /// the list is wholly on screen. On an iPad the lists sit beside the tasks and nothing moves.
+    @discardableResult
+    func folder(_ key: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let button = expect(app.buttons["todos.folder.\(key)"], "the \(key) list among the folders", file: file, line: line)
+        let screen = app.windows.firstMatch.frame
+        let margin: CGFloat = 12
+        // Beside the list (iPad) every folder is in view and there is nothing to slide or wait for.
+        if isPad && button.isHittable { return button }
+        // choosing a list slides the strip by itself: let that finish before measuring
+        Thread.sleep(forTimeInterval: 0.6)
+        for _ in 0..<12 {
+            let frame = button.frame
+            let hiddenRight = frame.maxX > screen.maxX - margin
+            let hiddenLeft = frame.minX < screen.minX + margin
+            // wider than the screen can show, or already in view
+            if !(hiddenRight || hiddenLeft) || frame.width > screen.width - 2 * margin { break }
+            // a finger on the strip, drawn a third of the screen towards the hidden side's opposite
+            let reach = screen.width * 0.3
+            let from = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: screen.midX + (hiddenRight ? reach / 2 : -reach / 2), dy: frame.midY))
+            let to = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: screen.midX + (hiddenRight ? -reach / 2 : reach / 2), dy: frame.midY))
+            // slowly and held at the end, so the strip stops where the finger leaves it
+            from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+        return button
     }
 
     /// Attaches a screenshot named for the report, e.g. "03-todos".
@@ -132,7 +173,8 @@ class SubspaceTestCase: XCTestCase {
             tree.lifetime = .keepAlways
             add(tree)
             shot("failed")
-            XCTFail("Expected \(what)", file: file, line: line)
+            // 4 is running in the foreground; anything else means the app was left or has stopped
+            XCTFail("Expected \(what) (app state \(app.state.rawValue))", file: file, line: line)
         }
         return element
     }

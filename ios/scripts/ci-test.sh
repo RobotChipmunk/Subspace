@@ -72,6 +72,16 @@ PY
   done
 fi
 
+# When an expectation failed the test attached what the app was showing, as text. Print the
+# named elements of each, short enough for the job log, so a failure can be read without the artifact.
+for f in "$SHOTS"/hierarchy*; do
+  [ -f "$f" ] || continue
+  echo "---- on screen at a failed expectation: $(basename "$f")"
+  grep -E "identifier: '|label: '" "$f" | sed -E 's/^ +//; s/0x[0-9a-f]+, //' | cut -c1-170 | head -80
+done
+# What the server said while the tests ran, when it complained.
+grep -iE "error|unhandled|ECONN| 5[0-9][0-9] " "$OUT/server-$NAME.log" 2>/dev/null | cut -c1-200 | awk '!seen[$0]++' | tail -20
+
 ios/scripts/e2e-server.sh stop
 xcrun simctl shutdown "$SIM" 2>/dev/null || true
 exit $STATUS

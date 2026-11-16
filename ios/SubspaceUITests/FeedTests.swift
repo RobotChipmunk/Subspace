@@ -52,7 +52,10 @@ final class FeedTests: SubspaceTestCase {
             app.swipeUp()
             swipes += 1
         }
+        // let the feed come to rest, so the tap lands on the button and not on what slides under it
+        Thread.sleep(forTimeInterval: 0.8)
         expect(mark, "a bookmark button on a post with a source").tap()
+        XCTAssertEqual(app.state, .runningForeground, "Tapping the bookmark should stay in the app, not open the post's source")
         expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'feed.save.' AND label == 'Remove bookmark'")).firstMatch, "the bookmark, filled in")
         shot("52-feed-bookmarked-post")
 

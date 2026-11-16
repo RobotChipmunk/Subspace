@@ -120,6 +120,7 @@ struct ShellView: View {
         switch tab {
         case .feed: FeedScreen()
         case .todos: TodosScreen()
+        case .journal: JournalScreen()
         case .context: ContextScreen()
         case .following: FollowingScreen()
         case .agents: AgentsScreen()
@@ -136,6 +137,8 @@ struct NavBar: View {
 
     var body: some View {
         let layout = vertical ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 4))
+        // Six tabs and the Now button fit a phone's width at 44 points each; the side bar keeps 48.
+        let side: CGFloat = vertical ? 48 : 44
         layout {
             ForEach(AppTab.allCases) { tab in
                 let on = app.tab == tab
@@ -146,7 +149,7 @@ struct NavBar: View {
                         Image(systemName: tab.icon)
                             .font(.system(size: 20, weight: on ? .semibold : .regular))
                             .foregroundStyle(on ? Theme.accent : Theme.ink2)
-                            .frame(width: 48, height: 48)
+                            .frame(width: side, height: side)
                         if tab == .agents && app.anyDirectUnread {
                             Circle().fill(Theme.accent).frame(width: 8, height: 8).offset(x: -10, y: 10)
                         }
@@ -176,7 +179,7 @@ struct NavBar: View {
                         Image(systemName: "sidebar.right")
                             .font(.system(size: 20))
                             .foregroundStyle(app.railSheet ? Theme.accent : Theme.ink2)
-                            .frame(width: 48, height: 48)
+                            .frame(width: side, height: side)
                         Text("\(app.rail.count)")
                             .font(.system(size: 10.5, weight: .semibold))
                             .foregroundStyle(.white)

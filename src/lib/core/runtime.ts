@@ -10,6 +10,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypt
 import { q, q1 } from "../db";
 import { CORE } from "../mcp/guide";
 import { TOOLS } from "../mcp/tools";
+import { finishRun, logged, refused, startRun, type CallCtx } from "./audit";
 import { briefing, changes } from "./discover";
 import { sharingInstructions } from "./guests";
 import { agentById, ApiError, bad, notFound, type Agent } from "./util";
@@ -59,6 +60,20 @@ function unseal(sealed: string): string | null {
   } catch {
     return null; // sealed under a different secret (the sign-in password changed)
   }
+}
+
+/**
+ * A key for small pieces of the app's own work (sorting a journal entry into themes): the server's
+ * own key, or failing that one the owner saved for a built-in agent. Null when there is none.
+ */
+export async function appApiKey(): Promise<string | null> {
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+  const rows = await q<{ runtime: Partial<Stored> | null }>("SELECT runtime FROM agents WHERE NOT archived AND runtime->>'key_enc' IS NOT NULL ORDER BY (runtime->>'enabled')::boolean DESC NULLS LAST, id");
+  for (const r of rows) {
+    const key = r.runtime?.key_enc ? unseal(r.runtime.key_enc) : null;
+    if (key) return key;
+  }
+  return null;
 }
 
 async function load(agentId: string): Promise<Stored> {
@@ -155,12 +170,14 @@ function checkInput(name: string, input: unknown): string | null {
 
 type RunResult = { status: "ok" | "error" | "refused" | "limit"; detail?: string; steps: number; input_tokens: number; output_tokens: number; model: string };
 
-async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: string, deadline: number): Promise<RunResult> {
+async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: string, deadline: number, run: { id: string; said: string[] }): Promise<RunResult> {
   const client = new Anthropic({ apiKey, maxRetries: 2 });
   const out: RunResult = { status: "ok", steps: 0, input_tokens: 0, output_tokens: 0, model: cfg.model };
 
-  const brief = await briefing(agent);
-  const waiting = await changes(agent, { limit: 60 });
+  // What the run is handed at the start is recorded like any call, so the record shows what it was shown.
+  const ctx = (name: string): CallCtx => ({ via: "runtime", runId: run.id, client: "subspace", readOnly: !!TOOLS.find((t) => t.name === name)?.readOnly });
+  const brief = await logged(agent, "briefing", { by: "run start" }, ctx("briefing"), () => briefing(agent));
+  const waiting = await logged(agent, "changes", { limit: 60, by: "run start" }, ctx("changes"), () => changes(agent, { limit: 60 }));
   const messages: Anthropic.Beta.BetaMessageParam[] = [
     {
       role: "user",
@@ -202,6 +219,8 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
     out.input_tokens += prompt;
     out.output_tokens += u.output_tokens;
     out.model = message.model;
+    // the model's own words in this step: nobody is shown them, but they explain what it did
+    for (const b of message.content) if (b.type === "text" && b.text.trim()) run.said.push(b.text.trim());
 
     if (message.stop_reason === "refusal") return { ...out, status: "refused", detail: "The model declined this request." };
     if (message.stop_reason === "pause_turn") {
@@ -217,11 +236,12 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
     for (const call of calls) {
       const problem = checkInput(call.name, call.input);
       if (problem) {
+        await refused(agent, call.name, call.input, ctx(call.name), problem);
         results.push({ type: "tool_result", tool_use_id: call.id, is_error: true, content: problem });
         continue;
       }
       try {
-        const value = await TOOLS.find((t) => t.name === call.name)!.run(agent, call.input as Record<string, unknown>);
+        const value = await logged(agent, call.name, call.input, ctx(call.name), () => TOOLS.find((t) => t.name === call.name)!.run(agent, call.input as Record<string, unknown>));
         results.push({ type: "tool_result", tool_use_id: call.id, content: JSON.stringify(value) });
       } catch (e) {
         if (!(e instanceof ApiError)) console.error("runtime tool error", call.name, e);
@@ -286,15 +306,18 @@ export async function runBuiltIn(handle: string, reason: string, startedAt = Dat
       await q("DELETE FROM settings WHERE key = $1", [pendingKey(handle)]);
       const apiKey = (cfg.key_enc && unseal(cfg.key_enc)) || process.env.ANTHROPIC_API_KEY;
       let result: RunResult;
+      const me = (await agentById(agent.id))!;
+      const run = { id: await startRun(me, reason, cfg), said: [] as string[] };
       if (!apiKey) result = { status: "error", detail: "The saved API key can no longer be read (the sign-in password changed). Save the key again.", steps: 0, input_tokens: 0, output_tokens: 0, model: cfg.model };
       else {
         try {
-          result = await converse((await agentById(agent.id))!, cfg, apiKey, reason, deadline);
+          result = await converse(me, cfg, apiKey, reason, deadline, run);
         } catch (err) {
           console.error("runtime run failed", handle, err);
           result = { status: "error", detail: explain(err), steps: 0, input_tokens: 0, output_tokens: 0, model: cfg.model };
         }
       }
+      await finishRun(run.id, result, run.said.join("\n\n"));
       await q("UPDATE agents SET runtime = jsonb_set(COALESCE(runtime, '{}'), '{last_run}', $2::jsonb), last_seen_at = now() WHERE id = $1", [
         agent.id,
         JSON.stringify({ at: new Date().toISOString(), ...result }),

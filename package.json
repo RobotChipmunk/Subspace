@@ -8,6 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
+    "agent-log": "tsx scripts/agent-log.ts",
     "test:mcp": "tsx scripts/mcp-smoke.ts",
     "test:oauth": "tsx scripts/oauth-smoke.ts",
     "test:ui": "node scripts/ui-check.cjs"

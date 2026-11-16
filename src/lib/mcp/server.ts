@@ -1,3 +1,4 @@
+import { logged, refused, type CallCtx } from "../core/audit";
 import { ApiError, type Agent } from "../core/util";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 import { sharingInstructions } from "../core/guests";
@@ -16,7 +17,7 @@ const ok = (id: Rpc["id"], result: unknown) => ({ jsonrpc: "2.0", id, result });
 const err = (id: Rpc["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
 /** What a connection may do. A guest gets a different, much smaller server; a read-only connection loses the tools that change things. */
-export type Access = { readOnly?: boolean; origin?: string };
+export type Access = { readOnly?: boolean; origin?: string; /** The app that is calling, for the record of what agents did. */ client?: string; grantId?: string };
 
 async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | null> {
   if (m.id === undefined) return null; // notifications need no reply
@@ -31,6 +32,8 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
   switch (m.method) {
     case "initialize": {
       const asked = m.params?.protocolVersion;
+      // a connection opening: which app, which version of it, which protocol
+      await logged(agent, "connect", { client: m.params?.clientInfo ?? null, protocol: asked ?? null, read_only: !!access.readOnly }, { via: "mcp", client: access.client ?? "token", grantId: access.grantId, readOnly: true }, async () => ({ guide: GUIDE_VERSION }));
       return ok(m.id, {
         protocolVersion: VERSIONS.includes(asked) ? asked : VERSIONS[0],
         capabilities: { tools: { listChanged: false }, resources: { listChanged: false }, prompts: { listChanged: false } },
@@ -54,9 +57,15 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
     case "tools/call": {
       // earlier names still answer, for an agent that listed the tools before they were renamed
       const tool = tools.find((t) => t.name === m.params?.name) ?? tools.find((t) => t.aliases?.includes(m.params?.name));
-      if (!tool) return err(m.id, -32602, `Unknown tool: ${m.params?.name}`);
+      const ctx: CallCtx = { via: "mcp", client: access.client ?? "token", grantId: access.grantId, readOnly: !!tool?.readOnly };
+      if (!tool) {
+        // a tool that is not there (or not allowed on this connection) is worth knowing about afterwards
+        await refused(agent, String(m.params?.name ?? ""), m.params?.arguments, ctx, access.readOnly ? "Unknown tool, or not available on a read-only connection." : "Unknown tool.");
+        return err(m.id, -32602, `Unknown tool: ${m.params?.name}`);
+      }
       try {
-        const out = await tool.run(agent, m.params?.arguments ?? {}, { origin: access.origin });
+        const args = m.params?.arguments ?? {};
+        const out = await logged(agent, tool.name, args, ctx, () => tool.run(agent, args, { origin: access.origin }));
         return ok(m.id, { content: [{ type: "text", text: JSON.stringify(out) }] });
       } catch (e) {
         // Tool errors go back as content so the model can read them and correct itself.
@@ -76,6 +85,8 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
       const uri = String(m.params?.uri ?? "");
       const topic = uri.replace("subspace://guide", "").replace(/^\//, "");
       const text = topic ? TOPICS[topic] : CORE;
+      // reading a guide page through resources counts as reading the guide
+      await logged(agent, "guide", { topic: topic || "core", by: "resource" }, { via: "mcp", client: access.client ?? "token", grantId: access.grantId, readOnly: true }, async () => (text ? { chars: text.length } : Promise.reject(new Error(`Unknown resource: ${uri}`)))).catch(() => {});
       if (!text) return err(m.id, -32002, `Unknown resource: ${uri}`);
       return ok(m.id, { contents: [{ uri, mimeType: "text/plain", text }] });
     }

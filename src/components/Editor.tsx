@@ -5,16 +5,17 @@ import Placeholder from "@tiptap/extension-placeholder";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import { Plugin } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor as TEditor, type NodeViewProps } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { AnimatePresence, motion } from "motion/react";
-import { ImagePlus, Sparkles } from "lucide-react";
+import { ImagePlus, Link2, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "tiptap-markdown";
 import { api, soft, useMe } from "@/lib/client";
 import { isBlockType, validateBlock, type AnyBlock } from "@/lib/blocks";
 import { BlockView } from "./blocks/BlockView";
+import type { LinkPreview } from "@/lib/core/links";
 import type { Agent } from "@/lib/core/util";
 import { Floating } from "./Floating";
 import { MentionMenu, useMentionMatches } from "./MentionInput";
@@ -199,6 +200,34 @@ async function upload(file: File): Promise<string> {
 }
 
 /**
+ * Shows a link as its preview: the page's title, site, a line about it and its picture. The preview
+ * is an ordinary block (one card in a list), so it is stored, drawn and edited like any other. A
+ * paragraph holding nothing but the address becomes the preview; otherwise it goes in at the cursor.
+ * Returns false when the address has no preview to show, and the text is left as it was.
+ */
+async function embedLink(view: EditorView, raw: string): Promise<boolean> {
+  let p: LinkPreview;
+  try {
+    p = await api<LinkPreview>("links/preview", { body: { url: raw } });
+  } catch {
+    return false;
+  }
+  if (view.isDestroyed || !/^https:\/\//.test(p.url)) return false;
+  const card = { title: p.title, subtitle: p.site, ...(p.description ? { description: p.description } : {}), ...(p.image ? { image: p.image } : {}), url: p.url };
+  const data = { layout: "list", items: [card] };
+  if (validateBlock("cards", data)) return false;
+  const block = view.state.schema.nodes.pageBlock.create({ kind: "cards", json: JSON.stringify(data) });
+  let at: { pos: number; size: number } | null = null;
+  view.state.doc.descendants((n, pos) => {
+    if (!at && n.type.name === "paragraph" && n.textContent.trim() === raw.trim()) at = { pos, size: n.nodeSize };
+    return !at;
+  });
+  const found = at as { pos: number; size: number } | null;
+  view.dispatch(found ? view.state.tr.replaceWith(found.pos, found.pos + found.size, block) : view.state.tr.replaceSelectionWith(block));
+  return true;
+}
+
+/**
  * Markdown treats a checklist item directly after a bullet as one list, which no editor can show
  * faithfully. An empty HTML comment between the two runs keeps them as separate lists.
  */
@@ -229,7 +258,21 @@ function agentsInDoc(e: TEditor): string[] {
   return [...found];
 }
 
-export function Editor({ value, onChange, onReviewed, placeholder }: { value: string; onChange: (md: string) => void; onReviewed?: () => void; placeholder?: string }) {
+export function Editor({ value, onChange, onReviewed, placeholder, linkPreviews }: { value: string; onChange: (md: string) => void; onReviewed?: () => void; placeholder?: string; /** Links can be embedded as previews: by pasting an address on a line of its own, or with the link button. */ linkPreviews?: boolean }) {
+  const previews = useRef(!!linkPreviews);
+  previews.current = !!linkPreviews;
+  const [linking, setLinking] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkError, setLinkError] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const linkBtn = useRef<HTMLButtonElement>(null);
+  const linkField = useRef<HTMLInputElement>(null);
+  // the field is placed a frame after it mounts and cannot take the keyboard before it is visible
+  useEffect(() => {
+    if (!linking) return;
+    const t = setTimeout(() => linkField.current?.focus(), 40);
+    return () => clearTimeout(t);
+  }, [linking]);
   const { agents } = useMe();
   const handlesRef = useRef<string[]>([]);
   handlesRef.current = agents.map((a) => a.handle);
@@ -261,6 +304,10 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
   const editorProps = useMemo<NonNullable<Parameters<typeof useEditor>[0]>["editorProps"]>(
     () => ({
       handlePaste(view, event) {
+        // An address pasted on an empty line goes in as usual, then turns into its preview once the page has been read.
+        const pasted = event.clipboardData?.getData("text/plain")?.trim() ?? "";
+        const { empty, $from } = view.state.selection;
+        if (previews.current && /^https:\/\/\S+$/.test(pasted) && empty && $from.parent.type.name === "paragraph" && !$from.parent.textContent.trim()) setTimeout(() => void embedLink(view, pasted), 0);
         const files = [...(event.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
         if (!files.length) return false;
         event.preventDefault();
@@ -346,6 +393,17 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
     onReviewed?.();
   }
 
+  async function addLink(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editor || linkBusy || !linkUrl.trim()) return;
+    setLinkBusy(true);
+    const ok = await embedLink(editor.view, linkUrl.trim());
+    setLinkBusy(false);
+    if (!ok) return setLinkError("That link could not be shown. Check the address; it must start with https.");
+    setLinking(false);
+    setLinkUrl("");
+  }
+
   const names = edited.map((h) => agents.find((a) => a.handle === h)?.name ?? "@" + h);
 
   return (
@@ -382,6 +440,27 @@ export function Editor({ value, onChange, onReviewed, placeholder }: { value: st
           }}
         />
       </label>
+      {linkPreviews && (
+        <button ref={linkBtn} type="button" onClick={() => (setLinkError(""), setLinking((o) => !o))} aria-label="Add a link" aria-expanded={linking} title="Add a link" className={`absolute -top-9 right-9 z-[1] grid h-8 w-8 place-items-center rounded-full transition-colors ${linking ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}>
+          <Link2 size={16} />
+        </button>
+      )}
+      {linking && (
+        <Floating anchor={() => linkBtn.current?.getBoundingClientRect() ?? null} inside={() => linkBtn.current} onDismiss={() => setLinking(false)}>
+          <motion.form onSubmit={addLink} initial={{ opacity: 0, scale: 0.96, y: -6 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={soft} style={{ transformOrigin: "top left" }} className="w-[320px] max-w-[calc(100vw-16px)] rounded-[22px] border border-line bg-solid px-4 shadow-[var(--shadow-lift)]">
+            <div className="flex h-12 items-center gap-2.5">
+              <Link2 size={16} className="flex-none text-ink3" />
+              <input value={linkUrl} onChange={(e) => (setLinkUrl(e.target.value), setLinkError(""))} onKeyDown={(e) => e.key === "Escape" && setLinking(false)} ref={linkField} inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="Paste a link" aria-label="Link to embed" className="min-w-0 flex-1 text-[15px]" />
+              {/^\S+\.\S{2,}$/.test(linkUrl.trim()) && (
+                <button type="submit" disabled={linkBusy} className="h-8 flex-none rounded-full bg-accent px-3.5 text-[13.5px] font-medium text-white transition-opacity disabled:opacity-60">
+                  {linkBusy ? "Adding" : "Add"}
+                </button>
+              )}
+            </div>
+            {linkError && <p className="pb-3 pl-[26px] text-[13px] text-danger">{linkError}</p>}
+          </motion.form>
+        </Floating>
+      )}
       <AnimatePresence>
         {mention && matches.length > 0 && (
           <Floating

@@ -320,6 +320,83 @@ const MIGRATIONS: string[] = [
   // creates the next, counted from the day it was finished; next_id on the finished task points at it.
   `ALTER TABLE todos ADD COLUMN IF NOT EXISTS repeat text;
    ALTER TABLE todos ADD COLUMN IF NOT EXISTS next_id text`,
+  // The journal: context nodes of kind 'journal', the owner's own dated writing. entry_date is the
+  // day an entry belongs to (the owner's calendar, changeable); tags are its themes. tags_by says
+  // who chose them ('auto' while Subspace categorises the entry, 'owner' once the owner has changed
+  // them, after which they are left alone); tags_for is a hash of the text they were worked out from.
+  `ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS entry_date date;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS tags_by text;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS tags_for text;
+   CREATE INDEX IF NOT EXISTS context_journal ON context_nodes (entry_date DESC, id DESC) WHERE kind = 'journal' AND NOT archived;
+   CREATE INDEX IF NOT EXISTS context_journal_tags ON context_nodes USING gin (tags) WHERE kind = 'journal' AND NOT archived`,
+  // The journal seen from further away. Each entry carries a mood (one of a short list; mood_by says
+  // whether the app or the owner chose it) and its summary holds the entry's gist in a sentence. A
+  // month has a written digest of its entries; basis is a hash of what it was written from, so it is
+  // rewritten only when the month's entries change.
+  `ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS mood text;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS mood_by text;
+   CREATE TABLE IF NOT EXISTS journal_months (
+     ym text PRIMARY KEY,
+     summary text NOT NULL DEFAULT '',
+     basis text NOT NULL DEFAULT '',
+     updated_at timestamptz NOT NULL DEFAULT now()
+   )`,
+  // What agents did, to be read afterwards (core/audit.ts).
+  // - agent_calls: one row per tool call, through MCP or from a run inside Subspace: who, through which
+  //   app, the arguments, whether it worked, how long it took, and what it was shown. query and path are
+  //   the search text and explore path, lifted out of args; refs are the ids and context paths the call
+  //   named, seen the ids its result contained; result is the start of what came back.
+  // - agent_runs: one row per run inside Subspace (why it started, how it ended, steps, tokens, the
+  //   model's own words) and per wake-up call sent to an outside agent.
+  `CREATE TABLE IF NOT EXISTS agent_calls (
+     id bigserial PRIMARY KEY,
+     ts timestamptz NOT NULL DEFAULT now(),
+     agent_id text NOT NULL,
+     via text NOT NULL,
+     run_id text,
+     client text,
+     grant_id text,
+     tool text NOT NULL,
+     kind text NOT NULL,
+     args jsonb NOT NULL DEFAULT '{}',
+     ok boolean NOT NULL,
+     error text,
+     ms int NOT NULL DEFAULT 0,
+     query text,
+     path text,
+     refs text[] NOT NULL DEFAULT '{}',
+     seen text[] NOT NULL DEFAULT '{}',
+     result_count int,
+     result_chars int NOT NULL DEFAULT 0,
+     result text NOT NULL DEFAULT ''
+   );
+   CREATE INDEX IF NOT EXISTS agent_calls_agent ON agent_calls (agent_id, ts DESC);
+   CREATE INDEX IF NOT EXISTS agent_calls_tool ON agent_calls (tool, ts DESC);
+   CREATE INDEX IF NOT EXISTS agent_calls_ts ON agent_calls (ts);
+   CREATE INDEX IF NOT EXISTS agent_calls_failed ON agent_calls (ts DESC) WHERE NOT ok;
+   CREATE INDEX IF NOT EXISTS agent_calls_run ON agent_calls (run_id, id) WHERE run_id IS NOT NULL;
+   CREATE INDEX IF NOT EXISTS agent_calls_seen ON agent_calls USING gin (seen);
+   CREATE INDEX IF NOT EXISTS agent_calls_refs ON agent_calls USING gin (refs);
+   CREATE TABLE IF NOT EXISTS agent_runs (
+     id text PRIMARY KEY,
+     agent_id text NOT NULL,
+     via text NOT NULL,
+     reason text NOT NULL DEFAULT '',
+     started_at timestamptz NOT NULL DEFAULT now(),
+     finished_at timestamptz,
+     status text NOT NULL DEFAULT 'running',
+     detail text,
+     model text,
+     effort text,
+     steps int NOT NULL DEFAULT 0,
+     input_tokens bigint NOT NULL DEFAULT 0,
+     output_tokens bigint NOT NULL DEFAULT 0,
+     calls int NOT NULL DEFAULT 0,
+     errors int NOT NULL DEFAULT 0,
+     said text NOT NULL DEFAULT ''
+   );
+   CREATE INDEX IF NOT EXISTS agent_runs_agent ON agent_runs (agent_id, started_at DESC)`,
 ];
 
 async function migrate() {

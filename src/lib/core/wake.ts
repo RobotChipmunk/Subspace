@@ -1,4 +1,5 @@
 import { q, q1 } from "../db";
+import { recordWake } from "./audit";
 
 /**
  * Waking agents. An agent that is not always running can be given a wake hook: a URL Subspace
@@ -49,11 +50,15 @@ async function fire(handle: string, reason: string) {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
-      console.error("wake failed", handle, res.status, (await res.text()).slice(0, 300));
+      const body = (await res.text()).slice(0, 300);
+      console.error("wake failed", handle, res.status, body);
+      await recordWake(handle, reason, false, `The wake hook answered ${res.status}: ${body}`);
       await q("DELETE FROM settings WHERE key = $1", [`wake:${handle}`]); // let the next event try again
     }
+    else await recordWake(handle, reason, true);
   } catch (e) {
     console.error("wake failed", handle, e);
+    await recordWake(handle, reason, false, e instanceof Error ? e.message : "The wake hook could not be reached.");
     await q("DELETE FROM settings WHERE key = $1", [`wake:${handle}`]);
   }
 }
