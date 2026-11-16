@@ -58,11 +58,14 @@ export function plainText(md: string): string {
     .trim();
 }
 
-export type JournalEntry = ContextLite & { excerpt: string; image: string | null };
+/** An entry in a listing: no body, but the start of its words and every picture in it (the first also as `image`). */
+export type JournalEntry = ContextLite & { excerpt: string; image: string | null; images: string[] };
 /** A month seen from far away: how many entries, how each felt (in day order), its main themes and its digest. */
 export type JournalMonth = { ym: string; count: number; moods: string[]; tags: string[]; summary: string };
 export type JournalPage = { entries: JournalEntry[]; months: JournalMonth[]; next: string | null; total: number; tags: { tag: string; count: number }[]; today: string };
 
+/** How many of an entry's pictures a listing carries. */
+const PICTURES = 8;
 const ENTRIES = "kind = 'journal' AND NOT archived";
 const isMonth = (s: unknown): s is string => typeof s === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 
@@ -83,8 +86,9 @@ export async function listEntries(opts: { tag?: string | null; month?: string | 
   const total = (await q1<{ n: number }>(`SELECT count(*)::int AS n FROM context_nodes WHERE ${where}`, params))!.n;
   const [day, id] = (opts.before ?? "").split("~");
   if (isDay(day) && id) where += ` AND (entry_date, id) < ($${params.push(day)}::date, $${params.push(id)})`;
-  const rows = await q<ContextLite & { head: string; image: string | null }>(
-    String.raw`SELECT ${LITE}, left(body, 1600) AS head, substring(body from '!\[[^\]]*\]\(([^)[:space:]]+)') AS image
+  const rows = await q<ContextLite & { head: string; images: string[] }>(
+    String.raw`SELECT ${LITE}, left(body, 1600) AS head,
+            ARRAY(SELECT m[1] FROM regexp_matches(body, '!\[[^\]]*\]\(([^)[:space:]]+)', 'g') AS m LIMIT ${PICTURES}) AS images
      FROM context_nodes WHERE ${where} ORDER BY entry_date DESC, id DESC LIMIT $${params.push(limit + 1)}`,
     params,
   );
@@ -95,7 +99,7 @@ export async function listEntries(opts: { tag?: string | null; month?: string | 
     `SELECT t AS tag, count(*)::int AS count FROM context_nodes, unnest(tags) t WHERE ${ENTRIES} GROUP BY t ORDER BY count(*) DESC, t LIMIT 60`,
   );
   return {
-    entries: rows.map(({ head, ...e }) => ({ ...e, excerpt: plainText(head).slice(0, 240) })),
+    entries: rows.map(({ head, images, ...e }) => ({ ...e, excerpt: plainText(head).slice(0, 240), images, image: images[0] ?? null })),
     months: await monthsFor([...new Set(rows.map((r) => r.entry_date!.slice(0, 7)))]),
     next: more && last ? `${last.entry_date}~${last.id}` : null,
     total,

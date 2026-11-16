@@ -205,10 +205,14 @@ Patterns:
   side effect.
 - **Later** (todos): a list of tasks dated beyond next week, grouped by day. Like the bin, it
   is listed only while it holds something, and nothing is added to it directly.
-- **Journal** (`journal/page.tsx`): the owner's own writing, arranged by time. The list sits
-  directly on the page under small month headings, newest first. A row names its day once, at
-  the left (the day number, in accent when it is today, over the short weekday; later entries of
-  the same day leave it blank), then the title, two lines of what the entry says, and its tags.
+- **Journal** (`journal/page.tsx`): the owner's own writing, arranged by time. Under small month
+  headings, newest first, each entry is a 22px glass card. It names its day once, at the left
+  (the day number, in accent when it is today, over the short weekday; later entries of the same
+  day leave it blank), then the title, two lines of what the entry says, and its mood and tags.
+  Beneath them come every picture in the entry, never cropped: one is shown whole across the card
+  (up to 360px tall, 300px on a phone); several sit in one row at a common height (200px, 160px on
+  a phone), each as wide as its shape needs, and the row scrolls sideways, fading at its right
+  edge while more wait. Cards lift a little under the pointer.
   An entry opens in place of the list as one 26px glass panel: one row of pills (the date, the
   mood, then the tags and "Tag" to add one, wrapping together) with the bin at its end, then the
   title, the gist, and the editor. Enter in the title moves on to the writing.
@@ -220,8 +224,8 @@ Patterns:
 - **Month at a glance** (journal): under a month's heading, a row of tone dots (one per entry, in
   day order), one meta line ("Mostly reflective · AI, Creativity"), and the month's digest in a
   sentence or two when one has been written. In the list each entry's second line is its gist,
-  the one sentence worth remembering, with its mood first among the chips and a 48px thumbnail at
-  the right when it holds a picture. The gist shows under an entry's title too. This is the same
+  the one sentence worth remembering, with its mood first among the chips and its pictures
+  beneath. The gist shows under an entry's title too. This is the same
   far-to-near reading agents get: months, then a line per entry, then the entry.
 - **Tags** (journal): quiet chips, `fill` with `ink2` text, never coloured. On an entry they share
   the top row with the date and mood pills; each chip carries a small remove button, and a "Tag"

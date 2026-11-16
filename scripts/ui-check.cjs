@@ -737,6 +737,12 @@ async function run(profile) {
     const row = page.locator("[data-entry]", { hasText: "Sketching again" });
     await reachable(row, "journal entry row");
     if (!(await row.innerText()).includes("Creativity")) fail("journal: the sketching entry does not show its Creativity tag");
+    // each entry is a card showing every picture in it, none cropped: a tall one stays tall, a wide one wide
+    await row.locator("img").first().evaluate((i) => i.decode().catch(() => {}));
+    const shapes = await row.locator("img").evaluateAll((imgs) => imgs.map((i) => ({ natural: i.naturalWidth / i.naturalHeight, shown: i.getBoundingClientRect().width / i.getBoundingClientRect().height })));
+    if (shapes.length !== 2) fail(`journal: the card for an entry with two pictures shows ${shapes.length}`);
+    for (const s of shapes) if (!s.natural || Math.abs(s.shown - s.natural) > 0.04) fail(`journal: a picture in a card is not shown at its own shape (${s.shown.toFixed(2)} instead of ${s.natural.toFixed(2)})`);
+    await reachable(row.locator("img").first(), "journal picture in a card");
     // from far away: each month says how it felt, each entry carries its mood and its gist
     const glance = page.locator("[data-month-glance]").first();
     await reachable(glance, "journal month at a glance");

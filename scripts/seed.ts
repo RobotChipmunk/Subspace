@@ -225,8 +225,17 @@ async function main() {
     [4, "A lesson from the roof", "The roofer found the leak in ten minutes. I had put the call off for a year. Lesson learned, again: the mistake is rarely the problem, it is waiting. Note to self for next time."],
     [38, "Walking the bridge", "Long walk across the St Johns bridge with Dad. He talked about his father for the first time in years. Grateful for a slow afternoon with family."],
   ];
+  // pictures of different shapes: two drawings on one entry (a tall page and a wide one), one wide view on another
+  const pic = async (png: Buffer) => `![](${await saveMedia(owner, png, "image/png")})`;
+  const pictures: Record<string, string[]> = {
+    "Sketching again": [
+      await pic(screenshot(600, 800, 0xf6f1e7, [[120, 120, 760, 520, 0xe2ddf7], [220, 220, 300, 300, 0x8f83f5], [560, 300, 220, 220, 0xf2b8a0], [120, 720, 560, 40, 0x26242b], [120, 800, 380, 40, 0x9a96a6]])),
+      await pic(screenshot(960, 540, 0xf3f1ee, [[60, 120, 880, 760, 0xffffff], [140, 220, 300, 520, 0x9fd8c4], [500, 220, 360, 240, 0xf3d58a], [500, 520, 360, 220, 0xf2b8a0]])),
+    ],
+    "Walking the bridge": [await pic(screenshot(1200, 600, 0xcfe0ef, [[0, 600, 1000, 400, 0x5b7a99], [0, 520, 1000, 80, 0x26242b], [160, 160, 40, 440, 0x26242b], [800, 160, 40, 440, 0x26242b], [700, 120, 120, 120, 0xf3d58a]]))],
+  };
   for (const [ago, title, body] of entries) {
-    const e = await createEntry(owner, { title, body, date: daysAgo(ago) });
+    const e = await createEntry(owner, { title, body: [body, ...(pictures[title] ?? [])].join("\n\n"), date: daysAgo(ago) });
     await categorize(e.id);
   }
 

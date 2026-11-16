@@ -666,6 +666,28 @@ html[data-typing] .art-mesh {
   }
 }
 
+/* ---------- Journal entries: cards that lift a little under the pointer ---------- */
+.entry-card {
+  transition: box-shadow 0.4s var(--ease), transform 0.4s var(--ease);
+}
+@media (hover: hover) {
+  .entry-card:hover {
+    box-shadow: var(--shadow-lift);
+  }
+}
+.entry-card:active {
+  transform: scale(0.995);
+}
+/* Several pictures in a card: one row that scrolls sideways, fading out only where more wait. */
+.entry-strip {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+}
+.entry-strip::-webkit-scrollbar {
+  display: none;
+}
+
 /* ---------- Saved links: quiet rows, no dividers ---------- */
 .link-row {
   transition: background 0.25s ease;
