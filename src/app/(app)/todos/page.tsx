@@ -388,7 +388,8 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   const { data, mutate } = useSWR<{ todos: Row[]; today: string }>(`todos?view=${view}`, fetcher, { refreshInterval: 15_000 });
   const { mutate: globalMutate } = useSWRConfig();
   const [rows, setRows] = useState<Row[] | null>(null);
-  const [adding, setAdding] = useState(false);
+  // the section a task is being typed into: "" in a list without sections, null when none is open
+  const [adding, setAdding] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const dragging = useRef(false);
   const away = useRef(false);
@@ -428,17 +429,20 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   }
 
   async function add() {
+    const section = adding ?? "";
     const title = draft.trim();
-    if (!title) return setAdding(false);
+    if (!title) return setAdding(null);
     setDraft("");
+    // a section that is a day adds to that day; "Any day" (and a list without sections) adds to the list itself
+    const target = /^\d{4}-/.test(section) ? section : view;
     // Show it straight away, exactly where it will live; the server's copy replaces it silently.
     // the same place the server will file it, so it does not jump between groups when saved
-    const day = /^\d{4}-/.test(view) ? view : view === "today" ? today : view === "weekend" && today ? weekendDay(today) : null;
+    const day = /^\d{4}-/.test(target) ? target : target === "today" ? today : target === "weekend" && today ? weekendDay(today) : null;
     const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, scope: view === "backlog" ? "backlog" : folder?.guest ? "guest" : day ? "day" : "week", guest_id: folder?.guest ?? null, date: day ?? null } as unknown as Row;
     unsaved.current.push(temp);
     setRows((rs) => [...(rs ?? []), temp]);
     try {
-      const t = await api<Row>("todos", { body: { title, view } });
+      const t = await api<Row>("todos", { body: { title, view: target } });
       const row = { ...t, has_notes: false };
       keys.current.set(row.id, temp.id);
       unsaved.current = unsaved.current.filter((u) => u !== temp);
@@ -451,7 +455,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
       unsaved.current = unsaved.current.filter((u) => u !== temp);
       setRows((rs) => (rs ?? []).filter((r) => r.id !== temp.id));
       setDraft(title);
-      setAdding(true);
+      setAdding(section);
     }
   }
 
@@ -468,7 +472,10 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
    * The sections of this list a task may be carried to: any but its own, a week in "Later" (no
    * single day to land on) and a day already past (it would only roll forward again).
    */
-  const acceptsGroup = (r: Row, key: string) => multi && !r.id.startsWith("new_") && key !== groupOf(r) && !key.endsWith("w") && (key === "any" || !today || key >= today);
+  const acceptsGroup = (r: Row, key: string) => multi && !r.id.startsWith("new_") && key !== groupOf(r) && takes(key);
+
+  /** Whether a section can be given a task, by carrying or typing: not a whole week in "Later" (no single day) nor a day already past. */
+  const takes = (key: string) => !key.endsWith("w") && (key === "any" || !today || key >= today);
 
   /** A task let go over another section: it joins that day (or "Any day") at the end, at once, and is saved behind. */
   async function moveToGroup(r: Row, key: string) {
@@ -508,6 +515,23 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   }
 
   const title = folder?.label ?? "";
+  const groupName = (key: string) => (key === "any" ? "Any day" : key === today ? "Today" : view !== "later" ? dayName(key) : key.endsWith("w") ? `Week of ${longDate(key.slice(0, 10)).replace(/^\S+\s/, "")}` : longDate(key));
+
+  /** The plus at the end of a list, or of one of its sections, and the field it opens. */
+  const adder = (section: string) => (
+    <div className="mt-1 flex items-center gap-3 px-1">
+      {adding === section ? (
+        <motion.form initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} onSubmit={(e) => (e.preventDefault(), add())} className="flex flex-1 items-center gap-3">
+          <span className="check opacity-40" />
+          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setAdding(null))} placeholder="New task" className="flex-1 py-[9px] text-[16px]" />
+        </motion.form>
+      ) : (
+        <motion.button whileTap={{ scale: 0.9 }} onClick={() => setAdding(section)} aria-label={section ? `Add task to ${groupName(section)}` : "Add task"} data-add={section || undefined} className={`grid h-[22px] w-[22px] place-items-center rounded-full bg-fill2 text-ink2 transition-colors hover:bg-accent hover:text-white ${section ? "mb-1 mt-1" : "mt-2"}`}>
+          <Plus size={15} strokeWidth={2.4} />
+        </motion.button>
+      )}
+    </div>
+  );
   const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : view === "later" ? "Dated beyond next week." : folder?.guest ? "Tasks stay here after you give them a day." : undefined;
   const openCount = rows?.filter((r) => !r.done).length ?? 0;
 
@@ -522,7 +546,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
         <div key={key} data-group={key || undefined} data-over={overGroup === key || undefined} className={`-mx-2 mb-2 rounded-2xl px-2 pb-1 ${key ? "mt-3 pt-2" : ""} ${overGroup === key ? "drop-target" : ""}`}>
           {key && (
             <h2 className={`mb-1 px-1 text-[12.5px] font-semibold uppercase tracking-[0.06em] transition-colors duration-300 ${overGroup === key ? "text-accent" : "text-ink3"}`}>
-              {key === "any" ? "Any day" : key === today ? "Today" : view !== "later" ? dayName(key) : key.endsWith("w") ? `Week of ${longDate(key.slice(0, 10)).replace(/^\S+\s/, "")}` : longDate(key)}
+              {groupName(key)}
             </h2>
           )}
           <Reorder.Group axis="y" values={items} onReorder={(o) => !away.current && reorder(key, o)} as="ul">
@@ -548,24 +572,15 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
               ))}
             </AnimatePresence>
           </Reorder.Group>
+          {/* in a list with sections each one that can take a task has its own plus, which adds to that day */}
+          {key && takes(key) && adder(key)}
         </div>
       ))}
 
-      {rows && rows.length === 0 && !adding && <p className="px-1 py-6 text-ink3">Nothing here.</p>}
+      {rows && rows.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">Nothing here.</p>}
 
-      {/* "Later" has no day of its own to add to: a task gets there by being given a date */}
-      <div className={`mt-1 flex items-center gap-3 px-1 ${view === "later" ? "hidden" : ""}`}>
-        {adding ? (
-          <motion.form initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} onSubmit={(e) => (e.preventDefault(), add())} className="flex flex-1 items-center gap-3">
-            <span className="check opacity-40" />
-            <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setAdding(false))} placeholder="New task" className="flex-1 py-[9px] text-[16px]" />
-          </motion.form>
-        ) : (
-          <motion.button whileTap={{ scale: 0.9 }} onClick={() => setAdding(true)} aria-label="Add task" className="mt-2 grid h-[22px] w-[22px] place-items-center rounded-full bg-fill2 text-ink2 transition-colors hover:bg-accent hover:text-white">
-            <Plus size={15} strokeWidth={2.4} />
-          </motion.button>
-        )}
-      </div>
+      {/* a list without sections has one plus at its end; "Later" adds only through its days, as a task gets there by being given a date */}
+      {!multi && adder("")}
     </div>
   );
 }
