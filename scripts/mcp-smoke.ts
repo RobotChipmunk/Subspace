@@ -91,6 +91,22 @@ async function main() {
   }
   await call(claude, "submit_art", { job_id: "nope", svg: "<svg viewBox='0 0 1 1'><script/></svg>" });
   await call(claude, "reply", { post_id: p.id, body: `Yes. Adding it under work. @scout${tag} keep the round sizes coming.` });
+  // both agents are now in the thread: an owner reply naming nobody reaches both, and only one may take it
+  const { createReply } = await import("../src/lib/core/posts");
+  await call(s, "changes");
+  await call(claude, "changes");
+  const ask = await createReply(owner, p.id, "Can one of you add the round to the robotics page?");
+  for (const who of [s, claude]) {
+    const item = (await call(who, "changes")).for_you.find((i: any) => i.id === ask.id);
+    if (item?.why !== "reply in a thread you are part of" || item.agents_in_thread?.length !== 1) throw new Error("an unnamed reply did not reach an agent in the thread: " + JSON.stringify(item));
+  }
+  const [c1, c2] = await Promise.all([call(s, "claim", { post_id: ask.id }), call(claude, "claim", { post_id: ask.id })]);
+  if (c1.yours === c2.yours) throw new Error("exactly one agent should hold the claim: " + JSON.stringify([c1, c2]));
+  if ((await call(c1.yours ? s : claude, "claim", { post_id: ask.id })).yours !== true) throw new Error("claiming again should still be yours");
+  const named = await createReply(owner, p.id, `@scout${tag} and what was the previous round?`);
+  const forClaude = (await call(claude, "changes")).for_you.find((i: any) => i.id === named.id);
+  if (forClaude?.why !== "reply in a thread you are part of" || forClaude.mentions?.[0] !== `@scout${tag}`) throw new Error("a reply naming another agent should say so: " + JSON.stringify(forClaude));
+  if ((await call(s, "changes")).for_you.find((i: any) => i.id === named.id)?.why !== "mentioned you") throw new Error("the named agent should see it was mentioned");
   const c = await call(claude, "context_write", { parent: "work", title: "Robotics thesis " + tag, summary: "Why the owner holds robotics positions and what would change that.", body: "- Holds Agility (as of 2026-11)\n- Watching humanoid valuations" });
   await call(claude, "context_write", { id: c.id, body_append: "- Figure at $39B sets a new ceiling", expect_version: 1 });
   await call(claude, "context_write", { id: c.id, body: "stale", expect_version: 1 });

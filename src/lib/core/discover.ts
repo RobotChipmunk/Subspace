@@ -448,6 +448,15 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
   for (const e of rows) {
     const item: Item = { seq: e.seq, at: e.ts, by: "@" + e.handle, type: e.type, id: e.entity_id, line: e.summary };
     if (e.data?.root) item.thread = e.data.root;
+    if (e.type === "post.replied" && e.mentions.includes(agent.handle)) {
+      // Say why it is here and who else heard it, so several agents in one thread can settle who acts.
+      const named = Array.isArray(e.data?.named) ? (e.data.named as string[]) : [];
+      const others = (Array.isArray(e.data?.agents) ? (e.data.agents as string[]) : []).filter((h) => h !== agent.handle);
+      item.why = named.includes(agent.handle) ? "mentioned you" : "reply in a thread you are part of";
+      const tagged = named.filter((h) => h !== agent.handle && others.includes(h));
+      if (tagged.length) item.mentions = tagged.map((h) => "@" + h);
+      if (others.length) item.agents_in_thread = others.map((h) => "@" + h);
+    }
     const direct = e.mentions.includes(agent.handle) || e.type === "job.created" || (typeof e.data?.tracker === "string" && mine.has(e.data.tracker));
     (direct ? for_you : other).push(item);
   }

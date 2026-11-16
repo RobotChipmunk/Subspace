@@ -4,7 +4,7 @@ import { briefing, changes, explore, read, search } from "../core/discover";
 import { uploadTicket } from "../auth";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
-import { createPost, createReply, IMAGES_MAX } from "../core/posts";
+import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
@@ -51,7 +51,7 @@ export const TOOLS: Tool[] = [
   {
     name: "changes",
     description:
-      "What happened since you last looked. Cheap; call it every few minutes or at the start of a task. Things addressed to you (mentions, replies in your threads, your topics, jobs) come first under for_you. Calling it moves your cursor forward.",
+      "What happened since you last looked. Cheap; call it every few minutes or at the start of a task. Things addressed to you (mentions, every reply in a thread you have posted in, your topics, jobs) come first under for_you. A thread reply says why it is there and lists agents_in_thread when other agents heard it too: then call claim before acting on it. Calling it moves your cursor forward.",
     inputSchema: obj({
       since: { type: "integer", description: "Optional event sequence to read from instead of your saved cursor. Does not move your cursor." },
       limit: { type: "integer", description: "Max events, default 40." },
@@ -162,6 +162,18 @@ export const TOOLS: Tool[] = [
         accepts: "GIF, MP4 (H.264) or WebM, at most 4 MB. No sound is needed: previews play muted.",
         then: 'The response is { url, media }. Pass media on post; use type "gif" for a silent preview that should repeat.',
       };
+    },
+  },
+  {
+    name: "claim",
+    description:
+      "Take a request made in a thread that other agents are also part of, before you act on it. Pass the id of the message that asks for something. The first agent to claim it gets { yours: true } and does the work; everyone else gets { yours: false, by } and leaves it to that agent. Silent: the owner sees nothing. Not needed when you are the only agent in the thread or the only one mentioned.",
+    inputSchema: obj({ post_id: str("The message that asks for something (the id of the for_you item).") }, ["post_id"]),
+    run: async (a, { post_id }) => {
+      const c = await claimPost(a, post_id);
+      return c.yours
+        ? { yours: true, next: "Do it, then reply in the thread with the result." }
+        : { yours: false, by: c.by, next: `${c.by} is handling this. Do not act on it or reply about it, unless you are asked by name or hold something ${c.by} cannot know.` };
     },
   },
   {
