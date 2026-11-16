@@ -332,7 +332,9 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
 
   return (
     <div ref={panel} className="glass mb-5 rounded-[26px] p-6 max-md:p-5">
-      <div className="mb-3 flex items-center gap-3">
+      {/* one row of pills: the day, the mood, then the tags and the way to add one; the bin stays at the end */}
+      <div className="mb-3 flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         <DatePill label={dayLabel(day, today)} value={day} today={today} past onPick={(d) => (setDay(d), void patch({ entry_date: d }))} />
         <label className={`relative flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${mood ? "bg-fill text-ink2 hover:bg-fill2" : "text-ink3 hover:bg-fill hover:text-ink2"}`} data-mood={mood ?? ""}>
           {mood && <ToneDot mood={mood} />}
@@ -347,7 +349,8 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
             {mood && entry.mood_by === "owner" && <option value="">Let Subspace choose</option>}
           </select>
         </label>
-        <span className="flex-1" />
+        <Tags tags={tags} auto={tagsBy === "auto"} onChange={chooseTags} />
+        </div>
         <ConfirmDelete label="Delete entry" confirm="Delete" onConfirm={async () => (await api(`context/${entry.id}`, { method: "DELETE" }), onDeleted())} />
       </div>
       <textarea
@@ -364,11 +367,12 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
         className="block w-full resize-none overflow-hidden text-[26px] font-bold leading-[1.2] tracking-[-0.025em]"
       />
       {gist && (
-        <p className="mt-1 text-[15px] leading-snug text-ink2" data-gist aria-label="Gist">
+        <p className="mt-1 pr-[72px] text-[15px] leading-snug text-ink2" data-gist aria-label="Gist">
           {gist}
         </p>
       )}
-      <Tags tags={tags} auto={tagsBy === "auto"} onChange={chooseTags} />
+      {/* room for the editor's link and picture buttons, which sit just above it */}
+      <div className="h-10" aria-hidden />
       <div className="editor-compact">
         <Editor value={body} linkPreviews placeholder="Write. Paste a link on a line of its own to show its preview." onChange={saver.push} />
       </div>
@@ -378,7 +382,8 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
 
 /**
  * An entry's tags: quiet chips, each with a way to take it off, and a pill that opens into a field
- * to add one. Tags chosen by the app say so, in one meta line, until the owner changes them.
+ * to add one. They sit in the entry's top row after the date and mood pills, and wrap with them.
+ * Tags chosen by the app say so, in a meta note at the end of the row, until the owner changes them.
  */
 function Tags({ tags, auto, onChange }: { tags: string[]; auto: boolean; onChange: (tags: string[]) => void }) {
   const [adding, setAdding] = useState(false);
@@ -396,7 +401,7 @@ function Tags({ tags, auto, onChange }: { tags: string[]; auto: boolean; onChang
   }
 
   return (
-    <div className="mb-6 mt-2.5 flex min-h-8 flex-wrap items-center gap-1.5 pr-[72px]" role="group" aria-label="Tags">
+    <div className="contents" role="group" aria-label="Tags">
       <AnimatePresence initial={false} mode="popLayout">
         {tags.map((t) => (
           <motion.span key={t} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={soft} data-tag={t} className="flex h-8 items-center rounded-full bg-fill pl-3 text-[13px] font-medium text-ink2">

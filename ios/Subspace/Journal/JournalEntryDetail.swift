@@ -207,9 +207,7 @@ private struct JournalEntryEditor: View {
                     .padding(.top, 4)
                     .accessibilityIdentifier("journal.gist")
             }
-            tagsRow
-                .padding(.top, 10)
-                .padding(.bottom, 24)
+            Color.clear.frame(height: 24)
             if !error.isEmpty {
                 Text(error).font(.ssMeta).foregroundStyle(Theme.danger).padding(.bottom, 12)
             }
@@ -224,11 +222,14 @@ private struct JournalEntryEditor: View {
 
     private var topRow: some View {
         HStack(alignment: .top, spacing: 6) {
-            // on a narrow phone the mood pill drops under the date pill
+            // One row of pills: the day, the mood, then the tags and the way to add one. They wrap
+            // together on a narrow screen; the height is taken from the width the row is given.
             FlowRow(spacing: 6) {
                 datePill
                 moodMenu
+                tagPills
             }
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(editing ? "Done" : "Edit") {
@@ -332,30 +333,29 @@ private struct JournalEntryEditor: View {
     }
 
     /// Quiet chips, each with a way to take it off, and a pill that opens into a field to add one.
-    /// Tags chosen by the app say so, in one meta line, until the owner changes them.
-    private var tagsRow: some View {
-        FlowRow(spacing: 6) {
-            ForEach(tags, id: \.self) { tag in
-                tagChip(tag)
-            }
-            if tags.count < 6 {
-                tagAdder
-                if addingTag {
-                    ForEach(suggestions, id: \.self) { tag in
-                        suggestionChip(tag)
-                    }
+    /// They follow the date and mood pills in the entry's top row (each is its own item there, so
+    /// they wrap one by one). Tags chosen by the app say so at the end of the row until the owner
+    /// changes them.
+    @ViewBuilder private var tagPills: some View {
+        ForEach(tags, id: \.self) { tag in
+            tagChip(tag)
+        }
+        if tags.count < 6 {
+            tagAdder
+            if addingTag {
+                ForEach(suggestions, id: \.self) { tag in
+                    suggestionChip(tag)
                 }
             }
-            if tagsBy == "auto" && !tags.isEmpty {
-                Text("Tagged for you")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.ink3)
-                    .padding(.leading, 4)
-                    .frame(minHeight: 32)
-                    .accessibilityIdentifier("journal.tags.auto")
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        if tagsBy == "auto" && !tags.isEmpty {
+            Text("Tagged for you")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.ink3)
+                .padding(.leading, 4)
+                .frame(minHeight: 36)
+                .accessibilityIdentifier("journal.tags.auto")
+        }
     }
 
     /// Tags the journal already uses, offered while one is being typed: those that contain what
@@ -383,7 +383,7 @@ private struct JournalEntryEditor: View {
                 .foregroundStyle(Theme.ink3)
                 .lineLimit(1)
                 .padding(.horizontal, 10)
-                .frame(height: 32)
+                .frame(height: 36)
                 .overlay(Capsule().strokeBorder(Theme.fill2, lineWidth: 1))
                 .contentShape(Capsule())
         }
@@ -405,7 +405,7 @@ private struct JournalEntryEditor: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.ink3)
-                    .frame(width: 28, height: 32)
+                    .frame(width: 28, height: 36)
                     .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle(scale: 0.9))
@@ -413,7 +413,7 @@ private struct JournalEntryEditor: View {
             .accessibilityIdentifier("journal.tags.remove.\(tag)")
         }
         .padding(.leading, 12)
-        .frame(height: 32)
+        .frame(height: 36)
         .background(Theme.fill, in: Capsule())
     }
 
@@ -432,7 +432,7 @@ private struct JournalEntryEditor: View {
                 .onAppear { focus = .tag }
                 .frame(width: 120)
                 .padding(.horizontal, 12)
-                .frame(height: 32)
+                .frame(height: 36)
                 .background(Theme.fill, in: Capsule())
                 .accessibilityLabel("New tag")
                 .accessibilityIdentifier("journal.tags.field")
@@ -446,7 +446,7 @@ private struct JournalEntryEditor: View {
                 }
                 .foregroundStyle(Theme.ink3)
                 .padding(.horizontal, 10)
-                .frame(height: 32)
+                .frame(height: 36)
                 .contentShape(Capsule())
             }
             .buttonStyle(PressStyle(scale: 0.95))

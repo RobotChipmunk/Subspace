@@ -209,8 +209,9 @@ Patterns:
   directly on the page under small month headings, newest first. A row names its day once, at
   the left (the day number, in accent when it is today, over the short weekday; later entries of
   the same day leave it blank), then the title, two lines of what the entry says, and its tags.
-  An entry opens in place of the list as one 26px glass panel: date pill, bin, title, tags, then
-  the editor. Enter in the title moves on to the writing.
+  An entry opens in place of the list as one 26px glass panel: one row of pills (the date, the
+  mood, then the tags and "Tag" to add one, wrapping together) with the bin at its end, then the
+  title, the gist, and the editor. Enter in the title moves on to the writing.
 - **Mood** (journal, `src/lib/moods.ts`): every entry has one of eleven moods, read from its text
   like its tags, and each mood has a tone. Tone is the only colour a mood gets, as a small dot:
   `--good` for the bright ones, `ink3` for the even ones, `--warn` for the heavy ones. Never a
@@ -222,10 +223,11 @@ Patterns:
   the one sentence worth remembering, with its mood first among the chips and a 48px thumbnail at
   the right when it holds a picture. The gist shows under an entry's title too. This is the same
   far-to-near reading agents get: months, then a line per entry, then the entry.
-- **Tags** (journal): quiet chips, `fill` with `ink2` text, never coloured. On an entry each chip
-  carries a small remove button, and a "Tag" pill at the end opens into a field (known tags are
+- **Tags** (journal): quiet chips, `fill` with `ink2` text, never coloured. On an entry they share
+  the top row with the date and mood pills; each chip carries a small remove button, and a "Tag"
+  pill after them opens into a field (known tags are
   offered as the owner types; at most six). The app chooses an entry's tags from its text a moment
-  after writing stops, and says so in one meta line, "Tagged for you"; once the owner adds or
+  after writing stops, and says so in a meta note at the end of that row, "Tagged for you"; once the owner adds or
   removes a tag the line goes and the app leaves them alone. Above the list the same chips, with
   counts, filter it: one at a time, `accent-soft` while chosen, held in the address as `?tag=`.
 - **Link previews** (`Editor.tsx`, where `linkPreviews` is on: the journal): an address pasted on
