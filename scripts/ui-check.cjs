@@ -524,7 +524,8 @@ async function run(profile) {
     const saved = (await get("/api/v1/todos?view=today")).todos.find((t) => t.title === title);
     if (!saved) return fail("todos sections: a task added under Today was not saved on today");
     // take it away again, so every screen size starts from the same lists
-    await page.evaluate((id) => fetch(`/api/v1/todos/${id}`, { method: "DELETE" }), saved.id);
+    // (for good, past the bin, which a later step expects to empty)
+    await page.evaluate(async (id) => (await fetch(`/api/v1/todos/${id}`, { method: "DELETE" }), await fetch(`/api/v1/todos/${id}?forever=1`, { method: "DELETE" })), saved.id);
     await settle(400);
   });
   await step("todos add, tick, open", async () => {
