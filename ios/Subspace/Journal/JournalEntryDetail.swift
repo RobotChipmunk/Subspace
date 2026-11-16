@@ -487,7 +487,8 @@ private struct JournalEntryEditor: View {
                 linkForm
                     .transition(.opacity)
             } else {
-                FlowRow(spacing: 18) {
+                // One row: a wrapping row here measured as a single line and let the picture control fall out of the panel.
+                HStack(spacing: 16) {
                     quietButton("link", "Add a link") {
                         withAnimation(.ssSoft) { linking = true }
                     }
@@ -506,6 +507,7 @@ private struct JournalEntryEditor: View {
                         .accessibilityLabel("Paste a picture")
                         .accessibilityIdentifier("journal.pasteimage")
                     }
+                    Spacer(minLength: 0)
                 }
             }
             if !imageError.isEmpty {
