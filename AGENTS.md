@@ -113,6 +113,10 @@ being true. Read this list before starting work.
 - `Floating` mounts hidden and is placed a frame later, so `autoFocus` on a field inside it does
   nothing and the keys go to whatever was tapped. Focus the field from an effect once it is open
   (see the link field in `Editor.tsx`).
+- Stopping `ui-check` with `pkill -f ui-check.cjs` left the run alive without its browser; it kept
+  going against the reseeded database and wrote into the same log as the next run. Stop it with
+  the task's own stop, confirm with `pgrep -f ui-check` that nothing is left, and give each run
+  its own log file.
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.

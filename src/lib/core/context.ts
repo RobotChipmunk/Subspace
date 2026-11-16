@@ -176,8 +176,10 @@ export async function updateNode(
     ]);
   }
   await q(
-    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10, blurb=$11, tags=$12, tags_by=$13, entry_date=$14, mood=$15, mood_by=$16 WHERE id=$1",
-    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind, blurb, tags, tagsBy, entryDate, mood, moodBy],
+    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10, blurb=$11, tags=$12, tags_by=$13, entry_date=$14, mood=$15, mood_by=$16, tags_for = CASE WHEN $17 THEN NULL ELSE tags_for END WHERE id=$1",
+    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind, blurb, tags, tagsBy, entryDate, mood, moodBy,
+      // a mood handed back to the app is worked out afresh the next time the entry is read
+      isEntry && patch.mood === null && before.mood_by === "owner"],
   );
   if (path !== before.path) {
     // Keep every descendant's address in step with its ancestor.

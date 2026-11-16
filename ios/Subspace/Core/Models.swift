@@ -138,14 +138,14 @@ struct Todo: Codable, Identifiable, Hashable {
     var next_date: String?
 }
 
-/// A node of the context tree: a note, a page an agent made, or a saved link.
+/// A node of the context tree: a note, a page an agent made, a saved link or a journal entry.
 struct ContextNode: Codable, Identifiable, Hashable {
     let id: String
     var parent_id: String?
     var path: String?
     var title: String
     var summary: String?
-    /// "note", "page" or "link".
+    /// "note", "page", "link" or "journal". Anything else is treated as a note.
     var kind: String?
     var cover: String?
     var url: String?
@@ -160,6 +160,18 @@ struct ContextNode: Codable, Identifiable, Hashable {
     var child_count: Int?
     var parent_title: String?
     var parent_path: String?
+    /// Journal entries only: the day it belongs to ("YYYY-MM-DD"), its themes, and who chose them
+    /// ("auto" or "owner").
+    var entry_date: String?
+    var tags: [String]?
+    var tags_by: String?
+    /// Journal entries only: how the writer felt (one of `JournalMoods.names`) and who said so
+    /// ("auto" or "owner"). An entry's `summary` is its gist in a sentence.
+    var mood: String?
+    var mood_by: String?
+    /// Journal lists only: the first words of the entry, without markup, and its first picture.
+    var excerpt: String?
+    var image: String?
 }
 
 struct RailAction: Codable, Hashable {

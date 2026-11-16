@@ -46,7 +46,8 @@ async function run(profile) {
       if (r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1) return `extends outside the screen (${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)} in ${vw}x${vh})`;
       for (const [fx, fy] of [[0.5, 0.5], [0.1, 0.2], [0.9, 0.8]]) {
         const top = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
-        if (top && !el.contains(top) && !top.contains(el)) return `is covered or clipped (by <${top.tagName.toLowerCase()} class="${String(top.className).slice(0, 50)}">)`;
+        // the dev server's own badge floats over the corner of the page; it is not part of the app
+        if (top && !el.contains(top) && !top.contains(el) && top.tagName !== "NEXTJS-PORTAL") return `is covered or clipped (by <${top.tagName.toLowerCase()} class="${String(top.className).slice(0, 50)}">)`;
       }
       return null;
     });

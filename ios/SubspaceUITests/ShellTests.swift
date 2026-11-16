@@ -24,7 +24,7 @@ final class ShellTests: SubspaceTestCase {
     func testEveryScreenOpensFromTheAppBar() {
         launch()
         signIn()
-        for tab in ["feed", "todos", "context", "following", "agents"] {
+        for tab in ["feed", "todos", "journal", "context", "following", "agents"] {
             go(tab)
             XCTAssertTrue(app.buttons["nav.\(tab)"].isSelected, "\(tab) should be the selected screen")
             shot("02-\(tab)")
