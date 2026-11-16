@@ -11,6 +11,30 @@ final class JournalTests: SubspaceTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    /// Scrolls the list until the element is there (cards with pictures are tall, and the list
+    /// only builds what is near the screen). Bounded, so a missing element fails quickly.
+    private func reveal(_ element: XCUIElement, up: Bool = true) {
+        for _ in 0..<5 {
+            if element.exists && element.isHittable { return }
+            if up { app.swipeUp() } else { app.swipeDown() }
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+    }
+
+    /// A picture's width over its height, waiting for it to take its own shape (it holds a 4:3
+    /// place until the picture has loaded).
+    private func settledRatio(_ picture: XCUIElement, near expected: CGFloat) -> CGFloat {
+        var ratio: CGFloat = 0
+        let until = Date().addingTimeInterval(10)
+        repeat {
+            let frame = picture.frame
+            ratio = frame.height > 0 ? frame.width / frame.height : 0
+            if abs(ratio - expected) < 0.05 { return ratio }
+            Thread.sleep(forTimeInterval: 0.5)
+        } while Date() < until
+        return ratio
+    }
+
     /// Entries an earlier, unfinished run of the writing test left behind (a failed test is run once more).
     private func removeLeftovers() {
         let leftovers = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'journal.entry.' AND (label BEGINSWITH 'Scratch entry' OR label == 'Untitled')"))
@@ -31,34 +55,58 @@ final class JournalTests: SubspaceTestCase {
         go("journal")
         XCTAssertTrue(app.buttons["nav.journal"].isSelected, "Journal should be the selected screen")
         expect(row("What the agents are for"), "today's seeded entry")
-        expect(row("Sketching again"), "yesterday's seeded entry")
-        expect(row("A lesson from the roof"), "the seeded entry from four days ago")
-        expect(row("Walking the bridge"), "the seeded entry from last month")
-        let months = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'journal.month.' AND NOT (identifier ENDSWITH '.summary')"))
-        expect(months.firstMatch, "a month heading")
-        XCTAssertGreaterThanOrEqual(months.count, 2, "Entries 38 days apart sit under different months")
-        // The month at a glance: a dot per entry by mood, the mood most share, its themes.
-        // The seed dates entries by the UTC day, so this month is the UTC month.
+        let sketching = expect(row("Sketching again"), "yesterday's seeded entry")
+        // The seed dates entries by the UTC day, so months are UTC months.
         let month = DateFormatter()
         month.locale = Locale(identifier: "en_US_POSIX")
         month.timeZone = TimeZone(secondsFromGMT: 0)
         month.dateFormat = "yyyy-MM"
-        let glance = expect(element("journal.month.\(month.string(from: Date())).summary"), "this month's summary under its name")
+        let thisMonth = month.string(from: Date())
+        let earlierMonth = month.string(from: Date().addingTimeInterval(-38 * 86400))
+        expect(element("journal.month.\(thisMonth)"), "this month's heading")
+        // The month at a glance: a dot per entry by mood, the mood most share, its themes.
+        let glance = expect(element("journal.month.\(thisMonth).summary"), "this month's summary under its name")
         XCTAssertTrue(glance.label.lowercased().contains("mostly"), "The month should name its leading mood, not \(glance.label)")
         shot("15-journal")
 
+        // Each entry is a card; its pictures sit beneath, whole, each at its own shape.
+        let id = sketching.identifier.replacingOccurrences(of: "journal.entry.", with: "")
+        expect(element("journal.entry.\(id).pictures"), "the pictures of Sketching again, in its card")
+        let tall = expect(element("journal.entry.\(id).picture.0"), "the first picture, a tall one")
+        let wide = expect(element("journal.entry.\(id).picture.1"), "the second picture, a wide one")
+        let tallRatio = settledRatio(tall, near: 0.75)
+        XCTAssertEqual(tallRatio, 0.75, accuracy: 0.05, "The tall picture should keep its 3:4 shape, not \(tallRatio) (frame \(tall.frame))")
+        let wideRatio = settledRatio(wide, near: 1.78)
+        XCTAssertEqual(wideRatio, 1.78, accuracy: 0.05, "The wide picture should keep its 16:9 shape, not \(wideRatio) (frame \(wide.frame))")
+        shot("15-journal-cards")
+
+        // Further down: the entry from last month, under its own month.
+        let roof = row("A lesson from the roof")
+        reveal(roof)
+        expect(roof, "the seeded entry from four days ago", timeout: 5)
+        let bridge = row("Walking the bridge")
+        reveal(bridge)
+        expect(bridge, "the seeded entry from last month", timeout: 5)
+        expect(element("journal.month.\(earlierMonth)"), "last month's heading: entries 38 days apart sit under different months")
+        let creativity = app.buttons["journal.tag.Creativity"]
+        reveal(creativity, up: false)
+
         // A tag narrows the list; the same tag again shows everything.
-        let creativity = expect(app.buttons["journal.tag.Creativity"], "the Creativity tag above the list")
-        creativity.tap()
+        expect(creativity, "the Creativity tag above the list").tap()
         waitToVanish(row("A lesson from the roof"), "an entry without the chosen tag")
         expect(row("Sketching again"), "the entry tagged Creativity")
         XCTAssertTrue(app.buttons["journal.tag.Creativity"].isSelected, "The chosen tag should read as selected")
         shot("15-journal-tag")
         app.buttons["journal.tag.Creativity"].tap()
-        expect(row("A lesson from the roof"), "every entry again once the tag is cleared")
+        let roofAgain = row("A lesson from the roof")
+        expect(row("Sketching again"), "the list again once the tag is cleared")
+        reveal(roofAgain)
+        expect(roofAgain, "every entry again once the tag is cleared", timeout: 5)
 
         // An entry opens in place of the list, with its blocks drawn.
-        row("What the agents are for").tap()
+        let today = row("What the agents are for")
+        reveal(today, up: false)
+        expect(today, "today's entry, back at the top", timeout: 5).tap()
         expect(element("journal.title"), "the entry's title")
         expect(app.buttons["journal.date"], "the date pill")
         expect(textContaining("The case for slow interfaces"), "the link preview card in the entry")

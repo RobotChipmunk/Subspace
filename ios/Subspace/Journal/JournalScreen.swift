@@ -232,6 +232,7 @@ private struct JournalList: View {
                         JournalRow(entry: row.entry, showDay: row.showDay, today: store.today) {
                             onOpen(row.entry.id)
                         }
+                        .padding(.bottom, 10)
                     }
                 }
                 if store.next != nil {
@@ -381,13 +382,15 @@ private struct JournalMonthGlance: View {
     }
 }
 
-/// One entry in the list: its day at the left (once per day), then title, its gist (or its first
-/// words), its mood and tags, and its first picture at the right.
+/// One entry in the list, as its own glass card: its day at the left (once per day), then title,
+/// its gist (or its first words), its mood and tags; beneath them every picture in it, never cropped.
 private struct JournalRow: View {
     var entry: ContextNode
     var showDay: Bool
     var today: String
     var onOpen: () -> Void
+
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var day: String { JournalDates.day(entry) }
     /// The gist when the entry has been read; until then, how it begins.
@@ -400,35 +403,48 @@ private struct JournalRow: View {
         return mood
     }
     private var tags: [String] { entry.tags ?? [] }
+    /// Every picture in the entry; an older server names only the first.
+    private var images: [String] {
+        let all = entry.images ?? (entry.image.map { [$0] } ?? [])
+        return all.filter { !$0.isEmpty }
+    }
 
     private var spoken: String {
         var parts: [String] = [JournalDates.label(day, today: today)]
         if !excerpt.isEmpty { parts.append(excerpt) }
         if let mood { parts.append(mood) }
         if !tags.isEmpty { parts.append(tags.joined(separator: ", ")) }
+        if !images.isEmpty { parts.append(images.count == 1 ? "1 picture" : "\(images.count) pictures") }
         return parts.joined(separator: ", ")
     }
 
     var body: some View {
-        Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 12) {
-                dayMark
-                texts
-                if let image = entry.image, !image.isEmpty {
-                    RemoteImage(image)
-                        .frame(width: 48, height: 48)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        VStack(alignment: .leading, spacing: 12) {
+            // The words are the button; the pictures beneath scroll sideways and open the entry on a tap.
+            Button(action: onOpen) {
+                HStack(alignment: .top, spacing: 12) {
+                    dayMark
+                    texts
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .buttonStyle(PressStyle(scale: 0.985))
+            .accessibilityLabel(entry.title)
+            .accessibilityValue(spoken)
+            .accessibilityIdentifier("journal.entry.\(entry.id)")
+
+            if !images.isEmpty {
+                JournalCardPictures(entryID: entry.id, images: images, wide: sizeClass == .regular, onOpen: onOpen)
+            }
         }
-        .buttonStyle(PressStyle(scale: 0.985))
-        .accessibilityLabel(entry.title)
-        .accessibilityValue(spoken)
-        .accessibilityIdentifier("journal.entry.\(entry.id)")
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glass(radius: 22)
+        .contentShape(shape)
+        // the card's edges open it too, as on the web where the whole card is the button
+        .onTapGesture { onOpen() }
     }
 
     private var dayMark: some View {
@@ -450,7 +466,7 @@ private struct JournalRow: View {
 
     private var texts: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(entry.title).font(.ssRowTitle).foregroundStyle(Theme.ink).lineLimit(1)
+            Text(entry.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
             if !excerpt.isEmpty {
                 Text(excerpt)
                     .font(.ssSecondary)
@@ -483,5 +499,116 @@ private struct JournalRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Where a card's pictures start on a wide screen: under the title, past the day column and its gap.
+private let journalCardIndent: CGFloat = 52
+
+/// The pictures of one entry in its card, never cropped. One is shown whole at its own shape, as
+/// wide as the card allows and no taller than 360 points (300 on a phone). Several sit in one row
+/// at a common height, each as wide as its shape needs, and the row scrolls sideways, fading at its
+/// right edge while more wait.
+private struct JournalCardPictures: View {
+    var entryID: String
+    var images: [String]
+    var wide: Bool
+    var onOpen: () -> Void
+
+    /// Each picture's width over its height, once known.
+    @State private var ratios: [Int: CGFloat] = [:]
+    /// Pictures that could not be shown take no space.
+    @State private var failed: Set<Int> = []
+    @State private var stripWidth: CGFloat = 0
+
+    /// Until a picture's shape is known it holds a 4:3 place, so the card does not jump much.
+    private static let guess: CGFloat = 4.0 / 3.0
+    private static let fade: CGFloat = 28
+
+    private func ratio(_ index: Int) -> CGFloat {
+        let r = ratios[index] ?? Self.guess
+        return r > 0 ? r : Self.guess
+    }
+
+    private var shown: [Int] { images.indices.filter { !failed.contains($0) } }
+
+    var body: some View {
+        Group {
+            if images.count == 1 {
+                single
+            } else {
+                strip
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(images.count == 1 ? "Picture" : "\(images.count) pictures")
+        .accessibilityIdentifier("journal.entry.\(entryID).pictures")
+    }
+
+    @ViewBuilder private var single: some View {
+        if !failed.contains(0) {
+            let tallest: CGFloat = wide ? 360 : 300
+            let r = ratio(0)
+            picture(0)
+                .aspectRatio(r, contentMode: .fit)
+                // a tall picture gets narrower rather than taller than the limit
+                .frame(maxWidth: tallest * r, maxHeight: tallest)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, wide ? journalCardIndent : 0)
+                .contentShape(Rectangle())
+                .onTapGesture { onOpen() }
+        }
+    }
+
+    private var strip: some View {
+        let height: CGFloat = wide ? 200 : 160
+        let indexes = shown
+        var content: CGFloat = 0
+        for index in indexes { content += height * ratio(index) }
+        content += CGFloat(max(indexes.count - 1, 0)) * 8
+        let more = stripWidth > 0 && content > stripWidth + 1
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(indexes, id: \.self) { index in
+                    picture(index)
+                        .frame(width: height * ratio(index), height: height)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+            // room at the end, so the last picture can be scrolled clear of the fade
+            .padding(.trailing, more ? Self.fade : 0)
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen() }
+        }
+        .frame(height: indexes.isEmpty ? 0 : height)
+        .mask {
+            HStack(spacing: 0) {
+                Rectangle().fill(Color.black)
+                LinearGradient(colors: [Color.black, Color.black.opacity(0)], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: more ? Self.fade : 0)
+            }
+        }
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { stripWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, width in stripWidth = width }
+            }
+        }
+        .padding(.leading, wide ? journalCardIndent : 0)
+    }
+
+    /// One picture, fitted whole into the frame its shape asks for.
+    private func picture(_ index: Int) -> some View {
+        RemoteImage(images[index], contentMode: .fit, onRatio: { r in
+            if r > 0 && ratios[index] != r { ratios[index] = r }
+        }, onFailed: {
+            failed.insert(index)
+        })
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Picture \(index + 1)")
+        .accessibilityAddTraits(.isImage)
+        .accessibilityIdentifier("journal.entry.\(entryID).picture.\(index)")
     }
 }

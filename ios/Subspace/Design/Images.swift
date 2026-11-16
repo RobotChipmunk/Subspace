@@ -34,14 +34,17 @@ struct RemoteImage: View {
     var contentMode: ContentMode = .fill
     /// Reports the picture's width divided by its height once known.
     var onRatio: ((CGFloat) -> Void)?
+    /// Reports that there is no picture to show: no address, or it could not be loaded.
+    var onFailed: (() -> Void)?
 
     @Environment(AppModel.self) private var app
     @State private var image: UIImage?
 
-    init(_ ref: String?, contentMode: ContentMode = .fill, onRatio: ((CGFloat) -> Void)? = nil) {
+    init(_ ref: String?, contentMode: ContentMode = .fill, onRatio: ((CGFloat) -> Void)? = nil, onFailed: (() -> Void)? = nil) {
         self.ref = ref
         self.contentMode = contentMode
         self.onRatio = onRatio
+        self.onFailed = onFailed
     }
 
     var body: some View {
@@ -56,10 +59,17 @@ struct RemoteImage: View {
             }
             .clipped()
             .task(id: ref) {
-                guard let url = app.api.resolve(ref) else { return }
+                guard let url = app.api.resolve(ref) else {
+                    onFailed?()
+                    return
+                }
                 let img = await ImageStore.shared.image(for: url, api: app.api)
                 guard !Task.isCancelled else { return }
-                if let img, img.size.height > 0 { onRatio?(img.size.width / img.size.height) }
+                if let img, img.size.height > 0 {
+                    onRatio?(img.size.width / img.size.height)
+                } else {
+                    onFailed?()
+                }
                 withAnimation(.easeOut(duration: 0.25)) { image = img }
             }
             .accessibilityHidden(true)
