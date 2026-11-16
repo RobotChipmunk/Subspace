@@ -112,6 +112,35 @@ class SubspaceTestCase: XCTestCase {
         Thread.sleep(forTimeInterval: 0.4)
     }
 
+    /// One of the todo lists ("today", "week", "next_week", "backlog", "bin", a date…), brought
+    /// into view. On a phone the lists are one strip that scrolls sideways, and how long it is
+    /// depends on the weekday (a Monday has every day of the week in it), so a list may sit beyond
+    /// the edge of the screen, where it cannot be tapped or dropped on. This slides the strip until
+    /// the list is wholly on screen. On an iPad the lists sit beside the tasks and nothing moves.
+    @discardableResult
+    func folder(_ key: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let button = expect(app.buttons["todos.folder.\(key)"], "the \(key) list among the folders", file: file, line: line)
+        let screen = app.windows.firstMatch.frame
+        let margin: CGFloat = 12
+        // choosing a list slides the strip by itself: let that finish before measuring
+        Thread.sleep(forTimeInterval: 0.6)
+        for _ in 0..<12 {
+            let frame = button.frame
+            let hiddenRight = frame.maxX > screen.maxX - margin
+            let hiddenLeft = frame.minX < screen.minX + margin
+            // wider than the screen can show, or already in view
+            if !(hiddenRight || hiddenLeft) || frame.width > screen.width - 2 * margin { break }
+            // a finger on the strip, drawn a third of the screen towards the hidden side's opposite
+            let reach = screen.width * 0.3
+            let from = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: screen.midX + (hiddenRight ? reach / 2 : -reach / 2), dy: frame.midY))
+            let to = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: screen.midX + (hiddenRight ? -reach / 2 : reach / 2), dy: frame.midY))
+            // slowly and held at the end, so the strip stops where the finger leaves it
+            from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+        return button
+    }
+
     /// Attaches a screenshot named for the report, e.g. "03-todos".
     func shot(_ name: String) {
         // let springs settle so the picture shows the resting state

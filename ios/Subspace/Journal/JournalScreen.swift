@@ -35,6 +35,11 @@ struct JournalScreen: View {
             }
         }
         .task { await poll() }
+        .onChange(of: app.pendingJournalID, initial: true) { _, id in
+            guard let id else { return }
+            app.pendingJournalID = nil
+            go(id)
+        }
         .onChange(of: app.tab) { _, now in
             if now == .journal && entryID == nil { Task { await store.refresh(api: app.api, merge: true) } }
         }

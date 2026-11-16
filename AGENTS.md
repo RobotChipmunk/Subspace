@@ -117,6 +117,10 @@ being true. Read this list before starting work.
   going against the reseeded database and wrote into the same log as the next run. Stop it with
   the task's own stop, confirm with `pgrep -f ui-check` that nothing is left, and give each run
   its own log file.
+- iOS UI tests: on a phone the todo folders are one sideways strip whose length depends on the
+  weekday (a Monday adds four day folders), so Backlog and Next week can sit off screen and a tap
+  or drag on them fails with "Activation point invalid". Reach folders through `folder(_:)` in
+  `SubspaceUITests/Support.swift`, which brings one into view first.
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.

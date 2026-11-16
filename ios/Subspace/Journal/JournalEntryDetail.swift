@@ -287,10 +287,10 @@ private struct JournalEntryEditor: View {
                 Text(current.isEmpty ? "Mood" : current).lineLimit(1)
             }
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(Theme.ink2)
+            .foregroundStyle(current.isEmpty ? Theme.ink3 : Theme.ink2)
             .padding(.horizontal, 12)
             .frame(minHeight: 36)
-            .background(Theme.fill, in: Capsule())
+            .background(current.isEmpty ? Color.clear : Theme.fill, in: Capsule())
             .contentShape(Capsule())
         }
         .accessibilityLabel("Mood: \(current.isEmpty ? "none yet" : current)")
@@ -340,6 +340,11 @@ private struct JournalEntryEditor: View {
             }
             if tags.count < 6 {
                 tagAdder
+                if addingTag {
+                    ForEach(suggestions, id: \.self) { tag in
+                        suggestionChip(tag)
+                    }
+                }
             }
             if tagsBy == "auto" && !tags.isEmpty {
                 Text("Tagged for you")
@@ -351,6 +356,40 @@ private struct JournalEntryEditor: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Tags the journal already uses, offered while one is being typed: those that contain what
+    /// is typed, without the ones the entry already has.
+    private var suggestions: [String] {
+        let typed = journalCleanTag(tagText).lowercased()
+        var out: [String] = []
+        for tag in known {
+            if out.count >= 6 { break }
+            let lower = tag.lowercased()
+            if tags.contains(where: { $0.lowercased() == lower }) { continue }
+            if typed.isEmpty || lower.contains(typed) { out.append(tag) }
+        }
+        return out
+    }
+
+    private func suggestionChip(_ tag: String) -> some View {
+        Button {
+            tagText = ""
+            withAnimation(.ssSoft) { addingTag = false }
+            chooseTags(tags + [tag])
+        } label: {
+            Text(tag)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink3)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .overlay(Capsule().strokeBorder(Theme.fill2, lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle(scale: 0.95))
+        .accessibilityLabel("Add tag \(tag)")
+        .accessibilityIdentifier("journal.tags.suggest.\(tag)")
     }
 
     private func tagChip(_ tag: String) -> some View {
@@ -429,7 +468,7 @@ private struct JournalEntryEditor: View {
         }
     }
 
-    private var placeholder: String { "Write. Add a link below to show its preview." }
+    private var placeholder: String { "Write. Paste a link on a line of its own to show its preview." }
 
     private var emptyBody: some View {
         Button {
@@ -652,6 +691,21 @@ private struct JournalEntryEditor: View {
         saver.push(draft)
         saver.flush()
         withAnimation(.ssSoft) { editing = false }
+        expandLinks(text)
+    }
+
+    /// An address left on a line of its own becomes its preview once the writing is put down.
+    private func expandLinks(_ written: String) {
+        if journalAddressLines(written.components(separatedBy: "\n")).isEmpty { return }
+        Task {
+            guard let next = await journalExpandLinks(written, api: app.api) else { return }
+            // only if nothing was written since
+            if editing || removed || (shown.body ?? "") != written { return }
+            shown.body = next
+            text = next
+            saver.push(ContextDraft(title: title, summary: baseSummary, body: next))
+            saver.flush()
+        }
     }
 
     private func titleChanged(_ now: String) {
@@ -680,16 +734,22 @@ private struct JournalEntryEditor: View {
     private func leave() {
         settle?.cancel()
         saver.flush()
-        guard !removed, unread || saver.dirty else { return }
+        // left while still writing: addresses on lines of their own become previews on the way out
+        let written = editing ? text : ""
+        let links = !journalAddressLines(written.components(separatedBy: "\n")).isEmpty
+        guard !removed, unread || saver.dirty || links else { return }
         // Once more on the way out, so the list shows the entry with its themes, mood and gist.
         let api = app.api
-        let path = "journal/\(entry.id)/categorize"
+        let id = entry.id
         let waiting = saver.dirty
         let done = onChanged
         Task {
             // what was typed last is on its way: let it land before the entry is read
             if waiting { try? await Task.sleep(for: .milliseconds(1200)) }
-            try? await api.send("POST", path, body: [:])
+            if links, let next = await journalExpandLinks(written, api: api) {
+                try? await api.send("PATCH", "context/\(id)", body: ["body": next])
+            }
+            try? await api.send("POST", "journal/\(id)/categorize", body: [:])
             done()
         }
     }

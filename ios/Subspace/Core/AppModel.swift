@@ -58,6 +58,8 @@ final class AppModel {
     var presentedPage: PageTarget?
     /// A task the todos screen should open as soon as it can; it clears this once it has.
     var pendingTodoID: String?
+    /// A journal entry the journal screen should open as soon as it can; it clears this once it has.
+    var pendingJournalID: String?
     var railSheet = false
     /// True while the feed's comments panel is open beside it; the docked rail steps aside.
     var commentsBeside = false
@@ -218,7 +220,8 @@ final class AppModel {
 
     // Links
 
-    /// Opens an address from content: a page ("/page/<id>"), a task ("/todos?open=<id>"),
+    /// Opens an address from content: a page ("/page/<id>"), a task ("/todos?open=<id>"), a journal
+    /// entry ("/journal?entry=<id>"),
     /// another screen ("/feed") or the web.
     func open(_ link: String) {
         if link.hasPrefix("/page/") {
@@ -231,6 +234,13 @@ final class AppModel {
             railSheet = false
             presentedPage = nil
             withAnimation(.ssSpring) { tab = .todos }
+            return
+        }
+        if link.hasPrefix("/journal") {
+            if let id = URLComponents(string: link)?.queryItems?.first(where: { $0.name == "entry" })?.value, !id.isEmpty { pendingJournalID = id }
+            railSheet = false
+            presentedPage = nil
+            withAnimation(.ssSpring) { tab = .journal }
             return
         }
         if link.hasPrefix("/"), let t = AppTab(rawValue: String(link.dropFirst()).components(separatedBy: CharacterSet(charactersIn: "?#/")).first ?? "") {

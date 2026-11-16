@@ -115,6 +115,25 @@ final class JournalTests: SubspaceTestCase {
         waitToVanish(element("journal.tags.auto"), "the line saying the app chose the tags")
         shot("17-journal-tag-added")
 
+        // Typing in the tag field offers the journal's own tags; tapping one adds it.
+        press(app.buttons["journal.tags.add"], "the Tag pill, again")
+        let again = expect(element("journal.tags.field"), "the field for a new tag, again")
+        enter("Crea", into: again, "the field for a new tag")
+        let offered = expect(element("journal.tags.suggest.Creativity"), "Creativity, offered while typing")
+        shot("17-journal-tag-suggested")
+        offered.tap()
+        expect(element("journal.tags.item.Creativity"), "the offered tag, now on the entry")
+        XCTAssertFalse(element("journal.tags.item.Crea").exists, "What was typed should not become a tag when an offered one is chosen")
+
+        // An address on a line of its own becomes its preview once the writing is put down.
+        press(app.buttons["journal.edit"], "Edit")
+        let editorAgain = expect(app.textViews["journal.body.editor"], "the editor, opened again")
+        enter("\n\nhttps://example.com/heat-pump-guide", into: editorAgain, "the editor")
+        Thread.sleep(forTimeInterval: 1.0)
+        press(app.buttons["journal.edit"], "Done")
+        expect(textContaining("Heat pump guide"), "the preview of the address typed on its own line", timeout: 25)
+        shot("17-journal-link-preview")
+
         // Delete: the first tap arms, the second does it, and the list is as it was.
         let delete = element("journal.delete")
         expect(delete, "the delete control").tap()

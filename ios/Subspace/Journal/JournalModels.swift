@@ -191,6 +191,50 @@ func journalCardBlock(_ preview: JournalLinkPreview) -> String? {
     return "```cards\n" + json + "\n```"
 }
 
+/// Whether a line of a body is nothing but a web address ("https://…").
+func journalIsAddressLine(_ line: String) -> Bool {
+    let trimmed = line.trimmingCharacters(in: .whitespaces)
+    return trimmed.range(of: "^https://\\S+$", options: [.regularExpression, .caseInsensitive]) != nil
+}
+
+/// The lines of a body that are only an address and sit outside fenced blocks, by index.
+func journalAddressLines(_ lines: [String]) -> [Int] {
+    var out: [Int] = []
+    var fenced = false
+    for (index, line) in lines.enumerated() {
+        let start = line.trimmingCharacters(in: .whitespaces)
+        if start.hasPrefix("```") || start.hasPrefix("~~~") {
+            fenced.toggle()
+            continue
+        }
+        if !fenced && journalIsAddressLine(line) { out.append(index) }
+    }
+    return out
+}
+
+/// An address on a line of its own becomes its preview, as pasting one does on the web: each such
+/// line is looked up and replaced by a card block. A line whose lookup fails stays as it is.
+/// Nil when nothing changed.
+func journalExpandLinks(_ body: String, api: API) async -> String? {
+    var lines = body.components(separatedBy: "\n")
+    let found = journalAddressLines(lines)
+    if found.isEmpty { return nil }
+    var changed = false
+    // from the end, so earlier indexes stay true while lines are put in
+    for index in found.reversed() {
+        let raw = lines[index].trimmingCharacters(in: .whitespaces)
+        guard let preview: JournalLinkPreview = try? await api.send("POST", "links/preview", body: ["url": raw]) else { continue }
+        guard preview.url.hasPrefix("https://"), let block = journalCardBlock(preview) else { continue }
+        var piece: [String] = block.components(separatedBy: "\n")
+        // a block stands in a paragraph of its own
+        if index + 1 < lines.count, !lines[index + 1].trimmingCharacters(in: .whitespaces).isEmpty { piece.append("") }
+        if index > 0, !lines[index - 1].trimmingCharacters(in: .whitespaces).isEmpty { piece.insert("", at: 0) }
+        lines.replaceSubrange(index...index, with: piece)
+        changed = true
+    }
+    return changed ? lines.joined(separator: "\n") : nil
+}
+
 /// Entries a page at a time, newest day first: all of them, or those carrying one tag.
 @MainActor
 @Observable
