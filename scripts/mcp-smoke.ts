@@ -134,7 +134,35 @@ async function main() {
   await call(s, "search", { query: "example review" });
   await call(s, "explore", { path: "/context/work" });
   await call(s, "read", { ids: [l.id] });
-  await q("SELECT 1");
+
+  // The journal, from far to near, and an entry added on the owner's word.
+  const je = await call(s, "journal_write", { text: "I want to spend more mornings drawing before work. Grateful for the quiet hour today.", title: "Mornings " + tag });
+  if (!je.id || !je.mood || !je.gist) throw new Error("journal_write did not file the entry: " + JSON.stringify(je));
+  const jtop = await call(s, "explore", { path: "/journal" });
+  if (!jtop.children?.length) throw new Error("explore(/journal) lists no months");
+  const jmonth = await call(s, "explore", { path: jtop.children[0].path });
+  if (!jmonth.items?.some((i: any) => i.id === je.id && i.mood && i.gist)) throw new Error("the month does not give the new entry a line with its mood and gist");
+  const jread = await call(s, "read", { ids: [je.id] });
+  if (jread.items?.[0]?.type !== "journal" && jread[0]?.type !== "journal") console.log("note: read() shape for a journal entry:", JSON.stringify(jread).slice(0, 200));
+  await call(s, "context_archive", { id: je.id });
+
+  // What agents did is on record: every call above, with what it asked for and what it was shown.
+  await call(s, "search", { query: "zzzqqq" + tag + "xk" });
+  await call(s, "no_such_tool", {}).catch(() => {});
+  const calls = await q<{ tool: string; ok: boolean; query: string | null; path: string | null; result_count: number | null; seen: string[]; refs: string[]; kind: string; client: string | null }>(
+    "SELECT tool, ok, query, path, result_count, seen, refs, kind, client FROM agent_calls WHERE agent_id = $1 ORDER BY id", [s.id]);
+  const need = (what: string, hit: boolean) => { if (!hit) throw new Error("agent log: " + what); };
+  need("the calls were not recorded", calls.length > 20);
+  need("the connection opening is missing", calls.some((c) => c.tool === "connect"));
+  need("a search did not keep its query", calls.some((c) => c.tool === "search" && c.query === "quiet software defaults" && (c.result_count ?? 0) > 0));
+  need("a search that found nothing is not recognisable", calls.some((c) => c.tool === "search" && c.query?.startsWith("zzzqqq") && c.result_count === 0));
+  need("an explore did not keep its path", calls.some((c) => c.tool === "explore" && c.path === "/links"));
+  need("a read did not keep what it opened", calls.some((c) => c.tool === "read" && c.refs.includes(l.id)));
+  need("a listing did not keep what it showed", calls.some((c) => c.tool === "explore" && c.seen.length > 0));
+  need("a failed call is missing", calls.some((c) => !c.ok && c.tool === "link_save"));
+  need("an unknown tool is missing", calls.some((c) => !c.ok && c.tool === "no_such_tool"));
+  need("reads and writes are not told apart", calls.some((c) => c.kind === "read") && calls.some((c) => c.kind === "write"));
+  console.log(`\nagent log: ${calls.length} calls recorded for @${s.handle}, ${calls.filter((c) => !c.ok).length} failed`);
   process.exit(0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

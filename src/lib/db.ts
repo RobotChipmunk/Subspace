@@ -342,6 +342,61 @@ const MIGRATIONS: string[] = [
      basis text NOT NULL DEFAULT '',
      updated_at timestamptz NOT NULL DEFAULT now()
    )`,
+  // What agents did, to be read afterwards (core/audit.ts).
+  // - agent_calls: one row per tool call, through MCP or from a run inside Subspace: who, through which
+  //   app, the arguments, whether it worked, how long it took, and what it was shown. query and path are
+  //   the search text and explore path, lifted out of args; refs are the ids and context paths the call
+  //   named, seen the ids its result contained; result is the start of what came back.
+  // - agent_runs: one row per run inside Subspace (why it started, how it ended, steps, tokens, the
+  //   model's own words) and per wake-up call sent to an outside agent.
+  `CREATE TABLE IF NOT EXISTS agent_calls (
+     id bigserial PRIMARY KEY,
+     ts timestamptz NOT NULL DEFAULT now(),
+     agent_id text NOT NULL,
+     via text NOT NULL,
+     run_id text,
+     client text,
+     grant_id text,
+     tool text NOT NULL,
+     kind text NOT NULL,
+     args jsonb NOT NULL DEFAULT '{}',
+     ok boolean NOT NULL,
+     error text,
+     ms int NOT NULL DEFAULT 0,
+     query text,
+     path text,
+     refs text[] NOT NULL DEFAULT '{}',
+     seen text[] NOT NULL DEFAULT '{}',
+     result_count int,
+     result_chars int NOT NULL DEFAULT 0,
+     result text NOT NULL DEFAULT ''
+   );
+   CREATE INDEX IF NOT EXISTS agent_calls_agent ON agent_calls (agent_id, ts DESC);
+   CREATE INDEX IF NOT EXISTS agent_calls_tool ON agent_calls (tool, ts DESC);
+   CREATE INDEX IF NOT EXISTS agent_calls_ts ON agent_calls (ts);
+   CREATE INDEX IF NOT EXISTS agent_calls_failed ON agent_calls (ts DESC) WHERE NOT ok;
+   CREATE INDEX IF NOT EXISTS agent_calls_run ON agent_calls (run_id, id) WHERE run_id IS NOT NULL;
+   CREATE INDEX IF NOT EXISTS agent_calls_seen ON agent_calls USING gin (seen);
+   CREATE INDEX IF NOT EXISTS agent_calls_refs ON agent_calls USING gin (refs);
+   CREATE TABLE IF NOT EXISTS agent_runs (
+     id text PRIMARY KEY,
+     agent_id text NOT NULL,
+     via text NOT NULL,
+     reason text NOT NULL DEFAULT '',
+     started_at timestamptz NOT NULL DEFAULT now(),
+     finished_at timestamptz,
+     status text NOT NULL DEFAULT 'running',
+     detail text,
+     model text,
+     effort text,
+     steps int NOT NULL DEFAULT 0,
+     input_tokens bigint NOT NULL DEFAULT 0,
+     output_tokens bigint NOT NULL DEFAULT 0,
+     calls int NOT NULL DEFAULT 0,
+     errors int NOT NULL DEFAULT 0,
+     said text NOT NULL DEFAULT ''
+   );
+   CREATE INDEX IF NOT EXISTS agent_runs_agent ON agent_runs (agent_id, started_at DESC)`,
 ];
 
 async function migrate() {

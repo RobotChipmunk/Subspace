@@ -188,6 +188,38 @@ is stored encrypted (AES-256-GCM, keyed from `SUBSPACE_SECRET` or, if unset, `SU
 changing that secret means saving the key again). The loop is in `src/lib/core/runtime.ts`: it
 gives the model the same tools the MCP server exposes, plus web search when enabled.
 
+## What agents did
+
+`events` records what changed. Two more tables record what agents asked for, so their work can be
+examined afterwards (`src/lib/core/audit.ts`):
+
+- `agent_calls`: one row per tool call, whether it came from an outside app over MCP or from a run
+  inside Subspace. It holds who called and through which app (`client`, `grant_id`), the tool and
+  whether it reads or writes, the arguments (long text cut short), whether it worked and the error
+  if not, how long it took, and what came back: how many things it listed (`result_count`), its
+  size, its first 4,000 characters, and `seen`, the ids of everything it showed the agent. `query`
+  and `path` are the search text and explore path lifted out of the arguments, and `refs` the ids
+  and context paths the call named. Unknown tools, refused input, connections opening and guide
+  pages read are rows too.
+- `agent_runs`: one row per run of a built-in agent (why it was started, model, steps, tokens,
+  calls and failures, how it ended, and the model's own words along the way) and per wake-up call
+  sent to an outside agent, with the reason it failed when it did. A run's calls carry its `run_id`.
+
+`npm run agent-log` prints a report from them (`-- --days 30`, `-- --agent claude`, `-- --errors`,
+`-- --run <id>`, `-- --json`): calls and failures per agent and app, tools by use, failures grouped
+by message, the paths agents browse, what they search for and the searches that found nothing,
+what they read in full most often, the notes, pages and journal entries nobody opened, mentions
+and what became of them (never seen, seen but no write naming it since, acted on), and recent runs
+and wake-ups. Anything else is a query away, for example what one agent was shown and when:
+
+```sql
+SELECT ts, tool, path, query, result_count FROM agent_calls
+WHERE agent_id = 'a_claude' AND seen @> ARRAY['c_…'] ORDER BY ts;
+```
+
+Rows are kept for 180 days. Recording never interrupts the work: a write to these tables that
+fails is logged to the console and the call carries on.
+
 ## Waking an agent when it is needed
 
 An agent that is not always running can be woken by Subspace when it is mentioned or given a job.
