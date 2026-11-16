@@ -10,7 +10,8 @@ import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
 import { api, fetcher, soft, useSaver } from "@/lib/client";
 import type { ContextNode } from "@/lib/core/context";
-import type { JournalEntry, JournalPage } from "@/lib/core/journal";
+import type { JournalEntry, JournalMonth, JournalPage } from "@/lib/core/journal";
+import { MOOD_NAMES, toneOf } from "@/lib/moods";
 
 export default function Journal() {
   return (
@@ -27,6 +28,42 @@ const weekdayName = (day: string) => at(day).toLocaleDateString(undefined, { wee
 function dayLabel(day: string, today: string): string {
   if (day === today) return "Today";
   return at(day).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) });
+}
+
+/** A mood's tone as a small dot: the only colour a mood gets. */
+function ToneDot({ mood, size = 8 }: { mood: string | null; size?: number }) {
+  const tone = toneOf(mood);
+  return <span aria-hidden className={`inline-block flex-none rounded-full ${tone === "up" ? "bg-[var(--good)]" : tone === "down" ? "bg-[var(--warn)]" : "bg-[var(--ink-3)]"}`} style={{ width: size, height: size }} />;
+}
+
+/** The mood most entries share (the earliest of equals). */
+function leadMood(moods: string[]): string | null {
+  const n = new Map<string, number>();
+  for (const m of moods) n.set(m, (n.get(m) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+/**
+ * A month at a glance, under its heading: a dot per entry in day order, coloured by how it felt;
+ * a line naming the prevailing mood and the themes; and the month's digest when one has been written.
+ */
+function MonthGlance({ month }: { month: JournalMonth }) {
+  const lead = leadMood(month.moods);
+  if (!lead && !month.summary) return null;
+  const line = [lead ? `Mostly ${lead.toLowerCase()}` : "", month.tags.join(", ")].filter(Boolean).join(" · ");
+  return (
+    <div className="mb-2 px-3" data-month-glance={month.ym} aria-label={`${monthName(month.ym)}: ${line}. ${month.summary}`}>
+      {month.moods.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 pb-1 pt-0.5" aria-hidden>
+          {month.moods.slice(0, 31).map((m, i) => (
+            <ToneDot key={i} mood={m} />
+          ))}
+        </div>
+      )}
+      {line && <p className="text-[12.5px] text-ink3">{line}</p>}
+      {month.summary && <p className="mt-1 max-w-[62ch] text-[13.5px] leading-snug text-ink2">{month.summary}</p>}
+    </div>
+  );
 }
 
 function Inner() {
@@ -95,6 +132,7 @@ function useEntryPages(tag: string | null) {
   return {
     loaded: !!data,
     entries: data?.flatMap((d) => d.entries) ?? [],
+    months: data?.flatMap((d) => d.months) ?? [],
     total: data?.[0]?.total ?? 0,
     tags: data?.[0]?.tags ?? [],
     today: data?.[0]?.today ?? "",
@@ -133,6 +171,7 @@ function Entries({ tag, onTag, onOpen }: { tag: string | null; onTag: (tag: stri
     else months.push({ ym, entries: [e] });
   }
   let n = 0;
+  const glance = (ym: string) => pages.months.find((x) => x.ym === ym);
 
   return (
     <div>
@@ -152,6 +191,7 @@ function Entries({ tag, onTag, onOpen }: { tag: string | null; onTag: (tag: stri
       {months.map((m) => (
         <section key={m.ym} className="mb-5" aria-label={monthName(m.ym)}>
           <h2 className="mb-1 px-3 text-[12.5px] font-semibold uppercase tracking-[0.06em] text-ink3">{monthName(m.ym)}</h2>
+          {glance(m.ym) && <MonthGlance month={glance(m.ym)!} />}
           <div className="flex flex-col">
             {m.entries.map((e, i) => {
               const index = n++;
@@ -187,9 +227,15 @@ function EntryRow({ entry, index, today, showDay, onOpen }: { entry: JournalEntr
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15.5px] font-medium">{entry.title}</span>
-        {entry.excerpt && <span className="line-clamp-2 text-[13.5px] leading-snug text-ink2">{entry.excerpt}</span>}
-        {entry.tags.length > 0 && (
+        {(entry.summary || entry.excerpt) && <span className="line-clamp-2 text-[13.5px] leading-snug text-ink2">{entry.summary || entry.excerpt}</span>}
+        {(entry.mood || entry.tags.length > 0) && (
           <span className="mt-1.5 flex flex-wrap gap-1">
+            {entry.mood && (
+              <span data-mood={entry.mood} className="flex items-center gap-1 rounded-full bg-fill px-2 py-0.5 text-[11.5px] text-ink2">
+                <ToneDot mood={entry.mood} size={6} />
+                {entry.mood}
+              </span>
+            )}
             {entry.tags.map((t) => (
               <span key={t} className="rounded-full bg-fill px-2 py-0.5 text-[11.5px] text-ink2">
                 {t}
@@ -198,6 +244,10 @@ function EntryRow({ entry, index, today, showDay, onOpen }: { entry: JournalEntr
           </span>
         )}
       </span>
+      {entry.image && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={entry.image} alt="" loading="lazy" className="mt-0.5 h-12 w-12 flex-none rounded-[12px] bg-fill object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
+      )}
     </motion.button>
   );
 }
@@ -223,26 +273,29 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
   const [tags, setTags] = useState(entry.tags);
   const [tagsBy, setTagsBy] = useState(entry.tags_by);
   const [day, setDay] = useState(entry.entry_date ?? today);
+  const [mood, setMood] = useState(entry.mood);
+  const [gist, setGist] = useState(entry.summary);
   const panel = useRef<HTMLDivElement>(null);
 
   const patch = async (b: Record<string, unknown>) => (await api(`context/${entry.id}`, { method: "PATCH", body: b }), onChanged());
 
-  // Tags are worked out a moment after writing stops, and once more on the way out. Once the owner
-  // has chosen tags themselves the server leaves them alone, so asking again is harmless.
+  // The entry is read (tags, mood, gist) a moment after writing stops, and once more on the way
+  // out. The server keeps tags and a mood the owner chose, so asking is always harmless.
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mine = useRef(entry.tags_by === "owner");
+  const chosen = useRef(0); // counts the owner's own choices, so a reply that set out before one does not undo it
   const categorize = () => {
     if (settle.current) clearTimeout(settle.current);
     settle.current = null;
-    if (mine.current) return Promise.resolve(null);
     return api<ContextNode>(`journal/${entry.id}/categorize`, { method: "POST" }).catch(() => null);
   };
   const written = () => {
-    if (mine.current) return;
     if (settle.current) clearTimeout(settle.current);
     settle.current = setTimeout(async () => {
+      const before = chosen.current;
       const n = await categorize();
-      if (n && !mine.current) (setTags(n.tags), setTagsBy(n.tags_by));
+      if (!n || before !== chosen.current) return;
+      setTags(n.tags), setTagsBy(n.tags_by), setMood(n.mood), setGist(n.summary);
+      onChanged();
     }, SETTLE_MS);
   };
   // safe on a component that stays mounted: it only sends what is waiting and leaves nothing behind
@@ -258,20 +311,42 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
   useEffect(() => {
     setTags(entry.tags);
     setTagsBy(entry.tags_by);
-    mine.current = entry.tags_by === "owner";
-  }, [serverTags, entry.tags_by]); // eslint-disable-line react-hooks/exhaustive-deps
+    setMood(entry.mood);
+    setGist(entry.summary);
+  }, [serverTags, entry.tags_by, entry.mood, entry.summary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function chooseTags(next: string[]) {
-    mine.current = true;
+    chosen.current++;
     setTags(next);
     setTagsBy("owner");
     void patch({ tags: next });
+  }
+
+  async function chooseMood(next: string) {
+    chosen.current++;
+    // "" hands the choice back to the app, which reads the entry again
+    setMood(next || null);
+    await patch({ mood: next || null });
+    if (!next) written();
   }
 
   return (
     <div ref={panel} className="glass mb-5 rounded-[26px] p-6 max-md:p-5">
       <div className="mb-3 flex items-center gap-3">
         <DatePill label={dayLabel(day, today)} value={day} today={today} past onPick={(d) => (setDay(d), void patch({ entry_date: d }))} />
+        <label className={`relative flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${mood ? "bg-fill text-ink2 hover:bg-fill2" : "text-ink3 hover:bg-fill hover:text-ink2"}`} data-mood={mood ?? ""}>
+          {mood && <ToneDot mood={mood} />}
+          {mood ?? "Mood"}
+          <select aria-label="Mood" value={mood ?? ""} onChange={(e) => void chooseMood(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+            {!mood && <option value="">Mood</option>}
+            {MOOD_NAMES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            {mood && entry.mood_by === "owner" && <option value="">Let Subspace choose</option>}
+          </select>
+        </label>
         <span className="flex-1" />
         <ConfirmDelete label="Delete entry" confirm="Delete" onConfirm={async () => (await api(`context/${entry.id}`, { method: "DELETE" }), onDeleted())} />
       </div>
@@ -288,6 +363,11 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
         ref={grow}
         className="block w-full resize-none overflow-hidden text-[26px] font-bold leading-[1.2] tracking-[-0.025em]"
       />
+      {gist && (
+        <p className="mt-1 text-[15px] leading-snug text-ink2" data-gist aria-label="Gist">
+          {gist}
+        </p>
+      )}
       <Tags tags={tags} auto={tagsBy === "auto"} onChange={chooseTags} />
       <div className="editor-compact">
         <Editor value={body} linkPreviews placeholder="Write. Paste a link on a line of its own to show its preview." onChange={saver.push} />

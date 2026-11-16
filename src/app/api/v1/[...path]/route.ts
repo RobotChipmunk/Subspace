@@ -4,7 +4,7 @@ import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
 import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
 import { search } from "@/lib/core/discover";
-import { categorize, createEntry, getEntry, listEntries } from "@/lib/core/journal";
+import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { activeModules, removeModule } from "@/lib/core/rail";
@@ -75,12 +75,15 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^links\/preview$/, ({ body }) => previewLink(body.url)],
 
   // The journal: one page of entries, newest day first, optionally only those with one tag. An entry is
-  // a context node, so its title, body, tags and entry_date are changed with PATCH context/<id> and it
+  // a context node, so its title, body, tags, mood and entry_date are changed with PATCH context/<id> and it
   // is removed with DELETE context/<id>.
-  ["GET", /^journal$/, ({ url }) => listEntries({ tag: url.searchParams.get("tag"), before: url.searchParams.get("before") })],
+  // Each page also describes the months its entries fall in (count, moods in day order, themes, digest).
+  ["GET", /^journal$/, ({ url }) => listEntries({ tag: url.searchParams.get("tag"), month: url.searchParams.get("month"), before: url.searchParams.get("before") })],
+  // every month that has entries, newest first: the journal from far away
+  ["GET", /^journal\/months$/, async () => ({ months: await listMonths() })],
   ["POST", /^journal$/, ({ actor, body }) => createEntry(actor, body)],
   ["GET", /^journal\/([^/]+)$/, (_c, id) => getEntry(id)],
-  // work out an entry's tags from its text; a no-op once the owner has chosen tags themselves
+  // read an entry and file it: tags, mood and gist (its summary). Tags or a mood the owner chose are kept.
   ["POST", /^journal\/([^/]+)\/categorize$/, (_c, id) => categorize(id)],
 
   ["GET", /^trackers$/, async () => ({ trackers: await listTrackers() })],

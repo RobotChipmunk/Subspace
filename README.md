@@ -164,6 +164,15 @@ tags the journal already uses. It asks a small model when a key is available (th
 short list of starter themes, so tagging still works without a key. Tags the owner adds or removes
 are theirs: from then on the entry is not categorised again. The tab filters by tag.
 
+Besides tags, reading an entry gives it a mood (one of the short list in `src/lib/moods.ts`; the
+owner can choose another) and its gist, one sentence kept as the node's summary. A month has a
+digest written from its entries' moods and gists (`journal_months`; it needs a model and is
+rewritten only when the month's entries change). The tab shows this under each month's heading,
+and agents read the journal the same way, from far to near: `explore("/journal")` lists the
+months with how each felt, `explore("/journal/2026-11")` gives a line per entry (day, mood,
+themes, gist), and `read([id])` returns one entry in full. `journal_write` lets an agent add an
+entry when the owner asks it to. Pictures are pasted or dropped into an entry like into any note.
+
 A link is embedded as a preview: paste an address on a line of its own, or use the link button.
 `POST /api/v1/links/preview` reads the page's title, site, description and picture (nothing is
 saved) and the editor stores it as a one-card `cards` block, so previews are drawn, edited and

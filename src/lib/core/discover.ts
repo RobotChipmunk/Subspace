@@ -12,7 +12,7 @@
 import { q, q1 } from "../db";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
-import { listEntries } from "./journal";
+import { listEntries, listMonths, monthLine } from "./journal";
 import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule } from "./rail";
@@ -161,7 +161,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/context", title: "Context", about: "Shared long-term memory about the owner, their life and the agents' work. A tree you can reshape.", count: n!.context },
         { path: "/pages", title: "Pages", about: "Finished documents agents have made: research, shortlists, plans. Newest first; they live in the context tree.", count: n!.pages },
         { path: "/links", title: "Links", about: "Web links the owner saved, each with why they kept it and optional notes. Newest first; they live in the context tree.", count: n!.links },
-        { path: "/journal", title: "Journal", about: "The owner's own dated writing, each entry tagged with its themes. Newest day first; entries live in the context tree. Read it to understand them; it is theirs to write.", count: n!.journal },
+        { path: "/journal", title: "Journal", about: "The owner's own thoughts, musings and wishes, by day. Browse it by month: each month says how it felt and what ran through it, each entry has a mood, themes and a one-line gist. Read it to understand them.", count: n!.journal },
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
         { path: "/rail", title: "Rail", about: "Timely modules shown beside the owner's screen right now (bookings, deadlines, today's details).", count: n!.rail },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
@@ -407,20 +407,46 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   }
 
   if (space === "journal") {
-    const page = await listEntries({ limit: PAGE, before: cursor });
+    const entryItem = (e: { id: string; title: string; entry_date: string | null; mood: string | null; tags: string[]; summary: string; excerpt: string }): Item => ({
+      id: e.id,
+      day: e.entry_date,
+      title: e.title,
+      ...(e.mood ? { mood: e.mood } : {}),
+      ...(e.tags.length ? { tags: e.tags } : {}),
+      ...(e.summary || e.excerpt ? { gist: oneLine(e.summary || e.excerpt, 180) } : {}),
+    });
+    if (a) {
+      // one month: its digest, then every entry in a line
+      const page = await listEntries({ month: a, limit: PAGE, before: cursor });
+      const m = page.months[0];
+      if (!m) throw notFound(`No journal entries in ${a}. explore("/journal") lists the months that have some.`);
+      return {
+        path: `/journal/${a}`,
+        title: monthTitle(a),
+        about: [monthLine(m), `Moods, in day order: ${m.moods.join(", ") || "none noted"}.`].filter(Boolean).join(" "),
+        count: page.total,
+        items: page.entries.map(entryItem),
+        next_cursor: page.next,
+        hint: "Each item is one entry: its day, mood, themes and gist. read([id]) returns the entry in full, in the owner's own words; open only the ones that matter for what you are doing.",
+      };
+    }
+    const months = await listMonths();
+    const recent = await listEntries({ limit: 5 });
     return {
       path: "/journal",
       title: "Journal",
-      about: "What the owner wrote for themselves, newest day first. tags are the themes of an entry.",
-      count: page.total,
-      items: page.entries.map((e) => ({ id: e.id, title: e.title, day: e.entry_date, ...(e.tags.length ? { tags: e.tags } : {}), ...(e.excerpt ? { line: oneLine(e.excerpt, 140) } : {}) })),
-      next_cursor: page.next,
-      hint: 'read([id]) returns an entry in full. search(query, types: ["context"]) finds entries by what they say or by tag. The journal is the owner\'s own: do not add to it or edit it unless they ask.',
+      about: "What the owner writes for themselves: thoughts, musings, wishes, lessons. Read it from far away first. Each month below says how it felt and what ran through it; open a month for a line per entry, and an entry only when you need their own words.",
+      count: recent.total,
+      children: months.map((m) => ({ path: `/journal/${m.ym}`, title: monthTitle(m.ym), about: monthLine(m) || undefined, count: m.count })),
+      items: recent.entries.map(entryItem),
+      hint: 'items are the newest entries. search(query, types: ["context"]) finds entries by what they say, by theme or by mood. Use what you learn here to serve the owner better; do not quote it back at them unasked. The journal is theirs to write: add to it only with journal_write, and only when they ask.',
     };
   }
 
   throw notFound(`Nothing at "${rawPath}". Start from explore("/").`);
 }
+
+const monthTitle = (ym: string) => new Date(ym + "-01T12:00:00Z").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 
 /** One saved link in a listing: enough to recognise it and open it, nothing a model has to read twice. */
 const linkItem = (r: Record<string, unknown>, where = false): Item => ({
@@ -628,8 +654,9 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         const kids = await contextChildren(n.id);
         const saved = n.kind === "link" ? 0 : (await listLinks({ parent: n.id, limit: 1 })).total;
         out.push({
-          type: n.kind === "page" ? "page" : n.kind === "link" ? "link" : "context",
+          type: n.kind === "page" ? "page" : n.kind === "link" ? "link" : n.kind === "journal" ? "journal" : "context",
           id: n.id,
+          ...(n.kind === "journal" ? { day: n.entry_date, ...(n.mood ? { mood: n.mood } : {}), tags: n.tags } : {}),
           ...(n.kind === "page" ? { link: `/page/${n.id}` } : {}),
           ...(n.kind === "link" ? { url: n.url, site: n.site, about: n.blurb || undefined } : {}),
           path: "/context/" + n.path,

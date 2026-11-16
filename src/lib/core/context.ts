@@ -1,4 +1,5 @@
 import { checkBlocks } from "../blocks";
+import { asMood, MOOD_NAMES } from "../moods";
 import { q, q1 } from "../db";
 import { markAgentText } from "./todos";
 import { ApiError, bad, findMentions, indexDoc, logEvent, newId, notFound, slugify, unindexDoc, type Agent } from "./util";
@@ -20,6 +21,9 @@ export type ContextNode = {
   entry_date: string | null;
   tags: string[];
   tags_by: string | null;
+  /** Journal entries only: how the entry feels (one of MOODS), and who said so ("auto" or "owner"). */
+  mood: string | null;
+  mood_by: string | null;
   version: number;
   updated_by: string;
   archived: boolean;
@@ -27,7 +31,7 @@ export type ContextNode = {
   updated_at: string;
 };
 
-const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, entry_date, tags, tags_by, version, updated_by, created_at, updated_at, length(body) AS body_chars";
+export const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, entry_date, tags, tags_by, mood, mood_by, version, updated_by, created_at, updated_at, length(body) AS body_chars";
 export type ContextLite = Omit<ContextNode, "body" | "archived"> & { body_chars: number; child_count?: number };
 
 export async function getNode(ref: string): Promise<ContextNode> {
@@ -120,7 +124,7 @@ export async function createNode(actor: Agent, input: { parent?: string | null; 
 export async function updateNode(
   actor: Agent,
   ref: string,
-  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string; tags?: string[]; entry_date?: string },
+  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string; tags?: string[]; entry_date?: string; mood?: string | null },
 ) {
   const before = await getNode(ref);
   if (patch.expect_version !== undefined && patch.expect_version !== before.version)
@@ -143,6 +147,10 @@ export async function updateNode(
   const tags = isEntry && patch.tags !== undefined ? cleanTags(patch.tags) : before.tags;
   const tagsBy = isEntry && patch.tags !== undefined ? "owner" : before.tags_by;
   if (patch.entry_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(patch.entry_date)) throw bad("entry_date must be a day written as YYYY-MM-DD.");
+  // a mood given here is the owner's word for it (null hands the choice back to the app)
+  const mood = isEntry && patch.mood !== undefined ? asMood(patch.mood) : before.mood;
+  if (isEntry && patch.mood != null && !mood) throw bad(`mood must be one of: ${MOOD_NAMES.join(", ")}.`);
+  const moodBy = isEntry && patch.mood !== undefined ? (mood ? "owner" : null) : before.mood_by;
   const entryDate = isEntry && patch.entry_date !== undefined ? patch.entry_date : before.entry_date;
   const blurb = before.kind === "link" && patch.about !== undefined ? patch.about.slice(0, 400) : before.blurb;
   const title = patch.title?.trim() || before.title;
@@ -159,7 +167,7 @@ export async function updateNode(
   }
 
   const changed = body !== before.body || title !== before.title || summary !== before.summary || cover !== before.cover || kind !== before.kind || blurb !== before.blurb;
-  const filed = tags.join("\n") !== before.tags.join("\n") || entryDate !== before.entry_date;
+  const filed = tags.join("\n") !== before.tags.join("\n") || entryDate !== before.entry_date || mood !== before.mood || moodBy !== before.mood_by;
   if (!changed && !filed && path === before.path) return before;
 
   if (changed) {
@@ -168,8 +176,8 @@ export async function updateNode(
     ]);
   }
   await q(
-    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10, blurb=$11, tags=$12, tags_by=$13, entry_date=$14 WHERE id=$1",
-    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind, blurb, tags, tagsBy, entryDate],
+    "UPDATE context_nodes SET title=$2, summary=$3, body=$4, path=$5, parent_id=$6, updated_by=$7, updated_at=now(), version = version + $8, cover=$9, kind=$10, blurb=$11, tags=$12, tags_by=$13, entry_date=$14, mood=$15, mood_by=$16 WHERE id=$1",
+    [before.id, title, summary, body, path, parentId, actor.id, changed ? 1 : 0, cover, kind, blurb, tags, tagsBy, entryDate, mood, moodBy],
   );
   if (path !== before.path) {
     // Keep every descendant's address in step with its ancestor.

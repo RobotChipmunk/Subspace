@@ -2,6 +2,7 @@ import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
 import { briefing, changes, explore, read, search } from "../core/discover";
 import { uploadTicket } from "../auth";
+import { categorize, createEntry, getEntry, plainText } from "../core/journal";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
@@ -9,7 +10,7 @@ import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
-import { bad, type Agent } from "../core/util";
+import { bad, oneLine, type Agent } from "../core/util";
 import { q } from "../db";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 
@@ -246,6 +247,31 @@ export const TOOLS: Tool[] = [
         ? await updateNode(a, args.id, { ...args, parent } as any)
         : await createNode(a, { parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append });
       return { id: n.id, path: "/context/" + n.path, version: n.version };
+    },
+  },
+  {
+    name: "journal_write",
+    description:
+      'Add an entry to the owner\'s journal, or add to one. Only when the owner asks you to ("journal this", "add to my journal", "note for my journal"), and in their words, not yours: write down what they said, lightly tidied, never your own commentary or a summary of your work. Without id it starts a new entry (today unless date is given); with id it adds text to the end of that entry. Its themes, mood and one-line gist are worked out afterwards. To read the journal use explore("/journal").',
+    inputSchema: obj({
+      text: str("What to write, as markdown. The owner's own words."),
+      title: str("New entries only: two to six words. Left out, the entry is titled with its first words."),
+      date: str("New entries only: the day it belongs to, YYYY-MM-DD. Default today."),
+      id: str("An existing entry's id, to add text to it instead of starting a new one."),
+    }, ["text"]),
+    run: async (a, args) => {
+      const text = String(args.text ?? "").trim();
+      if (!text) throw bad("Give the text to write.");
+      let n;
+      if (args.id) {
+        n = (await getEntry(args.id)).entry;
+        n = await updateNode(a, n.id, { body_append: text });
+      } else {
+        const first = oneLine(plainText(text), 60).replace(/[.!?…]+$/, "");
+        n = await createEntry(a, { title: args.title || first.split(" ").slice(0, 6).join(" ") || "Untitled", body: text, date: args.date });
+      }
+      const filed = await categorize(n.id);
+      return { id: filed.id, day: filed.entry_date, title: filed.title, ...(filed.mood ? { mood: filed.mood } : {}), tags: filed.tags, ...(filed.summary ? { gist: filed.summary } : {}) };
     },
   },
   {

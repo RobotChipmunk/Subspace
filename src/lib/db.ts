@@ -330,6 +330,18 @@ const MIGRATIONS: string[] = [
    ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS tags_for text;
    CREATE INDEX IF NOT EXISTS context_journal ON context_nodes (entry_date DESC, id DESC) WHERE kind = 'journal' AND NOT archived;
    CREATE INDEX IF NOT EXISTS context_journal_tags ON context_nodes USING gin (tags) WHERE kind = 'journal' AND NOT archived`,
+  // The journal seen from further away. Each entry carries a mood (one of a short list; mood_by says
+  // whether the app or the owner chose it) and its summary holds the entry's gist in a sentence. A
+  // month has a written digest of its entries; basis is a hash of what it was written from, so it is
+  // rewritten only when the month's entries change.
+  `ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS mood text;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS mood_by text;
+   CREATE TABLE IF NOT EXISTS journal_months (
+     ym text PRIMARY KEY,
+     summary text NOT NULL DEFAULT '',
+     basis text NOT NULL DEFAULT '',
+     updated_at timestamptz NOT NULL DEFAULT now()
+   )`,
 ];
 
 async function migrate() {

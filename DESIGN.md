@@ -211,6 +211,17 @@ Patterns:
   the same day leave it blank), then the title, two lines of what the entry says, and its tags.
   An entry opens in place of the list as one 26px glass panel: date pill, bin, title, tags, then
   the editor. Enter in the title moves on to the writing.
+- **Mood** (journal, `src/lib/moods.ts`): every entry has one of eleven moods, read from its text
+  like its tags, and each mood has a tone. Tone is the only colour a mood gets, as a small dot:
+  `--good` for the bright ones, `ink3` for the even ones, `--warn` for the heavy ones. Never a
+  face, an emoji or a coloured chip. On an entry the mood is a pill beside the date that opens the
+  system menu; choosing one makes it the owner's, and "Let Subspace choose" hands it back.
+- **Month at a glance** (journal): under a month's heading, a row of tone dots (one per entry, in
+  day order), one meta line ("Mostly reflective · AI, Creativity"), and the month's digest in a
+  sentence or two when one has been written. In the list each entry's second line is its gist,
+  the one sentence worth remembering, with its mood first among the chips and a 48px thumbnail at
+  the right when it holds a picture. The gist shows under an entry's title too. This is the same
+  far-to-near reading agents get: months, then a line per entry, then the entry.
 - **Tags** (journal): quiet chips, `fill` with `ink2` text, never coloured. On an entry each chip
   carries a small remove button, and a "Tag" pill at the end opens into a field (known tags are
   offered as the owner types; at most six). The app chooses an entry's tags from its text a moment

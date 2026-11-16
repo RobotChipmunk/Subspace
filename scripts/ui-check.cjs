@@ -735,6 +735,11 @@ async function run(profile) {
     const row = page.locator("[data-entry]", { hasText: "Sketching again" });
     await reachable(row, "journal entry row");
     if (!(await row.innerText()).includes("Creativity")) fail("journal: the sketching entry does not show its Creativity tag");
+    // from far away: each month says how it felt, each entry carries its mood and its gist
+    const glance = page.locator("[data-month-glance]").first();
+    await reachable(glance, "journal month at a glance");
+    if (!/Mostly \w+/.test(await glance.innerText())) fail("journal: the month does not name its prevailing mood");
+    if (!(await page.locator("[data-entry] [data-mood]").count())) fail("journal: no entry shows a mood");
 
     // a tag narrows the list to its entries, and lets go again
     const chips = page.getByRole("group", { name: "Tags" });
@@ -767,6 +772,13 @@ async function run(profile) {
     await page.keyboard.type("Thinking about how AI models and prompts change the way agents work for me.", { delay: 8 });
     await page.locator('[data-tag="AI"]').waitFor({ timeout: 10000 }).catch(() => fail("journal: a new entry about AI was not tagged AI on its own"));
     await page.getByText("Tagged for you").waitFor({ timeout: 3000 }).catch(() => fail("journal: tags chosen by the app are not marked as such"));
+    await page.locator("[data-gist]").waitFor({ timeout: 3000 }).catch(() => fail("journal: the entry was not given its gist"));
+    // the mood is the app's reading until the owner says otherwise
+    const moodPill = page.locator("label[data-mood]");
+    await reachable(moodPill, "journal mood pill");
+    if (!(await moodPill.getAttribute("data-mood"))) fail("journal: the entry was not given a mood");
+    await page.getByLabel("Mood").selectOption("Hopeful");
+    await page.locator('label[data-mood="Hopeful"]').waitFor({ timeout: 3000 }).catch(() => fail("journal: choosing a mood did not show it"));
 
     // embed a link with the button
     await reachable(page.getByLabel("Add a link"), "journal add a link button");
@@ -787,6 +799,16 @@ async function run(profile) {
       el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
     });
     await page.locator('.page-block a[href="https://example.com/slow-interfaces"]').waitFor({ timeout: 10000 }).catch(() => fail("journal: a pasted address did not become a preview"));
+    // a picture pasted in is uploaded and shown in place
+    await press(page.locator(".ProseMirror > p").last());
+    await settle(300);
+    await page.locator(".ProseMirror").evaluate((el) => {
+      const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFklEQVR4nGP8z8Dwn4EIwESMolGF+AEAr1YCDmxPhzQAAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
+      const data = new DataTransfer();
+      data.items.add(new File([png], "pasted.png", { type: "image/png" }));
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await page.locator('.ProseMirror img[src^="/api/media/"]').waitFor({ timeout: 10000 }).catch(() => fail("journal: a pasted picture was not added to the entry"));
     await settle(600);
     await noSidewaysScroll("journal new entry");
 
@@ -820,6 +842,9 @@ async function run(profile) {
     const mine = page.locator("[data-entry]", { hasText: "Check entry" });
     await mine.first().waitFor({ timeout: 5000 });
     if (!(await mine.first().innerText()).includes("AI")) fail("journal: the new entry lost its tag in the list");
+    if (!(await mine.first().innerText()).includes("Hopeful")) fail("journal: the mood the owner chose is not in the list");
+    if (!(await mine.first().locator("img").count())) fail("journal: an entry with a picture shows no thumbnail in the list");
+    await shot("journal-after");
     await press(mine.first());
     await page.getByLabel("Title").waitFor({ timeout: 5000 });
     await settle(600);
