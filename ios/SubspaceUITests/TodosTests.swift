@@ -102,6 +102,36 @@ final class TodosTests: SubspaceTestCase {
         shot("13-todos-repeat-next")
     }
 
+    func testEachSectionHasItsOwnAdd() {
+        launchSignedIn()
+        go("todos")
+        folder("week").tap()
+
+        // Today's section has its own plus, and a task typed there lands on today.
+        let todayPlus = app.buttons.matching(NSPredicate(format: "label == 'Add task to Today'")).firstMatch
+        expect(todayPlus, "the plus at the end of Today's section").tap()
+        let title = "Post the parcel \(Int.random(in: 1000...9999))"
+        let field = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.add.2'")).firstMatch
+        expect(field, "Today's own add field, open")
+        Thread.sleep(forTimeInterval: 0.4)
+        app.typeText(title + "\n")
+        expect(row(title), "the new task in This week")
+        shot("15-todos-section-add")
+        folder("today").tap()
+        expect(row(title), "the task added under Today's section, on Today")
+
+        // "Any day" has its own plus too, and keeps its task for the week with no day.
+        folder("week").tap()
+        expect(app.buttons["todos.addIn.any"], "the plus at the end of Any day").tap()
+        let anyTitle = "Sort the photos \(Int.random(in: 1000...9999))"
+        expect(app.textFields["todos.add.any"], "Any day's own add field, open")
+        Thread.sleep(forTimeInterval: 0.4)
+        app.typeText(anyTitle + "\n")
+        expect(row(anyTitle), "the new task under Any day")
+        folder("today").tap()
+        XCTAssertFalse(row(anyTitle).waitForExistence(timeout: 3), "A task added to Any day should not be on Today")
+    }
+
     func testDragATaskToAnotherSection() {
         launchSignedIn()
         go("todos")

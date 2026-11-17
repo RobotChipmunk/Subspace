@@ -29,6 +29,8 @@ final class TodosStore {
     var draggingID: String? = nil
     /// The section of this list (another day of the week) the carried row is held over.
     var targetGroup: String? = nil
+    /// The section of a list with sections whose own add field is open, if any.
+    var addingSection: String? = nil
 
     /// Tasks typed here that the server has not answered for yet.
     @ObservationIgnored private var unsaved: [Todo] = []
@@ -48,10 +50,20 @@ final class TodosStore {
         return folders.first { $0.key == key }
     }
 
-    private var isMulti: Bool { view == "week" || view == "next_week" || view == "weekend" || view == "later" }
+    var isMulti: Bool { view == "week" || view == "next_week" || view == "weekend" || view == "later" }
 
-    /// "Later" has no day of its own to add to: a task gets there by being given a date.
-    var canAdd: Bool { view != "later" }
+    /// A list without sections has one add field at its end. A list with sections adds through
+    /// each section instead ("Later" only through its days: a task gets there by being given a date).
+    var canAdd: Bool { !isMulti }
+
+    /// Whether a section can be given a task, by carrying or typing: not a whole week in "Later"
+    /// (no single day to land on) and not a day already past (it would only roll forward again).
+    func takes(_ key: String) -> Bool {
+        guard isMulti, !key.isEmpty, !key.hasSuffix("w") else { return false }
+        if key == "any" { return true }
+        guard let today else { return true }
+        return key >= today
+    }
 
     func rowKey(_ id: String) -> String {
         keys[id] ?? id
@@ -171,6 +183,7 @@ final class TodosStore {
             openID = nil
             if changed {
                 view = key
+                addingSection = nil
                 rows = nil
                 unsaved = []
             }
@@ -314,10 +327,13 @@ final class TodosStore {
         await refreshFolders()
     }
 
-    /// Adds a task to the selected folder. False means it could not be saved and the words should go back in the box.
-    func add(_ title: String) async -> Bool {
+    /// Adds a task to the selected folder, or to one of its sections: a section that is a day adds
+    /// to that day, "Any day" to the list itself. False means it could not be saved and the words
+    /// should go back in the box.
+    func add(_ title: String, to section: String = "") async -> Bool {
         guard let api = app?.api, !isBin else { return false }
-        let target = view
+        let list = view
+        let target = TodosDates.isDate(section) ? section : list
         // the same place the server will file it, so it does not jump between groups when saved
         var day: String? = nil
         if TodosDates.isDate(target) {
@@ -355,7 +371,7 @@ final class TodosStore {
             saved.has_notes = false
             unsaved.removeAll { $0.id == tempID }
             problem = nil
-            if view == target, let index = rows?.firstIndex(where: { $0.id == tempID }) {
+            if view == list, let index = rows?.firstIndex(where: { $0.id == tempID }) {
                 keys[saved.id] = tempID
                 rows?[index] = saved
             }
@@ -398,11 +414,9 @@ final class TodosStore {
     /// rule as the web: not its own section, not a whole week in "Later" (no single day to land
     /// on) and not a day already past (it would only roll forward again).
     func acceptsGroup(_ key: String) -> Bool {
-        guard isMulti, let id = draggingID, !id.hasPrefix("new_"), !key.isEmpty, !key.hasSuffix("w") else { return false }
+        guard takes(key), let id = draggingID, !id.hasPrefix("new_") else { return false }
         guard let row = (rows ?? []).first(where: { $0.id == id }), groupKey(row) != key else { return false }
-        if key == "any" { return true }
-        guard let today else { return true }
-        return key >= today
+        return true
     }
 
     /// The lifted row has come over a section: if it can go there, that section lights up.

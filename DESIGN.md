@@ -109,6 +109,10 @@ Patterns:
   too: it lights the same way (`.drop-target`) with its heading in accent, and the row lands at
   its end on that day. The week lists show every day still to come as a section, even an empty
   one (a bare heading), so there is always a day to carry a task onto. A day already past, and a whole week in "Later", take nothing. On touch, pulling a row sideways lifts it at once; up or down still scrolls.
+- **Add where it lands.** A list without sections ends in one small plus. In a list with sections
+  each section that can take a task ends in its own plus, which opens the field there and adds to
+  that day ("Any day" keeps it for the week). The same rule as carrying: a day already past and a
+  whole week in "Later" have none, so "Later" adds only through its days.
 - **Emphasis is rare.** One small flourish at the moment it matters (the bin's shake as it arms).
   Never loop attention-seeking motion.
 - **Make room, do not cover.** A panel that opens beside the content slides in from its edge with
