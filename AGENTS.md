@@ -128,3 +128,10 @@ being true. Read this list before starting work.
   loaded simulator sometimes cannot launch or quit the app. A test that fails twice is a real
   failure; one that passed on the second go shows in the summary as failed then passed. Tests
   change data, so write each one to cope with its own half-finished first attempt.
+- Production reaches Postgres through Neon's pooler, where each statement can land on a different
+  server connection. Migrations took a session lock (`pg_advisory_lock`) whose unlock went to
+  another connection, so it stayed held and every later server start hung until the host's
+  300-second limit (the 504s agents hit on 15 and 17 Nov 2026). Never hold session state across
+  statements: use `pg_advisory_xact_lock` inside a transaction. Keep the time limits in
+  `src/lib/db.ts`, and test database plumbing through a transaction-mode `pgbouncer`
+  (`apt-get update && apt-get install -y pgbouncer`), not only straight against Postgres.

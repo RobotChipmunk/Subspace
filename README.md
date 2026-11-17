@@ -66,6 +66,13 @@ created on first request.
 5. Deploy, sign in, open Agents, press Connect on an agent and paste its address into that agent
    as a custom MCP connector. The agent's app sends you to a Subspace page to approve it.
 
+`DATABASE_URL` there is Neon's pooled address: each statement may run on a different server
+connection, so nothing in the app may rely on session state (session advisory locks, `SET` outside
+a transaction). `src/lib/db.ts` puts a limit on connecting (10 s), on each query (30 s) and on the
+wait for the migration lock (20 s). When one runs out the request fails instead of hanging, and
+the function log has a line starting `db:` that says what gave up and after how long. Search the
+Vercel logs for `db:` when agents report that Subspace did not answer.
+
 ## How agents connect
 
 Each agent has its own address, `/api/mcp/<handle>`. The address is not a secret. Subspace is its

@@ -1,4 +1,4 @@
-import { Pool, types, type PoolClient } from "pg";
+import { Pool, types, type PoolClient, type QueryConfig } from "pg";
 
 // Dates stay as YYYY-MM-DD strings; bigints (event sequence numbers) become numbers.
 types.setTypeParser(1082, (v) => v);
@@ -6,19 +6,45 @@ types.setTypeParser(20, (v) => Number(v));
 
 const g = globalThis as unknown as { __ssPool?: Pool; __ssReady?: Promise<void> };
 
+// Nothing here may wait for ever. A request that hangs on the database is cut off by the host only
+// after five minutes, and it takes every later request on the same server instance with it (they
+// all wait on `ready()`). So connecting, each query and the wait for the migration lock all have
+// a limit, after which the call fails, says why in the log, and the next one starts afresh.
+const CONNECT_MS = 10_000; // includes a sleeping database waking up
+const QUERY_MS = 30_000;
+const MIGRATION_MS = 120_000; // one migration may rebuild a table or an index
+const LOCK_WAIT_MS = 20_000;
+const SLOW_START_MS = 3_000;
+
 function pool(): Pool {
   if (!g.__ssPool) {
     const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
-    g.__ssPool = new Pool({ connectionString: url, max: 5, idleTimeoutMillis: 10_000 });
+    // The limits are set here, on the client, and not as `statement_timeout` or `lock_timeout`:
+    // those go to the server as start-up parameters, which a connection pooler may refuse.
+    const p = new Pool({ connectionString: url, max: 5, idleTimeoutMillis: 10_000, connectionTimeoutMillis: CONNECT_MS, query_timeout: QUERY_MS, keepAlive: true });
+    // The server closing an idle connection (the database went to sleep) is not a crash.
+    p.on("error", (e) => console.error("db: an idle connection was lost:", e.message));
+    g.__ssPool = p;
   }
   return g.__ssPool;
 }
 
+/** Whether a failure was one of the limits above running out, so the connection is in an unknown state. */
+const timedOut = (e: unknown) => e instanceof Error && /timeout/i.test(e.message);
+
+const brief = (sql: string) => sql.replace(/\s+/g, " ").trim().slice(0, 160);
+
 export async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   await ready();
-  const r = await pool().query(sql, params);
-  return r.rows as T[];
+  try {
+    // The pool closes a connection whose query failed this way, so a stuck one is never reused.
+    const r = await pool().query(sql, params);
+    return r.rows as T[];
+  } catch (e) {
+    if (timedOut(e)) console.error(`db: gave up on a query (${(e as Error).message}): ${brief(sql)}`);
+    throw e;
+  }
 }
 
 export async function q1<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T | null> {
@@ -29,26 +55,41 @@ export async function q1<T = Record<string, unknown>>(sql: string, params: unkno
 export async function tx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
   await ready();
   const c = await pool().connect();
+  let broken: unknown;
   try {
     await c.query("BEGIN");
     const out = await fn(c);
     await c.query("COMMIT");
     return out;
   } catch (e) {
-    await c.query("ROLLBACK");
+    // After a timeout the connection may still be busy with the query: close it (which rolls the
+    // transaction back) instead of queueing a ROLLBACK behind it. The same if ROLLBACK itself fails.
+    if (timedOut(e)) {
+      broken = e;
+      console.error(`db: gave up inside a transaction (${(e as Error).message})`);
+    } else await c.query("ROLLBACK").catch((r) => (broken = r));
     throw e;
   } finally {
-    c.release();
+    c.release(broken ? true : undefined);
   }
 }
 
 /** Runs migrations once per server instance. Each migration is applied exactly once, in order. */
 export function ready(): Promise<void> {
   if (!g.__ssReady) {
-    g.__ssReady = migrate().catch((e) => {
-      g.__ssReady = undefined;
-      throw e;
-    });
+    const t0 = Date.now();
+    g.__ssReady = migrate().then(
+      () => {
+        const ms = Date.now() - t0;
+        if (ms > SLOW_START_MS) console.warn(`db: start-up took ${ms}ms`);
+      },
+      (e) => {
+        // Forget the failure so the next request tries again, and leave a line saying what it was.
+        g.__ssReady = undefined;
+        console.error(`db: start-up failed after ${Date.now() - t0}ms:`, e instanceof Error ? e.message : e);
+        throw e;
+      },
+    );
   }
   return g.__ssReady;
 }
@@ -399,28 +440,68 @@ const MIGRATIONS: string[] = [
    CREATE INDEX IF NOT EXISTS agent_runs_agent ON agent_runs (agent_id, started_at DESC)`,
 ];
 
+// The key of the lock that lets one server instance at a time change the schema.
+const MIGRATION_LOCK = 7782002;
+
+/**
+ * Runs `fn` in a transaction that holds the migration lock. The lock belongs to the transaction
+ * (`pg_advisory_xact_lock`), so it is gone when the transaction ends, however it ends. It must not
+ * be a session lock (`pg_advisory_lock`): the database is reached through a pooler that gives each
+ * statement whichever server connection is free, so the unlock can land on a different connection
+ * from the lock. The lock is then never released, and every later start waits for it for ever.
+ */
+async function locked<T>(c: PoolClient, fn: () => Promise<T>): Promise<T> {
+  await c.query("BEGIN");
+  try {
+    await c.query(`SET LOCAL lock_timeout = ${LOCK_WAIT_MS}`);
+    await c.query("SELECT pg_advisory_xact_lock($1)", [MIGRATION_LOCK]);
+    const out = await fn();
+    await c.query("COMMIT");
+    return out;
+  } catch (e) {
+    if (!timedOut(e)) await c.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+}
+
+/** The versions already applied, or none when the table is not there yet (a new database). */
+async function applied(c: PoolClient): Promise<Set<number>> {
+  try {
+    return new Set((await c.query("SELECT version FROM schema_migrations")).rows.map((r) => r.version as number));
+  } catch (e) {
+    if ((e as { code?: string }).code === "42P01") return new Set();
+    throw e;
+  }
+}
+
 async function migrate() {
   const c = await pool().connect();
+  let broken = false;
   try {
-    await c.query("SELECT pg_advisory_lock(7782001)");
-    await c.query("CREATE TABLE IF NOT EXISTS schema_migrations (version int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
-    const done = new Set((await c.query("SELECT version FROM schema_migrations")).rows.map((r) => r.version as number));
+    // The usual start: everything is applied and the first-run content is there. Reading that
+    // takes no lock, so a new server instance never waits on another one.
+    const done = await applied(c);
+    const upToDate = MIGRATIONS.every((_, i) => done.has(i + 1));
+    if (upToDate && (await c.query("SELECT 1 FROM agents LIMIT 1")).rowCount) return;
+
+    await locked(c, () => c.query("CREATE TABLE IF NOT EXISTS schema_migrations (version int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"));
     for (let i = 0; i < MIGRATIONS.length; i++) {
       if (done.has(i + 1)) continue;
-      await c.query("BEGIN");
-      try {
-        await c.query(MIGRATIONS[i]);
+      await locked(c, async () => {
+        // Another instance may have applied it while this one waited for the lock.
+        if ((await c.query("SELECT 1 FROM schema_migrations WHERE version = $1", [i + 1])).rowCount) return;
+        const migration: QueryConfig & { query_timeout: number } = { text: MIGRATIONS[i], query_timeout: MIGRATION_MS };
+        await c.query(migration);
         await c.query("INSERT INTO schema_migrations (version) VALUES ($1)", [i + 1]);
-        await c.query("COMMIT");
-      } catch (e) {
-        await c.query("ROLLBACK");
-        throw e;
-      }
+        console.log(`db: applied migration ${i + 1}`);
+      });
     }
-    await bootstrap(c);
+    await locked(c, () => bootstrap(c));
+  } catch (e) {
+    broken = true; // whatever state the connection is in, do not hand it to a request
+    throw e;
   } finally {
-    await c.query("SELECT pg_advisory_unlock(7782001)").catch(() => {});
-    c.release();
+    c.release(broken ? true : undefined);
   }
 }
 
