@@ -123,6 +123,9 @@ private struct JournalEntryEditor: View {
     @State private var removed = false
     @State private var error = ""
     @State private var addingTag = false
+    /// Whether the open tag field has had the keyboard. Losing it closes the field, but only after it had it:
+    /// a focus change left over from the field's last use must not close the one just opened.
+    @State private var tagFieldFocused = false
     @State private var tagText = ""
     @State private var linking = false
     @State private var linkURL = ""
@@ -375,7 +378,7 @@ private struct JournalEntryEditor: View {
     private func suggestionChip(_ tag: String) -> some View {
         Button {
             tagText = ""
-            withAnimation(.ssSoft) { addingTag = false }
+            closeTagField()
             chooseTags(tags + [tag])
         } label: {
             Text(tag)
@@ -427,7 +430,7 @@ private struct JournalEntryEditor: View {
                 .focused($focus, equals: .tag)
                 .onSubmit {
                     addTag()
-                    withAnimation(.ssSoft) { addingTag = false }
+                    closeTagField()
                 }
                 .onAppear { focus = .tag }
                 .frame(width: 120)
@@ -438,6 +441,7 @@ private struct JournalEntryEditor: View {
                 .accessibilityIdentifier("journal.tags.field")
         } else {
             Button {
+                tagFieldFocused = false
                 withAnimation(.ssSoft) { addingTag = true }
             } label: {
                 HStack(spacing: 4) {
@@ -723,10 +727,19 @@ private struct JournalEntryEditor: View {
         saver.push(draft)
     }
 
+    /// Closes the tag field and lets go of the keyboard, so no focus on a field that is gone lingers.
+    private func closeTagField() {
+        tagFieldFocused = false
+        withAnimation(.ssSoft) { addingTag = false }
+        if focus == .tag { focus = nil }
+    }
+
     private func focusChanged(_ now: JournalField?) {
-        if now != .tag && addingTag {
+        if now == .tag {
+            tagFieldFocused = true
+        } else if addingTag && tagFieldFocused {
             addTag()
-            withAnimation(.ssSoft) { addingTag = false }
+            closeTagField()
         }
         if now == nil { saver.flush() }
     }
