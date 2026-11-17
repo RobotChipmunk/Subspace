@@ -497,6 +497,37 @@ async function run(profile) {
     const back = (await get("/api/v1/todos?view=week")).todos.find((t) => t.title === title);
     if (!back || back.scope !== "week") fail("todos sections: a task dropped on Any day was not saved for the week");
   });
+  await step("todos add to a section", async () => {
+    // In a list with sections every section that can take a task has its own plus, and adds to that day.
+    const nav = page.getByRole("navigation", { name: "Lists" });
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const today = (await get("/api/v1/todos/folders")).today;
+    await press(nav.getByRole("button", { name: /^This week/ }));
+    await settle(1200);
+    const keys = await page.locator("[data-group]").evaluateAll((els) => els.map((e) => e.getAttribute("data-group")));
+    for (const key of keys) {
+      const has = await page.locator(`[data-group="${key}"] [data-add="${key}"]`).count();
+      if (has !== 1) fail(`todos sections: the "${key}" section has ${has} add buttons, not one`);
+    }
+    if (await page.getByRole("button", { name: "Add task", exact: true }).count()) fail("todos sections: a list with sections still has one add button for the whole list");
+    const add = page.getByRole("button", { name: "Add task to Today" });
+    await add.scrollIntoViewIfNeeded();
+    await reachable(add, "todos section add button");
+    await press(add);
+    const title = `Section task ${profile.name}`;
+    await page.keyboard.type(title);
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    await page.locator(`[data-group="${today}"] li`, { hasText: title }).waitFor({ timeout: 5000 }).catch(() => fail("todos sections: a task added under Today is not in Today's section"));
+    await settle(800);
+    await shot("todos-section-add");
+    const saved = (await get("/api/v1/todos?view=today")).todos.find((t) => t.title === title);
+    if (!saved) return fail("todos sections: a task added under Today was not saved on today");
+    // take it away again, so every screen size starts from the same lists
+    // (for good, past the bin, which a later step expects to empty)
+    await page.evaluate(async (id) => (await fetch(`/api/v1/todos/${id}`, { method: "DELETE" }), await fetch(`/api/v1/todos/${id}?forever=1`, { method: "DELETE" })), saved.id);
+    await settle(400);
+  });
   await step("todos add, tick, open", async () => {
     await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
     await settle(500);

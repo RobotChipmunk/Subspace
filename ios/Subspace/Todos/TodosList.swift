@@ -75,6 +75,10 @@ private struct TodosGroupView: View {
                 TodosRowView(row: item.row, tag: tagged && item.row.guest_id != nil, place: place, store: store)
                     .transition(.opacity)
             }
+            // in a list with sections each one that can take a task has its own plus, which adds to that day
+            if store.rows != nil && store.takes(key) {
+                TodosSectionAdd(section: key, store: store)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 4)
@@ -256,9 +260,41 @@ private struct TodosDrop: DropDelegate {
     }
 }
 
-/// Types a new task into the selected folder. It shows at once; return adds it and stays for the next.
+/// The plus at the end of one section of a list with sections. Tapped, it becomes that section's
+/// add field; the field goes back to a plus when it is left empty.
+private struct TodosSectionAdd: View {
+    var section: String
+    var store: TodosStore
+
+    var body: some View {
+        if store.addingSection == section {
+            TodosAddField(store: store, section: section)
+                .transition(.opacity)
+        } else {
+            Button {
+                withAnimation(.ssSoft) { store.addingSection = section }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.ink2)
+                    .frame(width: 22, height: 22)
+                    .background(Theme.fill2, in: Circle())
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle(scale: 0.9))
+            .accessibilityLabel("Add task to \(store.groupTitle(section))")
+            .accessibilityIdentifier("todos.addIn.\(section)")
+        }
+    }
+}
+
+/// Types a new task into the selected folder, or into one section of it. It shows at once; return
+/// adds it and stays for the next.
 private struct TodosAddField: View {
     var store: TodosStore
+    /// The section it adds to; empty in a list without sections.
+    var section: String = ""
     @State private var draft = ""
     @FocusState private var focused: Bool
 
@@ -281,20 +317,30 @@ private struct TodosAddField: View {
                     add()
                     focused = true
                 }
-                .accessibilityLabel("Add task")
-                .accessibilityIdentifier("todos.add")
+                .accessibilityLabel(section.isEmpty ? "Add task" : "Add task to \(store.groupTitle(section))")
+                .accessibilityIdentifier(section.isEmpty ? "todos.add" : "todos.add.\(section)")
         }
         .onChange(of: focused) { _, on in
             if !on { add() }
+        }
+        // a section's field is opened by its plus, and takes the keys at once
+        .task {
+            if !section.isEmpty { focused = true }
         }
     }
 
     private func add() {
         let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = ""
-        if title.isEmpty { return }
+        if title.isEmpty {
+            // left empty: a section's field goes back to its plus
+            if !section.isEmpty && !focused && store.addingSection == section {
+                withAnimation(.ssSoft) { store.addingSection = nil }
+            }
+            return
+        }
         Task {
-            let saved = await store.add(title)
+            let saved = await store.add(title, to: section)
             // could not be saved: give the words back to the box
             if !saved && draft.isEmpty { draft = title }
         }
