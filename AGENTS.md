@@ -137,6 +137,10 @@ being true. Read this list before starting work.
   `npm run typecheck` after the last edit, not only after the edits under `src/`.
 - `scripts/mcp-smoke.ts` expects a freshly seeded database: after a `ui-check` run the agents have
   more than one page of changes waiting and it fails on an unrelated assertion.
+- iOS CI: the watchdog in `ios/scripts/ci-test.sh` stops the tests after a fixed time and the job
+  then fails with exit code 143, even when every test passed. Three more tests took the suite to
+  28 minutes against a 30-minute limit. When you add UI tests, read "Executed N tests ... in S
+  seconds" in the job log and keep the limit (and the job's `timeout-minutes`) well above it.
 - iOS CI: a failed UI test is run once more before it counts (`-retry-tests-on-failure`), because a
   loaded simulator sometimes cannot launch or quit the app. A test that fails twice is a real
   failure; one that passed on the second go shows in the summary as failed then passed. Tests

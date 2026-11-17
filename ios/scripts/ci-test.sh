@@ -21,7 +21,9 @@ sleep "${SIM_SETTLE_SECONDS:-45}"
 rm -rf "$OUT/$NAME.xcresult"
 # Run in the background under a watchdog: a simulator that never starts the tests must not hold
 # the job until its timeout.
-LIMIT="${TEST_LIMIT_SECONDS:-1800}"
+# The whole suite takes about 28 minutes on a slow runner (25 tests, some run twice), so the
+# limit leaves room above that; the job's own timeout in ios.yml is longer still.
+LIMIT="${TEST_LIMIT_SECONDS:-2400}"
 xcodebuild test-without-building -project ios/Subspace.xcodeproj -scheme Subspace \
   -destination "id=$SIM" -derivedDataPath "$DERIVED" -resultBundlePath "$OUT/$NAME.xcresult" \
   -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 240 \
