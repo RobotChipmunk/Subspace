@@ -7,15 +7,21 @@ struct TodosListView: View {
 
     var body: some View {
         let loaded = store.rows != nil
-        let empty = store.rows?.isEmpty ?? false
+        let empty = store.shownRows?.isEmpty ?? false
+        let chosen = store.filter
         VStack(alignment: .leading, spacing: 0) {
-            PageHeader(store.folder?.label ?? "", sub: store.listSub)
+            PageHeader(store.folder?.label ?? "", sub: store.listSub) {
+                // only on a list that has tagged tasks, or while a choice is still in force
+                if !store.viewTags.isEmpty {
+                    TodosTagFilter(store: store)
+                }
+            }
             TodosProblem(text: store.problem)
             ForEach(store.groups) { group in
                 TodosGroupView(group: group, store: store)
             }
             if empty {
-                Text("Nothing here.")
+                Text(chosen.isEmpty ? "Nothing here." : "Nothing tagged \(chosen.joined(separator: " or ")) here.")
                     .font(.ssBody)
                     .foregroundStyle(Theme.ink3)
                     .padding(.horizontal, 4)
@@ -27,6 +33,77 @@ struct TodosListView: View {
             }
         }
         .onDrop(of: [UTType.text], delegate: TodosDrop(entered: {}, dropped: { store.endDrag() }))
+    }
+}
+
+/// Narrows the list to the tasks carrying one or more tags. It sits quietly at the right of the
+/// list's heading, only on a list that has tagged tasks: a tag and the word "Tags", which turn
+/// accent and name the choice while one is made. Tapping it opens the tags to choose from; the
+/// menu stays open while they are ticked, so more than one can be chosen.
+private struct TodosTagFilter: View {
+    var store: TodosStore
+
+    var body: some View {
+        let chosen = store.filter
+        let on = !chosen.isEmpty
+        let title = on ? chosen.joined(separator: ", ") : "Tags"
+        Menu {
+            ForEach(store.viewTags) { item in
+                Button {
+                    store.toggleFilter(item.tag)
+                } label: {
+                    if chosen.contains(item.tag) { Label(item.tag, systemImage: "checkmark") } else { Text(item.tag) }
+                }
+                .menuActionDismissBehavior(.disabled)
+            }
+            if on {
+                Divider()
+                Button("Show all") { store.clearFilter() }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "tag")
+                Text(title).lineLimit(1)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(on ? Theme.accent : Theme.ink3)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 36)
+            .background(on ? Theme.accentSoft : Color.clear, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel(on ? "Tags: \(title)" : "Filter by tag")
+        .accessibilityIdentifier("todos.tags.filter")
+    }
+}
+
+/// A task's tags at the end of its row, as quiet chips: the first one or two, and how many more.
+private struct TodosRowTags: View {
+    var tags: [String]
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let shown = Array(tags.prefix(sizeClass == .regular ? 2 : 1))
+        let more = tags.count - shown.count
+        HStack(spacing: 4) {
+            ForEach(shown, id: \.self) { tag in
+                // a long tag is cut short here; the task itself shows it whole
+                Text(tag.count > 16 ? String(tag.prefix(15)) + "…" : tag)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.ink2)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1)
+                    .background(Theme.fill, in: Capsule())
+            }
+            if more > 0 {
+                Text("+\(more)")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.ink3)
+                    .fixedSize()
+            }
+        }
     }
 }
 
@@ -189,6 +266,7 @@ private struct TodosRowLabel: View {
         let unseen = row.ai_unseen ?? false
         let notes = row.has_notes ?? false
         let repeats = row.`repeat` != nil && !row.done
+        let tags = row.tags ?? []
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
@@ -212,6 +290,10 @@ private struct TodosRowLabel: View {
                     .accessibilityLabel("Changed since you last looked")
             }
             Spacer(minLength: 0)
+            if !tags.isEmpty {
+                TodosRowTags(tags: tags)
+                    .padding(.top, 2)
+            }
             if !place.isEmpty {
                 Text(place)
                     .font(.ssMeta)

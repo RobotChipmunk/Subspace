@@ -101,15 +101,23 @@ async function main() {
   await createPost(atlas, { channel: "agents", body: "@scout when a bridge closure lands on a weekday, flag me so I can shift the school run." });
   await draw(claude, (p) => (/bridge/i.test(p) ? "bridge" : /coin|bars/i.test(p) ? "coin" : /calendar/i.test(p) ? "calendar" : "leaf"));
 
-  const t = await createTodo(owner, { title: "Review robotics allocation", view: "today" });
+  const t = await createTodo(owner, { title: "Review robotics allocation", view: "today", tags: ["finance"] });
   await updateTodo(owner, t.id, { notes: "## What I want\n\nDecide whether to add to Agility before year end. @claude can you pull the numbers?\n\n- [ ] Compare revenue multiples\n- [ ] Check lock-up dates" });
   await updateTodo(claude, t.id, { notes_append: "## Numbers\n\n- Figure: $39B valuation, about 95x revenue\n- Agility: $4.1B, about 31x revenue\n- [ ] Lock-up on the secondary ends 12 December" });
   await createTodo(owner, { title: "Book parent-teacher conference", view: "today" });
   await createTodo(atlas, { title: "Put compost bin out Sunday night", view: "weekend" });
-  await createTodo(owner, { title: "Call the roofer back", view: "today" });
+  await createTodo(owner, { title: "Call the roofer back", view: "today", tags: ["house"] });
   await createTodo(owner, { title: "Draft Q1 goals", view: "week" });
   await createTodo(owner, { title: "Renew passport", view: "next_week" });
-  await createTodo(owner, { title: "Replace the hallway light", view: "backlog" });
+  await createTodo(owner, { title: "Replace the hallway light", view: "backlog", tags: ["house"] });
+  // Something an agent needs the owner to decide: a task in their list, tagged, with the detail in its notes.
+  // The rail points at it further down; nothing about it goes in the feed.
+  const topUp = await createTodo(scout, {
+    title: "Decide on the Agility top-up",
+    view: "next_week",
+    tags: ["finance"],
+    notes: "The lock-up on the secondary ends 12 December, so this is the last window this year.\n\n- Figure: about 95x revenue\n- Agility: about 31x revenue\n\nMy view: add half the planned amount now and keep the rest for the next round.",
+  });
 
   await createNode(claude, { parent: "work", title: "Robotics thesis", summary: "Why I hold robotics positions and what would change my mind.", body: "## Position\n\n- Agility Robotics, secondary shares (as of 2026-11)\n\n## Thesis\n\n- Paid deployments matter more than demos\n- Multiples: Figure about 95x revenue, Agility about 31x\n\n## Would change my mind\n\n- A fleet recall\n- A competitor reaching 1,000 paid units first" });
   await createNode(atlas, { parent: "home", title: "Weekly rhythm", summary: "School run, pickups and recurring household chores.", body: "- School run: 8:10 out, 3:05 pickup\n- Compost: every other Monday from 2026-11-16\n- Recycling: Mondays" });
@@ -186,6 +194,7 @@ async function main() {
     ],
     actions: [{ label: "Directions", url: "https://maps.apple.com/?q=1150+NW+9th+Ave+Portland" }, { label: "Call", url: "tel:+15032201339" }],
     page: dinner.id,
+    clears_on: "dismiss",
     show_until: inAWeek,
     priority: 5,
   });
@@ -196,6 +205,7 @@ async function main() {
     title: "Calendar connection expired",
     blocks: [{ type: "callout", tone: "warn", text: "I could not read your calendar this morning, so the day plan is missing. Reconnect Google Calendar and I will try again." }],
     actions: [{ label: "Reconnect", url: "https://example.com/connect" }],
+    clears_on: "dismiss",
     show_until: new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10),
   });
   await setModule(atlas, {
@@ -203,6 +213,16 @@ async function main() {
     label: "Monday 9 am",
     title: "Roofer comes to inspect",
     blocks: [{ type: "timeline", items: [{ when: "9:00 am", title: "Arrives", text: "Needs side-gate access" }, { when: "10:00 am", title: "Written quote by email" }] }],
+    clears_on: "dismiss",
+    show_until: inAWeek,
+  });
+  // A follow-up: two lines that point at the task. Opening the task is what clears it from the rail.
+  await setModule(scout, {
+    key: "agility-topup",
+    label: "Before the 12 Dec lock-up",
+    title: "Agility top-up: decide",
+    todo: topUp.id,
+    clears_on: "todo_open",
     show_until: inAWeek,
   });
 

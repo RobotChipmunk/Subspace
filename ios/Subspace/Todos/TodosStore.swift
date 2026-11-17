@@ -7,6 +7,8 @@ import Observation
 @Observable
 final class TodosStore {
     static let binKey = "bin"
+    /// Every task, wherever it is: a view across the lists rather than a place of its own.
+    static let allKey = "all"
 
     @ObservationIgnored var app: AppModel? = nil
 
@@ -14,6 +16,11 @@ final class TodosStore {
     var today: String? = nil
     var binCount: Int = 0
     var foldersLoaded: Bool = false
+    /// Every tag the tasks carry, most used first: offered when a tag is added to a task.
+    var knownTags: [TodosTagCount] = []
+    /// The tags the selected list is narrowed to; empty shows every task. It starts afresh on
+    /// every list, so no task is hidden by a choice made elsewhere.
+    var filter: [String] = []
 
     /// The selected folder's key, or `binKey`.
     var view: String = "today"
@@ -50,17 +57,32 @@ final class TodosStore {
         return folders.first { $0.key == key }
     }
 
-    var isMulti: Bool { view == "week" || view == "next_week" || view == "weekend" || view == "later" }
+    var isAll: Bool { view == Self.allKey }
+
+    var isMulti: Bool { view == "week" || view == "next_week" || view == "weekend" || view == "later" || isAll }
+
+    /// This week's Monday: the date a task set for the week (not a day) carries.
+    private var thisMonday: String? {
+        guard let today else { return nil }
+        return TodosDates.monday(today)
+    }
 
     /// A list without sections has one add field at its end. A list with sections adds through
     /// each section instead ("Later" only through its days: a task gets there by being given a date).
     var canAdd: Bool { !isMulti }
 
-    /// Whether a section can be given a task, by carrying or typing: not a whole week in "Later"
-    /// (no single day to land on) and not a day already past (it would only roll forward again).
+    /// Whether a section can be given a task, by carrying or typing: not a day already past (it
+    /// would only roll forward again), and not a whole week unless it is this week or the next in
+    /// "All" (a week further off has no list of its own to add to). In "All" the backlog can; what
+    /// waits for a day cannot (those tasks come from someone else).
     func takes(_ key: String) -> Bool {
-        guard isMulti, !key.isEmpty, !key.hasSuffix("w") else { return false }
-        if key == "any" { return true }
+        guard isMulti, !key.isEmpty else { return false }
+        if key == "any" || key == "backlog" { return true }
+        if key == "waiting" { return false }
+        if key.hasSuffix("w") {
+            guard isAll, let monday = thisMonday, let next = TodosDates.adding(7, to: monday) else { return false }
+            return String(key.dropLast()) <= next
+        }
         guard let today else { return true }
         return key >= today
     }
@@ -69,15 +91,82 @@ final class TodosStore {
         keys[id] ?? id
     }
 
+    /// The section a task is filed under in a list with sections; empty in a list without. A day
+    /// is its date; a week is its Monday followed by "w" ("Later" and "All", which span many
+    /// weeks) or "any" (a week's own list). "All" also has the backlog and what waits for a day.
     func groupKey(_ todo: Todo) -> String {
         if !isMulti { return "" }
-        // "Later" spans many weeks, so a task set for a week (not a day) is filed under that week
-        if todo.scope == "week" { return view == "later" ? (todo.date ?? "") + "w" : "any" }
+        if isAll && todo.scope == "backlog" { return "backlog" }
+        if isAll && todo.scope == "guest" { return "waiting" }
+        if todo.scope == "week" { return (view == "later" || isAll) ? (todo.date ?? "") + "w" : "any" }
         return todo.date ?? "any"
     }
 
+    /// Where a section sorts in "All": today, the week it is in, the days and weeks after, then
+    /// the backlog and what still waits for a day.
+    private func rank(_ key: String) -> String {
+        if key == "backlog" { return "z1" }
+        if key == "waiting" { return "z2" }
+        if !key.hasSuffix("w") { return key + "b" }
+        let week = String(key.dropLast())
+        // this week's own section follows today; a later week comes before its days
+        if let monday = thisMonday, week <= monday { return (today ?? week) + "c" }
+        return week + "a"
+    }
+
+    /// The selected list's tasks, narrowed to the chosen tags when there are any.
+    var shownRows: [Todo]? {
+        guard let rows else { return nil }
+        if filter.isEmpty { return rows }
+        let chosen = filter
+        return rows.filter { row in (row.tags ?? []).contains(where: { chosen.contains($0) }) }
+    }
+
+    /// The tags on this list's tasks, most used first, and whichever are chosen even when no
+    /// task here carries them (so a choice can always be taken off).
+    var viewTags: [TodosTagCount] {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for row in rows ?? [] {
+            for tag in row.tags ?? [] {
+                if counts[tag] == nil {
+                    counts[tag] = 0
+                    order.append(tag)
+                }
+                if !row.done { counts[tag] = (counts[tag] ?? 0) + 1 }
+            }
+        }
+        for tag in filter where counts[tag] == nil {
+            counts[tag] = 0
+            order.append(tag)
+        }
+        var out: [TodosTagCount] = []
+        for tag in order {
+            out.append(TodosTagCount(tag: tag, count: counts[tag] ?? 0))
+        }
+        return out.sorted { a, b in
+            if a.count != b.count { return a.count > b.count }
+            return a.tag.lowercased() < b.tag.lowercased()
+        }
+    }
+
+    /// Chooses a tag to narrow the list to, or takes that choice off.
+    func toggleFilter(_ tag: String) {
+        withAnimation(.ssSoft) {
+            if let index = filter.firstIndex(of: tag) {
+                filter.remove(at: index)
+            } else {
+                filter.append(tag)
+            }
+        }
+    }
+
+    func clearFilter() {
+        withAnimation(.ssSoft) { filter = [] }
+    }
+
     var groups: [TodosGroup] {
-        guard let rows else { return [] }
+        guard let rows = shownRows else { return [] }
         var order: [String] = []
         var map: [String: [Todo]] = [:]
         for row in rows {
@@ -88,7 +177,7 @@ final class TodosStore {
             }
             map[key]?.append(row)
         }
-        if isMulti && view != "weekend" && view != "later" && map["any"] == nil {
+        if isMulti && !isAll && view != "weekend" && view != "later" && map["any"] == nil {
             map["any"] = []
             order.append("any")
         }
@@ -97,10 +186,20 @@ final class TodosStore {
             map[day] = []
             order.append(day)
         }
-        let sorted = order.sorted { a, b in
-            if a == "any" { return b != "any" }
-            if b == "any" { return false }
-            return a < b
+        // "All" always has today, so there is somewhere to add a task
+        if isAll, let today, map[today] == nil {
+            map[today] = []
+            order.append(today)
+        }
+        let sorted: [String]
+        if isAll {
+            sorted = order.sorted { a, b in rank(a) < rank(b) }
+        } else {
+            sorted = order.sorted { a, b in
+                if a == "any" { return b != "any" }
+                if b == "any" { return false }
+                return a < b
+            }
         }
         var out: [TodosGroup] = []
         for key in sorted {
@@ -126,7 +225,16 @@ final class TodosStore {
 
     func groupTitle(_ key: String) -> String {
         if key == "any" { return "Any day" }
+        if key == "backlog" { return "Backlog" }
+        if key == "waiting" { return "Waiting for a day" }
         if key == today { return "Today" }
+        if isAll {
+            // named the way a task's date pill names it: Tomorrow, Thursday, Thu, Dec 17, Next week
+            let week = key.hasSuffix("w")
+            let date = week ? String(key.dropLast()) : key
+            let label = TodosDates.placeLabel(scope: week ? "week" : "day", date: date, today: today)
+            return label.isEmpty ? TodosDates.longDate(date) : label
+        }
         if view == "later" {
             return key.hasSuffix("w") ? "Week of " + TodosDates.monthDay(String(key.dropLast())) : TodosDates.longDate(key)
         }
@@ -135,12 +243,15 @@ final class TodosStore {
 
     /// The line under the list's title.
     var listSub: String? {
-        if view == "today", let today { return TodosDates.longDate(today) }
-        if TodosDates.isDate(view) { return TodosDates.longDate(view) }
-        if view == "backlog" { return "No date. Pull from here when you have room." }
-        if view == "later" { return "Dated beyond next week." }
-        if folder?.guest != nil { return "Tasks stay here after you give them a day." }
-        guard let rows else { return nil }
+        // narrowed to some tags, it counts what is left
+        if filter.isEmpty {
+            if view == "today", let today { return TodosDates.longDate(today) }
+            if TodosDates.isDate(view) { return TodosDates.longDate(view) }
+            if view == "backlog" { return "No date. Pull from here when you have room." }
+            if view == "later" { return "Dated beyond next week." }
+            if folder?.guest != nil { return "Tasks stay here after you give them a day." }
+        }
+        guard let rows = shownRows else { return nil }
         let open = rows.filter { !$0.done }.count
         if open > 0 { return "\(open) to do" }
         return rows.isEmpty ? nil : "All done"
@@ -183,6 +294,7 @@ final class TodosStore {
             openID = nil
             if changed {
                 view = key
+                filter = []
                 addingSection = nil
                 rows = nil
                 unsaved = []
@@ -215,6 +327,7 @@ final class TodosStore {
         guard folders.contains(where: { $0.key == key }) else { return }
         generation += 1
         view = key
+        filter = []
         rows = nil
         unsaved = []
         await refreshList()
@@ -242,6 +355,7 @@ final class TodosStore {
             folders = reply.folders
             today = reply.today
             binCount = reply.bin
+            knownTags = reply.tags ?? []
             foldersLoaded = true
         }
         // If the day rolls over a dated folder may be gone; the bin's entry goes once it is empty.
@@ -250,6 +364,7 @@ final class TodosStore {
             generation += 1
             withAnimation(.ssSpring) {
                 view = "today"
+                filter = []
                 rows = nil
                 unsaved = []
             }
@@ -325,6 +440,34 @@ final class TodosStore {
         }
         await refreshList()
         await refreshFolders()
+        // a rail module about this task goes when it is finished, and returns if it is unticked
+        await app?.refreshRail()
+    }
+
+    /// The list a section adds to and takes carried tasks into: the day itself, or the list the
+    /// section stands for ("Any day" is the week's own list).
+    func listTarget(for section: String) -> String {
+        if TodosDates.isDate(section) { return section }
+        if section == "backlog" { return "backlog" }
+        if section.hasSuffix("w") {
+            if let monday = thisMonday, String(section.dropLast()) <= monday { return "week" }
+            return "next_week"
+        }
+        return view
+    }
+
+    /// Where a task sent to that list will be filed, so it shows in its place before the server answers.
+    private func spot(for target: String) -> (scope: String, date: String?) {
+        if target == "backlog" { return ("backlog", nil) }
+        if target.hasPrefix("guest:") { return ("guest", nil) }
+        if target == "week" || target == "next_week" {
+            guard let monday = thisMonday else { return ("week", nil) }
+            let date: String? = target == "week" ? monday : TodosDates.adding(7, to: monday)
+            return ("week", date)
+        }
+        if TodosDates.isDate(target) { return ("day", target) }
+        if target == "weekend", let today { return ("day", TodosDates.weekendDay(today)) }
+        return ("day", today)
     }
 
     /// Adds a task to the selected folder, or to one of its sections: a section that is a day adds
@@ -333,30 +476,19 @@ final class TodosStore {
     func add(_ title: String, to section: String = "") async -> Bool {
         guard let api = app?.api, !isBin else { return false }
         let list = view
-        let target = TodosDates.isDate(section) ? section : list
+        let target = listTarget(for: section)
         // the same place the server will file it, so it does not jump between groups when saved
-        var day: String? = nil
-        if TodosDates.isDate(target) {
-            day = target
-        } else if target == "today" {
-            day = today
-        } else if target == "weekend", let today {
-            day = TodosDates.weekendDay(today)
-        }
-        var scope = "week"
-        if target == "backlog" {
-            scope = "backlog"
-        } else if target.hasPrefix("guest:") {
-            scope = "guest"
-        } else if day != nil {
-            scope = "day"
-        }
+        let landing = spot(for: target)
+        // while the list is narrowed to some tags a new task takes them, or it would vanish as it was added
+        let tags = filter
         tempCount += 1
         let tempID = "new_\(Int(Date().timeIntervalSince1970 * 1000))_\(tempCount)"
-        let temp = Todo(
-            id: tempID, title: title, notes: nil, scope: scope, date: day, position: nil, done: false, done_at: nil,
+        var temp = Todo(
+            id: tempID, title: title, notes: nil, scope: landing.scope, date: landing.date, position: nil, done: false, done_at: nil,
             ai_unseen: false, created_by: nil, guest_id: nil, created_at: nil, updated_at: nil, has_notes: false
         )
+        temp.tags = tags
+        let body: [String: Any] = tags.isEmpty ? ["title": title, "view": target] : ["title": title, "view": target, "tags": tags]
         generation += 1
         unsaved.append(temp)
         withAnimation(.ssSoft) {
@@ -367,7 +499,7 @@ final class TodosStore {
             }
         }
         do {
-            var saved: Todo = try await api.send("POST", "todos", body: ["title": title, "view": target])
+            var saved: Todo = try await api.send("POST", "todos", body: body)
             saved.has_notes = false
             unsaved.removeAll { $0.id == tempID }
             problem = nil
@@ -449,7 +581,7 @@ final class TodosStore {
     /// Whether the row being carried can be put on this list. The same rule as the web: not the
     /// list it is on, not "This week" or "Later", and a guest's list only for that guest's own task.
     func accepts(_ key: String) -> Bool {
-        guard let id = draggingID, !id.hasPrefix("new_"), key != view, key != "week", key != "later" else { return false }
+        guard let id = draggingID, !id.hasPrefix("new_"), key != view, key != "week", key != "later", key != Self.allKey else { return false }
         guard let row = (rows ?? []).first(where: { $0.id == id }), let folder = folders.first(where: { $0.key == key }) else { return false }
         return folder.guest == nil || folder.guest == row.guest_id
     }
@@ -464,7 +596,8 @@ final class TodosStore {
         }
         let before = rows
         let wasWaiting = (rows ?? []).first(where: { $0.id == id })?.scope == "guest"
-        let stays = folder?.guest != nil
+        // "All" shows every list, so there too the row stays and only its place changes
+        let stays = folder?.guest != nil || isAll
         draggingID = nil
         dragAt = nil
         targetGroup = nil
@@ -496,14 +629,17 @@ final class TodosStore {
             return
         }
         let before = rows
-        let target = key == "any" ? view : key
+        let target = listTarget(for: key)
         var row = list.remove(at: index)
+        let wasWaiting = row.scope == "guest"
         if key == "any" {
+            // "Any day" in a week's own list keeps the date the week's other tasks carry
             row.scope = "week"
             row.date = list.first(where: { $0.scope == "week" })?.date ?? row.date
         } else {
-            row.scope = "day"
-            row.date = key
+            let landing = spot(for: target)
+            row.scope = landing.scope
+            row.date = landing.date
         }
         list.append(row)
         draggingID = nil
@@ -514,6 +650,8 @@ final class TodosStore {
             do {
                 try await api.send("PATCH", "todos/\(id)", body: ["view": target])
                 problem = nil
+                // a guest's waiting task now has a day: its module leaves the rail
+                if wasWaiting { await app?.refreshRail() }
             } catch {
                 withAnimation(.ssSoft) { rows = before }
                 problem = error.localizedDescription

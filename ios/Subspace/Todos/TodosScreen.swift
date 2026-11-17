@@ -130,7 +130,8 @@ private struct TodosFolderNav: View {
         let folders = store.folders
         for index in folders.indices {
             let folder = folders[index]
-            var gap = folder.key == "next_week"
+            // "All" is a view across the lists, so it stands a little apart from them
+            var gap = folder.key == "next_week" || folder.key == TodosStore.allKey
             if index == 2 && folder.key != "weekend" { gap = true }
             if folder.guest != nil && index > 0 && folders[index - 1].guest == nil { gap = true }
             out.append(TodosFolderEntry(key: folder.key, label: folder.label, count: folder.count, gap: gap, dim: false))

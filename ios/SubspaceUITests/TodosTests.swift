@@ -1,9 +1,91 @@
 import XCTest
 
-/// The todos screen: folders, adding, notes that save themselves, completing, the bin.
+/// The todos screen: folders, adding, notes that save themselves, completing, the bin, tags.
 final class TodosTests: SubspaceTestCase {
     private func row(_ title: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.row.' AND label BEGINSWITH %@", title)).firstMatch
+    }
+
+    private func element(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any)[id]
+    }
+
+    /// The tag menu stays open while tags are ticked. A tap away from it closes it; `item` is one
+    /// of its choices, there only while it is open, so nothing behind is tapped once it has closed.
+    private func closeTagMenu(showing item: String) {
+        if app.buttons[item].waitForExistence(timeout: 2) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72)).tap()
+            waitToVanish(app.buttons[item], "the tag menu")
+        }
+    }
+
+    func testAllListAndTagFilter() {
+        launchSignedIn()
+        go("todos")
+        // "All" holds every task, under the day or list it is on.
+        folder("all").tap()
+        expect(row("Review robotics allocation"), "a task on Today, in All")
+        expect(row("Draft Q1 goals"), "a task set for the week, in All")
+        expect(row("Replace the hallway light"), "a task in the backlog, in All")
+        expect(element("todos.group.backlog"), "the Backlog section of All")
+        shot("16-todos-all")
+
+        // The filter sits at the right of the heading. Choosing a tag narrows the list to it.
+        expect(element("todos.tags.filter"), "the tag filter, on a list with tagged tasks").tap()
+        expect(app.buttons["finance"], "finance among the tags to choose from")
+        shot("16-todos-tag-menu")
+        expect(app.buttons["house"], "house among the tags to choose from").tap()
+        closeTagMenu(showing: "finance")
+        waitToVanish(row("Review robotics allocation"), "a task without the chosen tag")
+        expect(row("Replace the hallway light"), "a task carrying the chosen tag")
+        expect(row("Call the roofer back"), "another task carrying the chosen tag")
+        shot("16-todos-all-house")
+
+        // "Show all" takes the choice off again.
+        element("todos.tags.filter").tap()
+        expect(app.buttons["Show all"], "Show all in the tag menu").tap()
+        expect(row("Review robotics allocation"), "every task again, once the choice is off")
+    }
+
+    func testAddATagToATaskAndTakeItOff() {
+        launchSignedIn()
+        go("todos")
+        folder("backlog").tap()
+        let title = "Order furnace filters \(Int.random(in: 1000...9999))"
+        enter(title + "\n", into: app.textFields["todos.add"], "the add field")
+        expect(row(title), "the new task in the list").tap()
+
+        // "Add tag" follows the date and repeat pills. A typed tag becomes a chip on the task.
+        press(app.buttons["todos.detail.tags.add"], "the Add tag pill")
+        let field = expect(element("todos.detail.tags.field"), "the field for a new tag")
+        enter("errands\n", into: field, "the field for a new tag")
+        expect(element("todos.detail.tags.item.errands"), "the tag, on the task")
+        shot("17-todos-tagged")
+
+        // A tag the tasks already carry is offered while typing; tapping it adds it.
+        press(app.buttons["todos.detail.tags.add"], "the Add tag pill, again")
+        let again = expect(element("todos.detail.tags.field"), "the field for a new tag, again")
+        enter("hou", into: again, "the field for a new tag")
+        expect(element("todos.detail.tags.suggest.house"), "house, offered while typing").tap()
+        expect(element("todos.detail.tags.item.house"), "the offered tag, now on the task")
+        XCTAssertFalse(element("todos.detail.tags.item.hou").exists, "What was typed should not become a tag when an offered one is chosen")
+        shot("17-todos-tag-suggested")
+
+        // Both are kept: the list can be narrowed to the new one, and the task still has it.
+        app.buttons["todos.detail.close"].tap()
+        expect(row(title), "the list after closing the task")
+        Thread.sleep(forTimeInterval: 1.5) // the list is read again on the way out of a task
+        expect(element("todos.tags.filter"), "the tag filter on Backlog").tap()
+        expect(app.buttons["errands"], "the new tag among those the list can be narrowed to").tap()
+        closeTagMenu(showing: "house")
+        waitToVanish(row("Replace the hallway light"), "a task without the new tag")
+        shot("17-todos-narrowed")
+        expect(row(title), "the tagged task, still in the narrowed list").tap()
+
+        // The x on a chip takes the tag off.
+        expect(element("todos.detail.tags.remove.errands"), "the x on the tag").tap()
+        waitToVanish(element("todos.detail.tags.item.errands"), "the tag taken off")
+        expect(element("todos.detail.tags.item.house"), "the other tag, left alone")
     }
 
     func testSeededTasksAndAgentNotes() {

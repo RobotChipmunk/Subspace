@@ -1,18 +1,23 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { AlignLeft, ChevronLeft, Plus, Repeat as RepeatIcon, Undo2 } from "lucide-react";
+import { AlignLeft, Check, ChevronLeft, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
 import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
+import { Floating } from "@/components/Floating";
+import { TagPills } from "@/components/TagPills";
 import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
-import type { BinnedTodo, Folder, Repeat, Todo } from "@/lib/core/todos";
+import type { BinnedTodo, Folder, Repeat, TagCount, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
-type Folders = { today: string; folders: Folder[]; bin: number };
+type Folders = { today: string; folders: Folder[]; bin: number; tags?: TagCount[] };
 const BIN = "bin";
+/** Every task, wherever it is: a view across the lists rather than a place of its own. */
+const ALL = "all";
 
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -58,16 +63,29 @@ function FromTag({ id }: { id: string | null }) {
 }
 
 export default function TodosPage() {
+  // the address is read (?open=), which needs a boundary above it
+  return (
+    <Suspense>
+      <Todos />
+    </Suspense>
+  );
+}
+
+function Todos() {
+  const router = useRouter();
+  const wanted = useSearchParams().get("open");
   const [view, setView] = useState("today");
   const [openId, setOpenId] = useState<string | null>(null);
   // the list a carried task is being held over, lit as the place it will land
   const [carry, setCarry] = useState<string | null>(null);
+  // the tags the list is narrowed to; it starts afresh on every list, so no task is hidden by a choice made elsewhere
+  const [filter, setFilter] = useState<string[]>([]);
+  const show = (key: string) => (key !== view && setFilter([]), setView(key), setOpenId(null));
 
-  // The rail links here with ?open=<task id> to show one task.
+  // The rail links here with ?open=<task id> to show one task, also while this screen is already up.
   useEffect(() => {
-    const id = new URLSearchParams(location.search).get("open");
-    if (id) (setOpenId(id), history.replaceState(null, "", location.pathname));
-  }, []);
+    if (wanted) (setOpenId(wanted), router.replace("/todos", { scroll: false }));
+  }, [wanted, router]);
   const { data: f } = useSWR<Folders>("todos/folders", fetcher, { refreshInterval: 30_000 });
   const folder = f?.folders.find((x) => x.key === view);
 
@@ -84,13 +102,13 @@ export default function TodosPage() {
         <nav className="flex gap-0.5 max-md:-mx-4 max-md:overflow-x-auto max-md:px-4 md:flex-col" aria-label="Lists">
           {f?.folders.map((x, i) => {
             const on = x.key === view;
-            const gap = x.key === "next_week" || (i === 2 && x.key !== "weekend") || (!!x.guest && !f.folders[i - 1]?.guest);
+            const gap = x.key === "next_week" || x.key === ALL || (i === 2 && x.key !== "weekend") || (!!x.guest && !f.folders[i - 1]?.guest);
             return (
               <button
                 key={x.key}
                 data-folder={x.key}
                 data-over={carry === x.key || undefined}
-                onClick={() => (setView(x.key), setOpenId(null))}
+                onClick={() => show(x.key)}
                 className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors ${carry === x.key ? "drop-target font-semibold text-accent" : on ? "font-semibold text-ink" : "text-ink2 hover:text-ink"} ${gap ? "md:mt-3" : ""}`}
               >
                 {on && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
@@ -109,7 +127,7 @@ export default function TodosPage() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => (setView(BIN), setOpenId(null))}
+                onClick={() => show(BIN)}
                 className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors md:mt-3 ${view === BIN ? "font-semibold text-ink" : "text-ink3 hover:text-ink2"}`}
               >
                 {view === BIN && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
@@ -125,11 +143,11 @@ export default function TodosPage() {
         <AnimatePresence mode="wait" initial={false}>
           {openId ? (
             <motion.div key="detail" initial={{ opacity: 0, x: 28 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 28 }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
-              <Detail key={openId} id={openId} backLabel={folder?.label ?? "Back"} folders={f?.folders ?? []} today={f?.today} onOpen={setOpenId} onBack={() => setOpenId(null)} />
+              <Detail key={openId} id={openId} backLabel={folder?.label ?? "Back"} folders={f?.folders ?? []} tags={f?.tags ?? []} today={f?.today} onOpen={setOpenId} onBack={() => setOpenId(null)} />
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
-              {view === BIN ? <Bin /> : <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} onOpen={setOpenId} onCarry={setCarry} />}
+              {view === BIN ? <Bin /> : <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} filter={filter} onFilter={setFilter} onOpen={setOpenId} onCarry={setCarry} />}
             </motion.div>
           )}
         </AnimatePresence>
@@ -376,6 +394,16 @@ function TodoRow({
           {r.ai_unseen && <span title="Changed since you last looked" aria-label="Changed since you last looked" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
           {r.done && r.next_id && r.next_date && <NextNote date={r.next_date} today={today} onOpen={() => onOpenNext(r.next_id!)} className="mt-0.5" />}
         </span>
+        {!!r.tags?.length && (
+          <span data-tags className="mt-[4px] flex max-w-[46%] flex-none flex-wrap justify-end gap-1">
+            {r.tags.slice(0, 2).map((t) => (
+              <span key={t} className="max-w-[112px] truncate rounded-full bg-fill px-2 py-[1px] text-[11.5px] font-medium text-ink2">
+                {t}
+              </span>
+            ))}
+            {r.tags.length > 2 && <span className="py-[1px] text-[11.5px] text-ink3">+{r.tags.length - 2}</span>}
+          </span>
+        )}
         {r.repeat && !r.done && <RepeatIcon size={14} aria-label="Repeats" className="mt-[6px] flex-none text-ink3" />}
         {place && <span data-place className="mt-[4px] flex-none whitespace-nowrap text-[12.5px] text-ink3">{place}</span>}
         {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
@@ -384,7 +412,87 @@ function TodoRow({
   );
 }
 
-function List({ view, folder, folders, today, onOpen, onCarry }: { view: string; folder?: Folder; folders: Folder[]; today?: string; onOpen: (id: string) => void; onCarry: (folder: string | null) => void }) {
+/** How wide the tag menu is; it hangs from the right edge of its button. */
+const TAG_MENU_W = 208;
+
+/**
+ * Narrows a list to the tasks carrying one or more tags. It sits quietly at the right of the
+ * list's heading, only on a list that has tagged tasks: a tag icon and the word "Tags", which
+ * turn accent and name the choice while one is made. Tapping it opens the tags to choose from.
+ */
+function TagFilter({ tags, chosen, onChange }: { tags: TagCount[]; chosen: string[]; onChange: (tags: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const on = chosen.length > 0;
+  const toggle = (t: string) => onChange(chosen.includes(t) ? chosen.filter((x) => x !== t) : [...chosen, t]);
+  return (
+    <>
+      <button
+        ref={btn}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={on ? `Tags: ${chosen.join(", ")}` : "Filter by tag"}
+        data-tag-filter
+        className={`flex h-8 max-w-[200px] flex-none items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium transition-colors ${on ? "bg-accent-soft text-accent" : open ? "bg-fill text-ink2" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+      >
+        <TagIcon size={14} className="flex-none" />
+        <span className="truncate">{on ? chosen.join(", ") : "Tags"}</span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <Floating
+            anchor={() => {
+              const r = btn.current?.getBoundingClientRect();
+              return r ? { left: r.right - TAG_MENU_W, top: r.top, bottom: r.bottom } : null;
+            }}
+            inside={() => btn.current}
+            onDismiss={() => setOpen(false)}
+          >
+            <motion.div role="menu" aria-label="Tags" initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={spring} style={{ width: TAG_MENU_W, transformOrigin: "top right" }} className="menu scroll max-h-[min(360px,60vh)] rounded-2xl p-1.5">
+              {tags.map((t) => {
+                const picked = chosen.includes(t.tag);
+                return (
+                  <button key={t.tag} role="menuitemcheckbox" aria-checked={picked} onClick={() => toggle(t.tag)} className="flex min-h-9 w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-[14px] font-medium hover:bg-fill2">
+                    <Check size={15} strokeWidth={2.4} className={`flex-none text-accent transition-opacity ${picked ? "" : "opacity-0"}`} />
+                    <span className="min-w-0 flex-1 truncate">{t.tag}</span>
+                    <span className="text-[12.5px] font-normal tabular-nums text-ink3">{t.count || ""}</span>
+                  </button>
+                );
+              })}
+              {on && (
+                <button role="menuitem" onClick={() => (onChange([]), setOpen(false))} className="mt-1 flex min-h-9 w-full items-center rounded-xl px-2 py-1.5 pl-[31px] text-left text-[14px] text-ink2 hover:bg-fill2">
+                  Show all
+                </button>
+              )}
+            </motion.div>
+          </Floating>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function List({
+  view,
+  folder,
+  folders,
+  today,
+  filter,
+  onFilter,
+  onOpen,
+  onCarry,
+}: {
+  view: string;
+  folder?: Folder;
+  folders: Folder[];
+  today?: string;
+  /** the tags this list is narrowed to; none shows every task */
+  filter: string[];
+  onFilter: (tags: string[]) => void;
+  onOpen: (id: string) => void;
+  onCarry: (folder: string | null) => void;
+}) {
   const { data, mutate } = useSWR<{ todos: Row[]; today: string }>(`todos?view=${view}`, fetcher, { refreshInterval: 15_000 });
   const { mutate: globalMutate } = useSWRConfig();
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -407,26 +515,84 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
 
   const refreshCounts = () => globalMutate("todos/folders");
 
-  const multi = view === "week" || view === "next_week" || view === "weekend" || view === "later";
+  const all = view === ALL;
+  const multi = view === "week" || view === "next_week" || view === "weekend" || view === "later" || all;
+  // this week's Monday, which is the date a task set for the week (not a day) carries
+  const monday = today ? plusDays(today, -((new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7)) : undefined;
+
+  /**
+   * The section a row is filed under in a list with sections; "" in a list without. A day is its
+   * date; a week is its Monday followed by "w" ("Later" and "All", which span many weeks) or
+   * "any" (a week's own list). "All" also has the backlog and what still waits for a day.
+   */
+  const groupOf = (r: Pick<Row, "scope" | "date">) => {
+    if (!multi) return "";
+    if (all && r.scope === "backlog") return "backlog";
+    if (all && r.scope === "guest") return "waiting";
+    if (r.scope !== "week") return r.date!;
+    return all || view === "later" ? r.date + "w" : "any";
+  };
+
+  /** Where a section sorts in "All": today, the week it is in, the days and weeks after, then the backlog and what waits. */
+  const rank = (key: string) => {
+    if (key === "backlog") return "z1";
+    if (key === "waiting") return "z2";
+    if (!key.endsWith("w")) return key + "b";
+    const week = key.slice(0, 10);
+    // this week's own section follows today; a later week comes before its days
+    return monday && week <= monday ? (today ?? week) + "c" : week + "a";
+  };
+
+  // the tags on this list's tasks, most used first, and whichever are chosen even if no task here has them
+  const tags = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const r of rows ?? []) for (const t of r.tags ?? []) n.set(t, (n.get(t) ?? 0) + (r.done ? 0 : 1));
+    for (const t of filter) if (!n.has(t)) n.set(t, 0);
+    return [...n.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }, [rows, filter]);
+  const shown = useMemo(() => (filter.length ? (rows ?? []).filter((r) => r.tags?.some((t) => filter.includes(t))) : (rows ?? [])), [rows, filter]);
+
   const groups = useMemo(() => {
     const map = new Map<string, Row[]>();
-    for (const r of rows ?? []) {
-      // "Later" spans many weeks, so a task set for a week (not a day) is filed under that week
-      const k = !multi ? "" : r.scope !== "week" ? r.date! : view === "later" ? r.date + "w" : "any";
+    for (const r of shown) {
+      const k = groupOf(r);
       map.set(k, [...(map.get(k) ?? []), r]);
     }
-    if (multi && !map.has("any") && view !== "weekend" && view !== "later") map.set("any", []);
+    if (multi && !all && !map.has("any") && view !== "weekend" && view !== "later") map.set("any", []);
     // every day still to come has its section, empty or not, so a task can be carried onto it
     if (rows) for (const day of daySections(view, today)) if (!map.has(day)) map.set(day, []);
+    // "All" always has today, so there is somewhere to add a task
+    if (rows && all && today && !map.has(today)) map.set(today, []);
+    // plain order of the characters: digits (dates) before letters (the backlog, what waits)
+    if (all) return [...map.entries()].sort(([a], [b]) => (rank(a) < rank(b) ? -1 : rank(a) > rank(b) ? 1 : 0));
     return [...map.entries()].sort(([a], [b]) => (a === "any" ? -1 : b === "any" ? 1 : a.localeCompare(b)));
-  }, [rows, view, multi, today]);
+  }, [rows, shown, view, multi, today]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function toggle(r: Row) {
     setRows((rs) => rs!.map((x) => (x.id === r.id ? { ...x, done: !r.done } : x)));
     await api(`todos/${r.id}`, { method: "PATCH", body: { done: !r.done } });
     mutate();
     refreshCounts();
+    // a rail module about this task goes when it is finished, and returns if it is unticked
+    globalMutate("rail");
   }
+
+  /** The list a section adds to and takes carried tasks into: the day itself, or the list the section stands for. */
+  const targetOf = (section: string) => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(section)) return section;
+    if (section === "backlog") return "backlog";
+    if (section.endsWith("w")) return monday && section.slice(0, 10) <= monday ? "week" : "next_week";
+    return view;
+  };
+
+  /** Where a task sent to that list will be filed, so it shows in its place before the server answers. */
+  const placeOf = (target: string): Pick<Row, "scope" | "date"> => {
+    if (target === "backlog") return { scope: "backlog", date: null };
+    if (target.startsWith("guest:")) return { scope: "guest", date: null };
+    if (target === "week" || target === "next_week") return { scope: "week", date: monday ? plusDays(monday, target === "week" ? 0 : 7) : null };
+    const day = /^\d{4}-/.test(target) ? target : target === "weekend" && today ? weekendDay(today) : today;
+    return { scope: "day", date: day ?? null };
+  };
 
   async function add() {
     const section = adding ?? "";
@@ -434,15 +600,15 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
     if (!title) return setAdding(null);
     setDraft("");
     // a section that is a day adds to that day; "Any day" (and a list without sections) adds to the list itself
-    const target = /^\d{4}-/.test(section) ? section : view;
+    const target = targetOf(section);
+    // while the list is narrowed to some tags a new task takes them, or it would vanish as it was added
+    const tags = filter;
     // Show it straight away, exactly where it will live; the server's copy replaces it silently.
-    // the same place the server will file it, so it does not jump between groups when saved
-    const day = /^\d{4}-/.test(target) ? target : target === "today" ? today : target === "weekend" && today ? weekendDay(today) : null;
-    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, scope: view === "backlog" ? "backlog" : folder?.guest ? "guest" : day ? "day" : "week", guest_id: folder?.guest ?? null, date: day ?? null } as unknown as Row;
+    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, guest_id: folder?.guest ?? null, tags, ...placeOf(target) } as unknown as Row;
     unsaved.current.push(temp);
     setRows((rs) => [...(rs ?? []), temp]);
     try {
-      const t = await api<Row>("todos", { body: { title, view: target } });
+      const t = await api<Row>("todos", { body: { title, view: target, ...(tags.length ? { tags } : {}) } });
       const row = { ...t, has_notes: false };
       keys.current.set(row.id, temp.id);
       unsaved.current = unsaved.current.filter((u) => u !== temp);
@@ -462,11 +628,8 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   /** The lists a task may be carried to: the same ones its "Move to" menu offers, less the one it is in. */
   const accepts = (r: Row, key: string) => {
     const to = folders.find((x) => x.key === key);
-    return !!to && key !== view && key !== "week" && key !== "later" && !r.id.startsWith("new_") && (!to.guest || to.guest === r.guest_id);
+    return !!to && key !== view && key !== "week" && key !== "later" && key !== ALL && !r.id.startsWith("new_") && (!to.guest || to.guest === r.guest_id);
   };
-
-  /** The section a row is filed under in a list with sections; "" in a list without. */
-  const groupOf = (r: Row) => (!multi ? "" : r.scope !== "week" ? r.date! : view === "later" ? r.date + "w" : "any");
 
   /**
    * The sections of this list a task may be carried to: any but its own, a week in "Later" (no
@@ -474,30 +637,43 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
    */
   const acceptsGroup = (r: Row, key: string) => multi && !r.id.startsWith("new_") && key !== groupOf(r) && takes(key);
 
-  /** Whether a section can be given a task, by carrying or typing: not a whole week in "Later" (no single day) nor a day already past. */
-  const takes = (key: string) => !key.endsWith("w") && (key === "any" || !today || key >= today);
+  /**
+   * Whether a section can be given a task, by carrying or typing: not a day already past, and not
+   * a whole week unless it is this week or the next (a week further off has no list of its own to
+   * add to; a task gets there by being given a date). In "All", the backlog can; what waits for a
+   * day cannot (those tasks come from someone else).
+   */
+  const takes = (key: string) => {
+    if (key === "any" || key === "backlog") return true;
+    if (key === "waiting") return false;
+    if (key.endsWith("w")) return all && !!monday && key.slice(0, 10) <= plusDays(monday, 7);
+    return !today || key >= today;
+  };
 
-  /** A task let go over another section: it joins that day (or "Any day") at the end, at once, and is saved behind. */
+  /** A task let go over another section: it joins that day (or week, or the backlog) at the end, at once, and is saved behind. */
   async function moveToGroup(r: Row, key: string) {
-    const to = key === "any" ? view : key;
-    setRows((rs) => [...rs!.filter((x) => x.id !== r.id), { ...r, scope: key === "any" ? "week" : "day", date: key === "any" ? (rs!.find((x) => x.scope === "week")?.date ?? r.date) : key }]);
+    const to = targetOf(key);
+    // "Any day" in a week's own list keeps the date the week's other tasks carry
+    const place = key === "any" ? { scope: "week" as const, date: rows?.find((x) => x.scope === "week")?.date ?? r.date } : placeOf(to);
+    setRows((rs) => [...rs!.filter((x) => x.id !== r.id), { ...r, ...place }]);
     try {
       await api(`todos/${r.id}`, { method: "PATCH", body: { view: to } });
     } finally {
-      globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
+      // a task that was waiting for a day has one now, so its module leaves the rail
+      globalMutate((k) => typeof k === "string" && (k.startsWith("todos") || k === "rail"));
     }
   }
 
   /** A task let go over another list: it leaves this one at once, unless this view also shows the day it went to. A person's list keeps its tasks whatever day they are given. */
   async function move(r: Row, to: string) {
-    if (!(view === "week" || view === "next_week" || view === "weekend" || folder?.guest)) {
+    if (!(view === "week" || view === "next_week" || view === "weekend" || all || folder?.guest)) {
       setRows((rs) => rs!.filter((x) => x.id !== r.id));
       mutate((cur) => (cur ? { ...cur, todos: cur.todos.filter((x) => x.id !== r.id) } : cur), { revalidate: false });
     }
     try {
       await api(`todos/${r.id}`, { method: "PATCH", body: { view: to } });
     } finally {
-      globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
+      globalMutate((k) => typeof k === "string" && (k.startsWith("todos") || k === "rail"));
     }
   }
 
@@ -515,7 +691,15 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   }
 
   const title = folder?.label ?? "";
-  const groupName = (key: string) => (key === "any" ? "Any day" : key === today ? "Today" : view !== "later" ? dayName(key) : key.endsWith("w") ? `Week of ${longDate(key.slice(0, 10)).replace(/^\S+\s/, "")}` : longDate(key));
+  const groupName = (key: string) => {
+    if (key === "any") return "Any day";
+    if (key === "backlog") return "Backlog";
+    if (key === "waiting") return "Waiting for a day";
+    if (key === today) return "Today";
+    // "All" names a section the way a task's date pill does: Tomorrow, Thursday, Thu, Dec 17, Next week
+    if (all) return placeLabel({ scope: key.endsWith("w") ? "week" : "day", date: key.slice(0, 10) }, today) || longDate(key.slice(0, 10));
+    return view !== "later" ? dayName(key) : key.endsWith("w") ? `Week of ${longDate(key.slice(0, 10)).replace(/^\S+\s/, "")}` : longDate(key);
+  };
 
   /** The plus at the end of a list, or of one of its sections, and the field it opens. */
   const adder = (section: string) => (
@@ -533,13 +717,17 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
     </div>
   );
   const sub = view === "today" && today ? longDate(today) : /^\d{4}/.test(view) ? longDate(view) : view === "backlog" ? "No date. Pull from here when you have room." : view === "later" ? "Dated beyond next week." : folder?.guest ? "Tasks stay here after you give them a day." : undefined;
-  const openCount = rows?.filter((r) => !r.done).length ?? 0;
+  const openCount = shown.filter((r) => !r.done).length;
 
   return (
     <div>
-      <header className="mb-5 px-1">
-        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">{title}</h1>
-        <p className="mt-0.5 h-5 text-[14px] text-ink2">{sub ?? (rows ? (openCount ? `${openCount} to do` : rows.length ? "All done" : "") : "")}</p>
+      <header className="mb-5 flex items-end gap-3 px-1">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">{title}</h1>
+          <p className="mt-0.5 h-5 truncate text-[14px] text-ink2">{(!filter.length && sub) || (rows ? (openCount ? `${openCount} to do` : shown.length ? "All done" : "") : "")}</p>
+        </div>
+        {/* only on a list that has tagged tasks, or while a choice is still in force */}
+        {tags.length > 0 && <TagFilter tags={tags} chosen={filter} onChange={onFilter} />}
       </header>
 
       {groups.map(([key, items]) => (
@@ -577,7 +765,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
         </div>
       ))}
 
-      {rows && rows.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">Nothing here.</p>}
+      {rows && shown.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">{filter.length ? `Nothing tagged ${filter.join(" or ")} here.` : "Nothing here."}</p>}
 
       {/* a list without sections has one plus at its end; "Later" adds only through its days, as a task gets there by being given a date */}
       {!multi && adder("")}
@@ -585,7 +773,7 @@ function List({ view, folder, folders, today, onOpen, onCarry }: { view: string;
   );
 }
 
-function Detail({ id, backLabel, folders, today, onOpen, onBack }: { id: string; backLabel: string; folders: Folder[]; today?: string; onOpen: (id: string) => void; onBack: () => void }) {
+function Detail({ id, backLabel, folders, tags, today, onOpen, onBack }: { id: string; backLabel: string; folders: Folder[]; /** the tags tasks already carry, offered when one is added */ tags: TagCount[]; today?: string; onOpen: (id: string) => void; onBack: () => void }) {
   const { agent } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
   // While notes typed here are waiting to be saved, background refreshes are held back: nothing
@@ -594,10 +782,13 @@ function Detail({ id, backLabel, folders, today, onOpen, onBack }: { id: string;
   const { data: todo, mutate } = useSWR<Todo>(`todos/${id}`, fetcher, { refreshInterval: 8_000, isPaused: () => saver.dirty() });
   const [title, setTitle] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  const railTold = useRef(false);
 
   // Take the server's notes only when nothing typed here is waiting to be saved.
   useEffect(() => {
     if (!todo) return;
+    // opening a task clears a rail module that pointed at it and asked for that: let the rail catch up
+    if (!railTold.current) ((railTold.current = true), globalMutate("rail"));
     if (title === null) setTitle(todo.title);
     if (!saver.dirty()) setNotes(todo.notes);
     if (todo.ai_unseen && !todo.notes.includes("<ins ")) api(`todos/${id}`, { method: "PATCH", body: { seen: true } }).then(() => globalMutate((k) => typeof k === "string" && k.startsWith("todos?")));
@@ -609,6 +800,8 @@ function Detail({ id, backLabel, folders, today, onOpen, onBack }: { id: string;
     const t = await api<Todo>(`todos/${id}`, { method: "PATCH", body });
     mutate(t, false);
     if (!quiet) refreshLists();
+    // finishing a task takes what the rail said about it away; unticking brings it back
+    if ("done" in body) globalMutate("rail");
     return t;
   }
   const flush = saver.flush;
@@ -633,7 +826,7 @@ function Detail({ id, backLabel, folders, today, onOpen, onBack }: { id: string;
             className="h-8 cursor-pointer appearance-none rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 outline-none transition-colors hover:bg-fill2"
           >
             <option value="">Move to…</option>
-            {folders.filter((x) => x.key !== "week" && x.key !== "later" && (!x.guest || x.guest === todo.guest_id)).map((x) => (
+            {folders.filter((x) => x.key !== "week" && x.key !== "later" && x.key !== ALL && (!x.guest || x.guest === todo.guest_id)).map((x) => (
               <option key={x.key} value={x.key}>
                 {x.label}
               </option>
@@ -677,6 +870,8 @@ function Detail({ id, backLabel, folders, today, onOpen, onBack }: { id: string;
             ))}
           </select>
         </label>
+        {/* its tags, and the way to add one; the lists can be narrowed to them */}
+        <TagPills tags={todo.tags ?? []} known={tags.map((t) => t.tag)} add="Add tag" onChange={(next) => (mutate({ ...todo, tags: next }, false), patch({ tags: next }))} />
       </div>
       {todo.repeat && !todo.done && <p className="ml-[40px] mt-2 text-[13px] text-ink3">When you finish it, the next one is added {todo.repeat === "daily" ? "for the day after" : `${{ every_3_days: "three days", weekly: "a week", biweekly: "two weeks", monthly: "a month", yearly: "a year" }[todo.repeat]} from that day`}.</p>}
       <AnimatePresence initial={false}>

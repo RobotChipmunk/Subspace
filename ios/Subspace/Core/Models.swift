@@ -136,6 +136,8 @@ struct Todo: Codable, Identifiable, Hashable {
     /// On a finished repeating task: the task that was created to follow it, and the day it is on.
     var next_id: String?
     var next_date: String?
+    /// Short labels the lists can be narrowed to ("finance", "house"). At most six.
+    var tags: [String]?
 }
 
 /// A node of the context tree: a note, a page an agent made, a saved link or a journal entry.
@@ -185,6 +187,12 @@ struct RailTodoRef: Codable, Hashable {
     var id: String
 }
 
+/// The task in the owner's list that a rail module is about.
+struct RailTaskRef: Codable, Hashable {
+    var id: String
+    var title: String?
+}
+
 struct RailModule: Codable, Identifiable, Hashable {
     let id: String
     var key: String?
@@ -199,6 +207,12 @@ struct RailModule: Codable, Identifiable, Hashable {
     var page: PageRef?
     /// Set when the module is a task waiting to be given a day.
     var todo: RailTodoRef?
+    /// The task this module is about, when an agent needs the owner to follow something up.
+    var task: RailTaskRef?
+    /// What takes the module off the rail before it runs out: "dismiss" (only the owner dismissing
+    /// it), "action" (tapping one of its buttons), "todo_open" (opening its task), "todo_done"
+    /// (finishing its task) or "place" (a waiting task given a day).
+    var clears_on: String?
     /// "info", "warning" or "error".
     var level: String?
     var updated_at: String?

@@ -182,6 +182,15 @@ final class AppModel {
         await refreshRail()
     }
 
+    /// One of a module's buttons was tapped (an action, its page or its task). A module that
+    /// clears on that leaves the rail at once; any other stays where it is.
+    func railActed(_ module: RailModule) async {
+        guard module.clears_on == "action" else { return }
+        withAnimation(.ssSoft) { rail.removeAll { $0.id == module.id } }
+        try? await api.send("POST", "rail/\(module.id)/action")
+        await refreshRail()
+    }
+
     /// Anyone by id: the owner, an agent or a guest.
     func agent(_ id: String?) -> Agent? {
         guard let id else { return nil }

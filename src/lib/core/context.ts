@@ -2,7 +2,9 @@ import { checkBlocks } from "../blocks";
 import { asMood, MOOD_NAMES } from "../moods";
 import { q, q1 } from "../db";
 import { markAgentText } from "./todos";
-import { ApiError, bad, findMentions, indexDoc, logEvent, newId, notFound, slugify, unindexDoc, type Agent } from "./util";
+import { ApiError, bad, cleanTags, findMentions, indexDoc, logEvent, newId, notFound, slugify, unindexDoc, type Agent } from "./util";
+
+export { cleanTags };
 
 export type ContextNode = {
   id: string;
@@ -85,16 +87,6 @@ export const docText = (n: { summary: string; body: string; url?: string | null;
 
 /** Links are indexed as their own kind so a search can ask for links only. */
 const docType = (kind: string) => (kind === "link" ? "link" : "context");
-
-/** Tags as people write them: trimmed, at most 30 characters each, no repeats (whatever the capitals), at most six. */
-export function cleanTags(raw: unknown): string[] {
-  const out: string[] = [];
-  for (const t of Array.isArray(raw) ? raw : []) {
-    const tag = typeof t === "string" ? t.replace(/[\s,#]+/g, " ").trim().slice(0, 30).trim() : "";
-    if (tag && !out.some((o) => o.toLowerCase() === tag.toLowerCase())) out.push(tag);
-  }
-  return out.slice(0, 6);
-}
 
 const okCover = (c: unknown) => (typeof c === "string" && /^https:\/\//.test(c) && c.length < 2000 ? c : null);
 

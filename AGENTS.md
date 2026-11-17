@@ -124,6 +124,14 @@ being true. Read this list before starting work.
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.
+- Reading one task as the owner (`GET /api/v1/todos/<id>`) counts as opening it, and clears a rail
+  module that points at it with `clears_on: "todo_open"`. In `ui-check` and the iOS tests, do not
+  read a follow-up's task before the step that checks its module.
+- A `Link` to `/todos?open=<id>` from the docked rail does not remount the Todos page when it is
+  already showing, so reading the address once on mount missed it. Read it with `useSearchParams`
+  (inside a `Suspense`), as the journal does.
+- `localeCompare` sorts punctuation such as "~" before digits, so made-up sort keys came out in the
+  wrong order (Backlog above Today in "All"). Compare such keys with `<` and `>`.
 - iOS CI: a failed UI test is run once more before it counts (`-retry-tests-on-failure`), because a
   loaded simulator sometimes cannot launch or quit the app. A test that fails twice is a real
   failure; one that passed on the second go shows in the summary as failed then passed. Tests

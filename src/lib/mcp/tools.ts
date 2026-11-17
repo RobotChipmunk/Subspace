@@ -6,7 +6,7 @@ import { categorize, createEntry, getEntry, plainText } from "../core/journal";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
-import { RAIL_BLOCKS, removeModule, setModule } from "../core/rail";
+import { RAIL_BLOCKS, RAIL_CLEARS, removeModule, setModule } from "../core/rail";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
@@ -39,8 +39,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "guide",
-    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, pages, illustration, icons, context, todos, following.",
-    inputSchema: obj({ topic: str("design | posting | pages | illustration | icons | context | todos | following") }),
+    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, followups, pages, illustration, icons, context, todos, following.",
+    inputSchema: obj({ topic: str("design | posting | followups | pages | illustration | icons | context | todos | following") }),
     readOnly: true,
     run: async (_a, { topic }) => {
       if (topic && !TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
@@ -95,7 +95,7 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      'Publish a headline with a picture. At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents. Before posting, check the story is not already in the feed (search, explore("/feed/recent"), and explore("/following/<slug>") for a topic); never post a duplicate, even from a different source.',
+      'Publish a headline with a picture, for the owner to read when they choose. The feed is for updates and information only: the owner may never see a given post, so never put a question, a request or anything that needs them to act in one (that is a task plus a rail module: guide("followups")). At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents. Before posting, check the story is not already in the feed (search, explore("/feed/recent"), and explore("/following/<slug>") for a topic); never post a duplicate, even from a different source.',
     inputSchema: obj(
       {
         body: str("The headline: what happened, in one line. At most 27 words. Plain text, no links."),
@@ -179,7 +179,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "reply",
-    description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail about the story to your own posts. Never for notes about your own process, coverage, checks or access status. Up to 2000 characters. For a longer or structured answer, make a page with page_write and pass its id as page: the reply then carries a card that opens it.",
+    description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail about the story to your own posts. Never for notes about your own process, coverage, checks or access status, and never to ask the owner for something under your own post: they may not read it, so what you need from them is a task plus a rail module (guide(\"followups\")). Up to 2000 characters. For a longer or structured answer, make a page with page_write and pass its id as page: the reply then carries a card that opens it.",
     inputSchema: obj({ post_id: str("Any post id in the thread."), body: str("Your reply."), page: str("Optional. Id of a page you made that holds the full answer; shown as a card under the reply.") }, ["post_id", "body"]),
     run: async (a, { post_id, body, page }) => {
       const p = await createReply(a, post_id, body, page);
@@ -188,22 +188,22 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_list",
-    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, or a YYYY-MM-DD date.",
-    inputSchema: obj({ view: str("Default today.") }),
+    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Pass tag to see only the tasks carrying it.",
+    inputSchema: obj({ view: str("Default today."), tag: str('Optional. Only tasks carrying this tag, e.g. "finance". With view "all" this is every open task on that subject.') }),
     readOnly: true,
-    run: async (_a, { view }) => {
-      const l = await listTodos(view || "today");
+    run: async (_a, { view, tag }) => {
+      const l = await listTodos(view || "today", { tags: tag ? String(tag).split(",") : undefined });
       const share = await sharingFor(l.todos.map((t) => t.guest_id));
-      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
+      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
     },
   },
   {
     name: "todo_add",
-    description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions).",
-    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished.") }, ["title"]),
+    description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions). This is also how you ask the owner for anything: when you need them to do, decide or answer something, add the task here with what they need in its notes, then point a rail module at it with rail_set(todo: id). Never ask in the feed.",
+    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished.") }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
-      return { id: t.id, scope: t.scope, date: t.date };
+      return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, title, show_until, todo: this id, clears_on: \"todo_open\")." };
     },
   },
   {
@@ -216,6 +216,7 @@ export const TOOLS: Tool[] = [
         done: { type: "boolean" },
         view: str("Move to: today, week, weekend, next_week, backlog or YYYY-MM-DD."),
         repeat: str("daily, every_3_days, weekly, biweekly, monthly, yearly, or none to stop. Finishing a repeating task creates the next one that long after the day it was finished; the result then names it under next."),
+        tags: { type: "array", items: { type: "string" }, description: "The task's whole set of tags, replacing what it has; [] takes them all off. Leave out to keep them. Do not remove tags the owner chose." },
         notes_append: str("Markdown to add at the end of the notes. May contain blocks: fenced code blocks whose language is the block type and whose body is JSON."),
         notes_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement markdown.") }, required: ["find", "replace"] },
       },
@@ -223,7 +224,7 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, { id, ...patch }) => {
       const t = await updateTodo(a, id, patch);
-      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.repeat ? { repeat: t.repeat } : {}), ...(t.done && t.next_id && t.next_date ? { next: { id: t.next_id, date: t.next_date } } : {}), notes_chars: t.notes.length, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
+      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.repeat ? { repeat: t.repeat } : {}), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.done && t.next_id && t.next_date ? { next: { id: t.next_id, date: t.next_date } } : {}), notes_chars: t.notes.length, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
     },
   },
   {
@@ -384,7 +385,7 @@ export const TOOLS: Tool[] = [
   {
     name: "rail_set",
     description:
-      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. Also the only place to tell the owner about a problem in work you are doing for them (level: "error" or "warning"), and only when it is truly blocking: it has persisted across several attempts spread over an hour or more and needs them. Handle transient failures quietly. One module per thing. It needs an expiry (show_until) and a key; call again with the same key to update it. See the server instructions for when to use the rail.',
+      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. Also the only place to tell the owner about a problem in work you are doing for them (level: "error" or "warning"), and only when it is truly blocking: it has persisted across several attempts spread over an hour or more and needs them. Handle transient failures quietly. It is also how the owner learns that you need something from them: add the task with todo_add, then call this with todo set to its id and a title saying what is needed; the module opens that task and leaves the rail once the owner has. One module per thing. It needs an expiry (show_until), a key, and clears_on, which says what takes it off the rail; call again with the same key to update it. See the server instructions for when to use the rail.',
     inputSchema: obj(
       {
         key: str('Short stable name, lowercase with dashes, e.g. "portland-hotel". Reuse it to update the same module.'),
@@ -404,15 +405,22 @@ export const TOOLS: Tool[] = [
           items: { type: "object", properties: { label: str("At most 24 characters, e.g. Directions."), url: str("Where it goes.") }, required: ["label", "url"] },
         },
         page: str("Optional id of a page with the full detail; adds an Open page button."),
+        todo: str("Id of the task in the owner's list that this module is about (from todo_add). Adds an Open task button. Set it whenever the module asks the owner to do, decide or answer something: the task holds the detail and stays in their list after the module has gone."),
+        clears_on: {
+          type: "string",
+          enum: [...RAIL_CLEARS],
+          description:
+            'What takes this module off the rail before show_until. "dismiss": only the owner dismissing it; for things to know until they pass (a booking, the day\'s plan) and for errors you will remove yourself. "todo_open": the owner opens the task named in todo, from the rail or from their list; the usual choice for a follow-up. "todo_done": that task is finished; opening it is not enough. "action": the owner taps one of the module\'s buttons (an action, its page or its task). A module about a task also goes once that task is done or deleted.',
+        },
         show_until: str("When it stops being relevant: YYYY-MM-DD (shown through the end of that day) or an ISO date and time. At most 45 days ahead."),
         show_from: str("Optional. Do not show before this date or time."),
         priority: { type: "integer", description: "0 to 10. Higher shows first. Use above 0 only for things that need action today." },
       },
-      ["key", "title", "show_until"],
+      ["key", "title", "show_until", "clears_on"],
     ),
     run: async (a, args) => {
       const m = await setModule(a, args as any);
-      return { id: m.id, key: m.key, level: m.level, showing_from: m.show_from, showing_until: m.show_until };
+      return { id: m.id, key: m.key, level: m.level, ...(m.todo_id ? { todo: m.todo_id } : {}), clears_on: m.clears_on, showing_from: m.show_from, showing_until: m.show_until };
     },
   },
   {
