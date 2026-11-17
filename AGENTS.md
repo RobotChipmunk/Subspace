@@ -132,6 +132,11 @@ being true. Read this list before starting work.
   (inside a `Suspense`), as the journal does.
 - `localeCompare` sorts punctuation such as "~" before digits, so made-up sort keys came out in the
   wrong order (Backlog above Today in "All"). Compare such keys with `<` and `>`.
+- `next build` type-checks `scripts/` too, and the iOS workflow builds the server before it runs a
+  single test. A name declared twice in `scripts/mcp-smoke.ts` cost a whole run. Run
+  `npm run typecheck` after the last edit, not only after the edits under `src/`.
+- `scripts/mcp-smoke.ts` expects a freshly seeded database: after a `ui-check` run the agents have
+  more than one page of changes waiting and it fails on an unrelated assertion.
 - iOS CI: a failed UI test is run once more before it counts (`-retry-tests-on-failure`), because a
   loaded simulator sometimes cannot launch or quit the app. A test that fails twice is a real
   failure; one that passed on the second go shows in the summary as failed then passed. Tests

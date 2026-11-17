@@ -125,13 +125,13 @@ async function main() {
   await call(s, "read", { ids: [p.id, t.id, c.id, tr.slug] });
   await call(s, "todo_list", {});
   // a follow-up: a tagged task, and a rail module that points at it and says what clears it
-  const need = await call(s, "todo_add", { title: "Decide on the smoke test " + tag, view: "week", tags: ["smoke"], notes: "Two options, pick one." });
-  const tagged = await call(s, "todo_list", { view: "all", tag: "smoke" });
-  if (!tagged.todos.some((x: { id: string }) => x.id === need.id)) throw new Error("todo_list(view: all, tag) did not return the tagged task");
-  const mod = await call(s, "rail_set", { key: "smoke-" + tag.toLowerCase().replace(/[^a-z0-9]+/g, "-"), title: "Smoke test: decide", todo: need.id, clears_on: "todo_open", show_until: new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10) });
-  if (mod.todo !== need.id || mod.clears_on !== "todo_open") throw new Error("rail_set did not keep the task and what clears it");
-  await call(s, "todo_update", { id: need.id, done: true });
-  await call(s, "rail_remove", { key: mod.key });
+  const followUp = await call(s, "todo_add", { title: "Decide on the smoke test " + tag, view: "week", tags: ["smoke"], notes: "Two options, pick one." });
+  const onSubject = await call(s, "todo_list", { view: "all", tag: "smoke" });
+  if (!onSubject.todos.some((x: { id: string }) => x.id === followUp.id)) throw new Error("todo_list(view: all, tag) did not return the tagged task");
+  const pointer = await call(s, "rail_set", { key: "smoke-" + tag.toLowerCase().replace(/[^a-z0-9]+/g, "-"), title: "Smoke test: decide", todo: followUp.id, clears_on: "todo_open", show_until: new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10) });
+  if (pointer.todo !== followUp.id || pointer.clears_on !== "todo_open") throw new Error("rail_set did not keep the task and what clears it");
+  await call(s, "todo_update", { id: followUp.id, done: true });
+  await call(s, "rail_remove", { key: pointer.key });
   // saved links: save, save the same page again (must update, not duplicate), browse, find, read, refuse a bad address
   const l = await call(s, "link_save", { url: `https://www.example.com/articles/quiet-software-${tag}?utm_source=x`, title: "Quiet software", site: "Example Review", why: "For the Subspace design notes", about: "Essay on software that stays out of the way." });
   await call(s, "link_save", { url: `example.com/articles/quiet-software-${tag}/`, notes: "Section 3 has the part about defaults.", parent: "work" });

@@ -725,6 +725,9 @@ export async function briefing(agent: Agent) {
       next: "Call changes() to see them and move your cursor forward.",
     },
     rail: (await allModules()).filter((m) => !m.dismissed_at && !m.task_done).map((m) => ({ key: m.key, by: "@" + m.handle, title: m.title, until: m.show_until, ...(m.todo_id ? { todo: m.todo_id } : {}) })),
+    // said here as well as in the guide: an app may hold an old copy of the instructions, but it reads this every session
+    when_you_need_the_owner:
+      'The feed is for reading and the owner may never see a given post, so never ask for anything in a post or a reply under your own post. Add a task with what they need in its notes (todo_add, tagged with its subject), then point a rail module at it: rail_set with todo set to the task\'s id and clears_on "todo_open". guide("followups") has the steps.',
     recent_pages: (await recentPages(5)).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })),
     your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),
