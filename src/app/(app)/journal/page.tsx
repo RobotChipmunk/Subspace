@@ -192,7 +192,7 @@ function Entries({ tag, onTag, onOpen }: { tag: string | null; onTag: (tag: stri
         <section key={m.ym} className="mb-5" aria-label={monthName(m.ym)}>
           <h2 className="mb-1 px-3 text-[12.5px] font-semibold uppercase tracking-[0.06em] text-ink3">{monthName(m.ym)}</h2>
           {glance(m.ym) && <MonthGlance month={glance(m.ym)!} />}
-          <div className="flex flex-col">
+          <div className="flex flex-col gap-2.5">
             {m.entries.map((e, i) => {
               const index = n++;
               return <EntryRow key={e.id} entry={e} index={index < first.current ? index : 0} today={pages.today} showDay={e.entry_date !== m.entries[i - 1]?.entry_date} onOpen={() => onOpen(e.id)} />;
@@ -212,43 +212,82 @@ function Entries({ tag, onTag, onOpen }: { tag: string | null; onTag: (tag: stri
   );
 }
 
-/** One entry in the list: its day at the left (once per day), then title, a line of what it says, and its tags. */
+/**
+ * One entry in the list, as a card: its day at the left (once per day), then the title, the gist,
+ * the mood and tags, and beneath them every picture in the entry, each at its own shape.
+ */
 function EntryRow({ entry, index, today, showDay, onOpen }: { entry: JournalEntry; index: number; today: string; showDay: boolean; onOpen: () => void }) {
   const day = entry.entry_date ?? entry.created_at.slice(0, 10);
+  const images = entry.images ?? (entry.image ? [entry.image] : []);
   return (
-    <motion.button initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: Math.min(index, 12) * 0.025 }} onClick={onOpen} data-entry={entry.id} className="link-row flex items-start gap-3 rounded-[16px] px-3 py-2.5 text-left">
-      <span className="w-10 flex-none pt-0.5 text-center" aria-label={showDay ? dayLabel(day, today) : undefined}>
-        {showDay && (
-          <>
-            <span className={`block text-[20px] font-semibold leading-none tabular-nums tracking-[-0.02em] ${day === today ? "text-accent" : ""}`}>{+day.slice(8)}</span>
-            <span className="mt-1 block text-[11.5px] font-medium leading-none text-ink3">{weekdayName(day)}</span>
-          </>
-        )}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15.5px] font-medium">{entry.title}</span>
-        {(entry.summary || entry.excerpt) && <span className="line-clamp-2 text-[13.5px] leading-snug text-ink2">{entry.summary || entry.excerpt}</span>}
-        {(entry.mood || entry.tags.length > 0) && (
-          <span className="mt-1.5 flex flex-wrap gap-1">
-            {entry.mood && (
-              <span data-mood={entry.mood} className="flex items-center gap-1 rounded-full bg-fill px-2 py-0.5 text-[11.5px] text-ink2">
-                <ToneDot mood={entry.mood} size={6} />
-                {entry.mood}
-              </span>
-            )}
-            {entry.tags.map((t) => (
-              <span key={t} className="rounded-full bg-fill px-2 py-0.5 text-[11.5px] text-ink2">
-                {t}
-              </span>
-            ))}
-          </span>
-        )}
-      </span>
-      {entry.image && (
+    <motion.div
+      role="button"
+      tabIndex={0}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...soft, delay: Math.min(index, 12) * 0.025 }}
+      onClick={onOpen}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen())}
+      data-entry={entry.id}
+      aria-label={entry.title}
+      className="glass entry-card cursor-pointer rounded-[22px] p-4 text-left"
+    >
+      <div className="flex items-start gap-3">
+        <span className="w-10 flex-none pt-0.5 text-center" aria-label={showDay ? dayLabel(day, today) : undefined}>
+          {showDay && (
+            <>
+              <span className={`block text-[20px] font-semibold leading-none tabular-nums tracking-[-0.02em] ${day === today ? "text-accent" : ""}`}>{+day.slice(8)}</span>
+              <span className="mt-1 block text-[11.5px] font-medium leading-none text-ink3">{weekdayName(day)}</span>
+            </>
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[16px] font-semibold">{entry.title}</span>
+          {(entry.summary || entry.excerpt) && <span className="line-clamp-2 text-[13.5px] leading-snug text-ink2">{entry.summary || entry.excerpt}</span>}
+          {(entry.mood || entry.tags.length > 0) && (
+            <span className="mt-1.5 flex flex-wrap gap-1">
+              {entry.mood && (
+                <span data-mood={entry.mood} className="flex items-center gap-1 rounded-full bg-fill px-2 py-0.5 text-[11.5px] text-ink2">
+                  <ToneDot mood={entry.mood} size={6} />
+                  {entry.mood}
+                </span>
+              )}
+              {entry.tags.map((t) => (
+                <span key={t} className="rounded-full bg-fill px-2 py-0.5 text-[11.5px] text-ink2">
+                  {t}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
+      </div>
+      {images.length > 0 && <EntryPictures images={images} />}
+    </motion.div>
+  );
+}
+
+/**
+ * An entry's pictures in its card, none of them cropped. One is shown whole across the card, up
+ * to a height; several sit in one row at a common height, each as wide as its shape needs, and
+ * the row scrolls sideways when they do not fit.
+ */
+function EntryPictures({ images }: { images: string[] }) {
+  const one = images.length === 1;
+  return (
+    <div data-scroll-x={one ? undefined : ""} className={one ? "mt-3 sm:pl-[52px]" : "entry-strip mt-3 flex snap-x gap-2 overflow-x-auto pb-1 sm:ml-[52px]"} data-pictures={images.length}>
+      {images.map((src, i) => (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={entry.image} alt="" loading="lazy" className="mt-0.5 h-12 w-12 flex-none rounded-[12px] bg-fill object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
-      )}
-    </motion.button>
+        <img
+          key={src + i}
+          src={src}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          onError={(e) => (e.currentTarget.style.display = "none")}
+          className={one ? "block h-auto max-h-[360px] w-auto max-w-full rounded-[16px] bg-fill max-sm:max-h-[300px]" : "block h-[200px] w-auto max-w-none flex-none snap-start rounded-[14px] bg-fill max-sm:h-[160px]"}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -332,7 +371,9 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
 
   return (
     <div ref={panel} className="glass mb-5 rounded-[26px] p-6 max-md:p-5">
-      <div className="mb-3 flex items-center gap-3">
+      {/* one row of pills: the day, the mood, then the tags and the way to add one; the bin stays at the end */}
+      <div className="mb-3 flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         <DatePill label={dayLabel(day, today)} value={day} today={today} past onPick={(d) => (setDay(d), void patch({ entry_date: d }))} />
         <label className={`relative flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${mood ? "bg-fill text-ink2 hover:bg-fill2" : "text-ink3 hover:bg-fill hover:text-ink2"}`} data-mood={mood ?? ""}>
           {mood && <ToneDot mood={mood} />}
@@ -347,7 +388,8 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
             {mood && entry.mood_by === "owner" && <option value="">Let Subspace choose</option>}
           </select>
         </label>
-        <span className="flex-1" />
+        <Tags tags={tags} auto={tagsBy === "auto"} onChange={chooseTags} />
+        </div>
         <ConfirmDelete label="Delete entry" confirm="Delete" onConfirm={async () => (await api(`context/${entry.id}`, { method: "DELETE" }), onDeleted())} />
       </div>
       <textarea
@@ -364,11 +406,12 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
         className="block w-full resize-none overflow-hidden text-[26px] font-bold leading-[1.2] tracking-[-0.025em]"
       />
       {gist && (
-        <p className="mt-1 text-[15px] leading-snug text-ink2" data-gist aria-label="Gist">
+        <p className="mt-1 pr-[72px] text-[15px] leading-snug text-ink2" data-gist aria-label="Gist">
           {gist}
         </p>
       )}
-      <Tags tags={tags} auto={tagsBy === "auto"} onChange={chooseTags} />
+      {/* room for the editor's link and picture buttons, which sit just above it */}
+      <div className="h-10" aria-hidden />
       <div className="editor-compact">
         <Editor value={body} linkPreviews placeholder="Write. Paste a link on a line of its own to show its preview." onChange={saver.push} />
       </div>
@@ -378,7 +421,8 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
 
 /**
  * An entry's tags: quiet chips, each with a way to take it off, and a pill that opens into a field
- * to add one. Tags chosen by the app say so, in one meta line, until the owner changes them.
+ * to add one. They sit in the entry's top row after the date and mood pills, and wrap with them.
+ * Tags chosen by the app say so, in a meta note at the end of the row, until the owner changes them.
  */
 function Tags({ tags, auto, onChange }: { tags: string[]; auto: boolean; onChange: (tags: string[]) => void }) {
   const [adding, setAdding] = useState(false);
@@ -396,7 +440,7 @@ function Tags({ tags, auto, onChange }: { tags: string[]; auto: boolean; onChang
   }
 
   return (
-    <div className="mb-6 mt-2.5 flex min-h-8 flex-wrap items-center gap-1.5 pr-[72px]" role="group" aria-label="Tags">
+    <div className="contents" role="group" aria-label="Tags">
       <AnimatePresence initial={false} mode="popLayout">
         {tags.map((t) => (
           <motion.span key={t} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={soft} data-tag={t} className="flex h-8 items-center rounded-full bg-fill pl-3 text-[13px] font-medium text-ink2">

@@ -169,9 +169,11 @@ struct ContextNode: Codable, Identifiable, Hashable {
     /// ("auto" or "owner"). An entry's `summary` is its gist in a sentence.
     var mood: String?
     var mood_by: String?
-    /// Journal lists only: the first words of the entry, without markup, and its first picture.
+    /// Journal lists only: the first words of the entry, without markup, its first picture, and
+    /// every picture in it in order (at most eight; older servers send only `image`).
     var excerpt: String?
     var image: String?
+    var images: [String]?
 }
 
 struct RailAction: Codable, Hashable {
