@@ -21,7 +21,7 @@ struct TodosListView: View {
                 TodosGroupView(group: group, store: store)
             }
             if empty {
-                Text(chosen.isEmpty ? "Nothing here." : "Nothing tagged \(chosen.joined(separator: " or ")) here.")
+                Text(chosen.isEmpty ? "Nothing here." : "Nothing tagged \(chosen.joined(separator: " and ")) here.")
                     .font(.ssBody)
                     .foregroundStyle(Theme.ink3)
                     .padding(.horizontal, 4)
@@ -36,10 +36,10 @@ struct TodosListView: View {
     }
 }
 
-/// Narrows the list to the tasks carrying one or more tags. It sits quietly at the right of the
-/// list's heading, only on a list that has tagged tasks: a tag and the word "Tags", which turn
-/// accent and name the choice while one is made. Tapping it opens the tags to choose from; the
-/// menu stays open while they are ticked, so more than one can be chosen.
+/// Narrows the list to the tasks carrying a tag, or every one of several. It sits quietly at the
+/// right of the list's heading, only on a list that has tagged tasks: a tag and the word "Tags",
+/// which turn accent and name the choice while one is made. Tapping it opens the tags to choose
+/// from; the menu stays open while they are ticked, and each one ticked narrows the list further.
 private struct TodosTagFilter: View {
     var store: TodosStore
 

@@ -114,12 +114,16 @@ final class TodosStore {
         return week + "a"
     }
 
-    /// The selected list's tasks, narrowed to the chosen tags when there are any.
+    /// The selected list's tasks, narrowed to those carrying every one of the chosen tags when
+    /// there are any.
     var shownRows: [Todo]? {
         guard let rows else { return nil }
         if filter.isEmpty { return rows }
         let chosen = filter
-        return rows.filter { row in (row.tags ?? []).contains(where: { chosen.contains($0) }) }
+        return rows.filter { row in
+            let tags = row.tags ?? []
+            return chosen.allSatisfy { tags.contains($0) }
+        }
     }
 
     /// The tags on this list's tasks, most used first, and whichever are chosen even when no

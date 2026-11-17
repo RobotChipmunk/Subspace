@@ -188,7 +188,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_list",
-    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Pass tag to see only the tasks carrying it.",
+    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Pass tag to see only the tasks carrying it (several, separated by commas, for tasks carrying all of them).",
     inputSchema: obj({ view: str("Default today."), tag: str('Optional. Only tasks carrying this tag, e.g. "finance". With view "all" this is every open task on that subject.') }),
     readOnly: true,
     run: async (_a, { view, tag }) => {

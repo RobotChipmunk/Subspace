@@ -753,16 +753,24 @@ async function run(profile) {
     const house = every.filter((t) => t.tags.includes("house")).map((t) => t.title);
     let now = await titles();
     if (now.slice().sort().join("|") !== house.slice().sort().join("|")) fail(`todos tags: narrowed to house, the list shows ${now.join(", ") || "nothing"}`);
-    // a second tag widens it: tasks carrying either
-    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^finance/ }));
+    // a second tag narrows it further: only tasks carrying both
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^diy/ }));
     await settle(800);
     now = await titles();
-    const either = every.filter((t) => t.tags.some((x) => x === "house" || x === "finance")).length;
-    if (now.length !== either) fail(`todos tags: narrowed to house or finance, the list shows ${now.length} tasks, expected ${either}`);
+    const both = every.filter((t) => t.tags.includes("house") && t.tags.includes("diy")).map((t) => t.title);
+    if (!both.length || both.length === house.length) fail("todos tags: the seeded tasks do not tell one tag from two");
+    if (now.slice().sort().join("|") !== both.slice().sort().join("|")) fail(`todos tags: narrowed to house and diy, the list shows ${now.join(", ") || "nothing"}, expected ${both.join(", ")}`);
+    // tags that no task carries together leave nothing, and the list says what it is narrowed to
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^finance/ }));
+    await settle(800);
+    if ((await titles()).length) fail("todos tags: tasks are shown that do not carry every chosen tag");
+    await page.getByText("Nothing tagged house and diy and finance here.").waitFor({ timeout: 3000 }).catch(() => fail("todos tags: an empty narrowed list does not say what it is narrowed to"));
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^finance/ }));
+    await settle(800);
     await page.keyboard.press("Escape");
     await settle(500);
     if (await tagMenu.count()) fail("todos tags: the tag menu stayed open after Escape");
-    if (!/house/.test(await filter.innerText()) || !/finance/.test(await filter.innerText())) fail("todos tags: the filter does not name the chosen tags");
+    if (!/house/.test(await filter.innerText()) || !/diy/.test(await filter.innerText())) fail("todos tags: the filter does not name the chosen tags");
     await noSidewaysScroll("todos all, narrowed");
     await shot("todos-all-tagged");
     // "Show all" takes the choice off again

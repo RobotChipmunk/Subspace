@@ -416,9 +416,10 @@ function TodoRow({
 const TAG_MENU_W = 208;
 
 /**
- * Narrows a list to the tasks carrying one or more tags. It sits quietly at the right of the
- * list's heading, only on a list that has tagged tasks: a tag icon and the word "Tags", which
- * turn accent and name the choice while one is made. Tapping it opens the tags to choose from.
+ * Narrows a list to the tasks carrying a tag, or every one of several. It sits quietly at the
+ * right of the list's heading, only on a list that has tagged tasks: a tag icon and the word
+ * "Tags", which turn accent and name the choice while one is made. Tapping it opens the tags to
+ * choose from; each one ticked narrows the list further.
  */
 function TagFilter({ tags, chosen, onChange }: { tags: TagCount[]; chosen: string[]; onChange: (tags: string[]) => void }) {
   const [open, setOpen] = useState(false);
@@ -550,7 +551,8 @@ function List({
     for (const t of filter) if (!n.has(t)) n.set(t, 0);
     return [...n.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
   }, [rows, filter]);
-  const shown = useMemo(() => (filter.length ? (rows ?? []).filter((r) => r.tags?.some((t) => filter.includes(t))) : (rows ?? [])), [rows, filter]);
+  // several tags narrow it to the tasks carrying every one of them
+  const shown = useMemo(() => (filter.length ? (rows ?? []).filter((r) => filter.every((t) => r.tags?.includes(t))) : (rows ?? [])), [rows, filter]);
 
   const groups = useMemo(() => {
     const map = new Map<string, Row[]>();
@@ -765,7 +767,7 @@ function List({
         </div>
       ))}
 
-      {rows && shown.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">{filter.length ? `Nothing tagged ${filter.join(" or ")} here.` : "Nothing here."}</p>}
+      {rows && shown.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">{filter.length ? `Nothing tagged ${filter.join(" and ")} here.` : "Nothing here."}</p>}
 
       {/* a list without sections has one plus at its end; "Later" adds only through its days, as a task gets there by being given a date */}
       {!multi && adder("")}

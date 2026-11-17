@@ -41,6 +41,14 @@ final class TodosTests: SubspaceTestCase {
         expect(row("Call the roofer back"), "another task carrying the chosen tag")
         shot("16-todos-all-house")
 
+        // A second tag narrows it further: only tasks carrying both are left.
+        element("todos.tags.filter").tap()
+        expect(app.buttons["diy"], "diy among the tags to choose from").tap()
+        closeTagMenu(showing: "finance")
+        waitToVanish(row("Call the roofer back"), "a task carrying only one of the two chosen tags")
+        expect(row("Replace the hallway light"), "the task carrying both chosen tags")
+        shot("16-todos-all-house-diy")
+
         // "Show all" takes the choice off again.
         element("todos.tags.filter").tap()
         expect(app.buttons["Show all"], "Show all in the tag menu").tap()

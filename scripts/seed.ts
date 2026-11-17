@@ -109,7 +109,8 @@ async function main() {
   await createTodo(owner, { title: "Call the roofer back", view: "today", tags: ["house"] });
   await createTodo(owner, { title: "Draft Q1 goals", view: "week" });
   await createTodo(owner, { title: "Renew passport", view: "next_week" });
-  await createTodo(owner, { title: "Replace the hallway light", view: "backlog", tags: ["house"] });
+  // two tags on one task, so narrowing to both keeps it and drops the other "house" task
+  await createTodo(owner, { title: "Replace the hallway light", view: "backlog", tags: ["house", "diy"] });
   // Something an agent needs the owner to decide: a task in their list, tagged, with the detail in its notes.
   // The rail points at it further down; nothing about it goes in the feed.
   const topUp = await createTodo(scout, {

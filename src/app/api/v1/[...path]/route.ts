@@ -47,7 +47,7 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^posts\/([^/]+)\/replies$/, ({ actor, body }, id) => createReply(actor, id, body.body, body.page)],
 
   ["GET", /^todos\/folders$/, () => folders()],
-  // one list ("all" is every task), optionally only the tasks carrying any of ?tags=a,b
+  // one list ("all" is every task), optionally only the tasks carrying every one of ?tags=a,b
   ["GET", /^todos$/, ({ url }) => listTodos(url.searchParams.get("view") || "today", { tags: url.searchParams.get("tags")?.split(",").filter(Boolean) })],
   ["POST", /^todos$/, ({ actor, body }) => createTodo(actor, body)],
   ["POST", /^todos\/reorder$/, async ({ actor, body }) => (await reorderTodos(actor, body.ids ?? []), { ok: true })],

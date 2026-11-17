@@ -162,9 +162,9 @@ export async function listTodos(view: string, opts: { tags?: string[] } = {}) {
     : all
       ? "(scope = 'guest'), (scope = 'backlog'), date, scope DESC, position, id"
       : "date NULLS FIRST, scope DESC, position, id";
-  // narrowed to tasks carrying any of these tags, whatever their capitals
+  // narrowed to tasks carrying every one of these tags, whatever their capitals
   const wanted = cleanTags(opts.tags).map((t) => t.toLowerCase());
-  const tagClause = wanted.length ? `AND EXISTS (SELECT 1 FROM unnest(tags) AS x WHERE lower(x) = ANY($${spec.params.length + 1}))` : "";
+  const tagClause = wanted.length ? `AND $${spec.params.length + 1}::text[] <@ ARRAY(SELECT lower(x) FROM unnest(tags) AS x)` : "";
   const todos = await q<Todo & { has_notes: boolean }>(
     `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ${tagClause} ORDER BY ${order}`,
     wanted.length ? [...spec.params, wanted] : spec.params,

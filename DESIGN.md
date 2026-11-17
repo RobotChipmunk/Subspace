@@ -234,7 +234,7 @@ Patterns:
 - **Tag filter** (`TagFilter` in `todos/page.tsx`): on any list that has tagged tasks, a quiet
   control at the right of the heading: a tag icon and "Tags" in `ink3`, no surface. Tapping it
   drops a menu of that list's tags with counts; each is ticked on and off, and the list shows the
-  tasks carrying any of the ticked ones. While a choice is made the control is `accent-soft` and
+  tasks carrying every ticked one, so each tick narrows it further. While a choice is made the control is `accent-soft` and
   names it, and "Show all" in the menu takes it off. The choice belongs to the list it was made
   on and is dropped on leaving it, so no task is hidden by a choice made elsewhere. A task added
   while the list is narrowed takes the chosen tags. On a list with no tagged tasks the control is

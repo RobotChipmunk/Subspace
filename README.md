@@ -150,10 +150,10 @@ in `src/lib/mcp/guide.ts` is the agent-facing version.
 
 A task can carry up to six tags (`tags` on `POST /todos` and `PATCH /todos/<id>`). The owner adds
 one beside the repeat pill in a task; agents tag the tasks they add with their subject. Any list
-with tagged tasks can be narrowed to one or more of them from its heading. "All" (`?view=all`)
+with tagged tasks can be narrowed from its heading to the tasks carrying a tag, or all of several. "All" (`?view=all`)
 is every unfinished task under the day or list it is on, which is where narrowing to a tag shows
 everything on a subject. `GET /todos/folders` returns the tags in use; `GET /todos?view=…&tags=a,b`
-narrows on the server, for agents (`todo_list(view, tag)`).
+narrows on the server to tasks carrying both, for agents (`todo_list(view, tag)`).
 
 ## Saved links
 
