@@ -53,7 +53,12 @@ class SubspaceTestCase: XCTestCase {
         for owner in [springboard, app!] {
             let notNow = owner.buttons["Not Now"]
             if notNow.waitForExistence(timeout: owner === springboard ? 12 : 1) {
-                notNow.tap()
+                // A tap while the prompt is still sliding in can miss, so tap again if it is still there.
+                for _ in 1...3 {
+                    notNow.tap()
+                    let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: notNow)
+                    if XCTWaiter().wait(for: [gone], timeout: 4) == .completed { return }
+                }
                 waitToVanish(notNow, "the Save Password prompt")
                 return
             }
