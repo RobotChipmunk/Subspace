@@ -15,6 +15,11 @@ struct RootView: View {
             }
         }
         .foregroundStyle(Theme.ink)
+        // Any link in text goes the same way as the rest: the web opens inside the app.
+        .environment(\.openURL, OpenURLAction { url in
+            app.open(url.absoluteString)
+            return .handled
+        })
         .onChange(of: phase) { _, now in
             if now == .active, app.signedIn { Task { await app.refresh() } }
         }

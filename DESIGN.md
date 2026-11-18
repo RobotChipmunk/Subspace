@@ -78,6 +78,8 @@ it in full for editing.
 - In the iOS app there is no bar under the status bar. Content that scrolls up beneath it blurs
   and fades away, barely at first and completely by the top edge (`softTopEdge`). At rest nothing
   is drawn there: no tint, no line. Do not add a material strip or a navigation bar at the top.
+- In the iOS app a web link opens in the viewer inside the app, over whatever is on screen, and
+  "Done" returns to where it was tapped. Nothing sends the owner out to the browser.
 - Shadows: `--shadow` at rest, `--shadow-lift` for something picked up or opened.
 - Spacing: 4px steps. Row padding about 10px by 12px; cards 16px; panels 24px. Content column
   maxes at about 880px.

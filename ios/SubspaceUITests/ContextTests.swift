@@ -53,5 +53,16 @@ final class ContextTests: SubspaceTestCase {
         expect(textContaining("Saved by the UI test"), "the new link with its reason", timeout: 30)
         XCTAssertEqual(rows.count, before + 1, "One more link than before")
         shot("23-links-added")
+
+        // A link opens in the viewer inside the app, not in the browser.
+        press(rows.firstMatch, "a saved link")
+        let done = app.buttons["Done"]
+        let shown = done.waitForExistence(timeout: 10)
+        XCTAssertEqual(app.state, .runningForeground, "Opening a link should stay in the app")
+        shot("23-links-web-viewer")
+        if shown {
+            done.tap()
+            expect(app.buttons["context.links"], "the links, back where the link was tapped")
+        }
     }
 }

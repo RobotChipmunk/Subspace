@@ -198,11 +198,8 @@ struct ContextScreen: View {
             go(id)
             return .handled
         }
-        if url.scheme == nil {
-            app.open(url.absoluteString)
-            return .handled
-        }
-        return .systemAction
+        app.open(url.absoluteString)
+        return .handled
     }
 
     // MARK: Data
