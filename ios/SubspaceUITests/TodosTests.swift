@@ -112,6 +112,27 @@ final class TodosTests: SubspaceTestCase {
         expect(row("Review robotics allocation"), "the list again after closing the task")
     }
 
+    /// A title too long for one line wraps, the row grows to hold it, and the circle stays level
+    /// with the first line instead of sitting halfway down the block.
+    func testALongTitleWrapsUnderItsCircle() {
+        launchSignedIn()
+        go("todos")
+        folder("backlog").tap()
+
+        let title = "Wrap \(Int.random(in: 1000...9999)) " + String(repeating: "and then one more thing to remember ", count: 6).trimmingCharacters(in: .whitespaces)
+        enter(title + "\n", into: app.textFields["todos.add"], "the add field")
+        let added = expect(row(title), "the long task in the list")
+        // the row is first drawn under a temporary id; its circle is named once it has been saved
+        let saved = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.row.' AND NOT (identifier BEGINSWITH 'todos.row.new_') AND label BEGINSWITH %@", title)).firstMatch
+        expect(saved, "the long task, saved")
+        let check = expect(app.buttons[saved.identifier.replacingOccurrences(of: "todos.row.", with: "todos.check.")], "its circle")
+        shot("16-todos-long-title")
+
+        XCTAssertGreaterThan(added.frame.height, 50, "A long title should wrap and its row grow to hold every line")
+        XCTAssertEqual(check.frame.minY, added.frame.minY, accuracy: 3, "The circle should sit at the top of the row, level with the first line")
+        XCTAssertLessThan(check.frame.midY, added.frame.minY + 24, "The circle should be beside the first line, not centred on the block")
+    }
+
     func testAddWriteNotesCompleteDeleteAndRestore() {
         launchSignedIn()
         go("todos")
