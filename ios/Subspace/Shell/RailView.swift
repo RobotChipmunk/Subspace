@@ -5,6 +5,8 @@ import SwiftUI
 struct RailView: View {
     /// True when shown as a sheet from the right edge; false when docked beside the content.
     var sheet: Bool
+    /// The status bar's height. The sheet softens its own top edge; docked, the shell does it.
+    var topInset: CGFloat = 0
     @Environment(AppModel.self) private var app
     @State private var openID: String?
 
@@ -42,6 +44,7 @@ struct RailView: View {
             .padding(.bottom, 40)
         }
         .scrollIndicators(.hidden)
+        .softTopEdge(topInset, active: sheet)
         .background {
             if sheet {
                 Rectangle().fill(.regularMaterial).overlay(Theme.surface).ignoresSafeArea()

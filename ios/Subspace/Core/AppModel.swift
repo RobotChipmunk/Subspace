@@ -231,7 +231,7 @@ final class AppModel {
 
     /// Opens an address from content: a page ("/page/<id>"), a task ("/todos?open=<id>"), a journal
     /// entry ("/journal?entry=<id>"),
-    /// another screen ("/feed") or the web.
+    /// another screen ("/feed") or the web, which opens in the viewer inside the app.
     func open(_ link: String) {
         if link.hasPrefix("/page/") {
             let id = String(link.dropFirst(6)).components(separatedBy: CharacterSet(charactersIn: "?#/")).first ?? ""
@@ -258,6 +258,6 @@ final class AppModel {
             withAnimation(.ssSpring) { tab = t }
             return
         }
-        if let url = api.resolve(link) { UIApplication.shared.open(url) }
+        if let url = api.resolve(link) { WebViewer.open(url) }
     }
 }

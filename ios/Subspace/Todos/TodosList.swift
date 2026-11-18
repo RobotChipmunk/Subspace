@@ -213,6 +213,8 @@ private struct TodosRowView: View {
                 .accessibilityIdentifier("todos.delete.\(id)")
             }
         }
+        // As tall as its title needs, so the circle and the bin stay level with the first line.
+        .fixedSize(horizontal: false, vertical: true)
         .contentShape(Rectangle())
         .onDrag {
             store.beginDrag(id)
@@ -319,6 +321,9 @@ private struct TodosRowLabel: View {
         }
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        // Its own height whatever is offered: offered less than a wrapped title needs, the frame
+        // above would settle on 36 and let the words spill over the rows either side.
+        .fixedSize(horizontal: false, vertical: true)
         .contentShape(Rectangle())
     }
 }

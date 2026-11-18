@@ -271,6 +271,8 @@ beyond the session and which direct messages have been read.
   system of `DESIGN.md` in Swift (tokens, glass, avatars, Confirm delete); `Shell` is sign-in, the
   app bar and the Now rail; each screen has its own folder. Files added to these folders join the
   build on their own.
+- Web links open inside the app, in the system's viewer (`Shell/WebViewer.swift`), not in the
+  browser. Send every link through `AppModel.open`.
 - Plain `http://` works only for local addresses (`localhost`, `192.168.…`, `*.local`); anything
   else must be `https://`.
 
