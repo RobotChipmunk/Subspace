@@ -130,6 +130,10 @@ async function run(profile) {
         return [...document.querySelectorAll("main article, main form, main h1")].some((el) => el.getBoundingClientRect().right > rail.left + 1);
       });
       if (overlap) fail("rail: page content runs underneath the docked rail");
+      // it grows with the screen: 28% of the width, never under 300px nor over 360px
+      const railWidth = await page.evaluate(() => document.querySelector('aside[aria-label="Now"]').getBoundingClientRect().width);
+      const wanted = Math.min(360, Math.max(300, profile.viewport.width * 0.28));
+      if (Math.abs(railWidth - wanted) > 1.5) fail(`rail: docked ${Math.round(railWidth)}px wide on a ${profile.viewport.width}px screen, expected ${Math.round(wanted)}px`);
     } else {
       if (await hotel.count()) fail("rail: modules are showing before the rail is opened on a narrow screen");
       await reachable(toggle, "rail button");

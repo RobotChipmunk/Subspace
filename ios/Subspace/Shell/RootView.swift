@@ -36,18 +36,21 @@ struct ShellView: View {
     @Namespace private var indicator
 
     static let railDockWidth: CGFloat = 1100
-    static let railWidth: CGFloat = 288
+    /// The docked rail grows with the screen, as `--rail-w` does on the web: 308 points where it
+    /// first docks, 330 on an 11-inch iPad on its side, 360 from 1286 points wide.
+    static func railWidth(in width: CGFloat) -> CGFloat { min(max(300, width * 0.28), 360) }
 
     var body: some View {
         @Bindable var app = app
         GeometryReader { geo in
             let wide = sizeClass == .regular
             let docked = geo.size.width >= Self.railDockWidth && !app.rail.isEmpty && !app.commentsBeside
+            let railWidth = Self.railWidth(in: geo.size.width)
             ZStack {
                 ZStack {
                     screens
                         .padding(.leading, wide ? 84 : 0)
-                        .padding(.trailing, docked ? Self.railWidth : 0)
+                        .padding(.trailing, docked ? railWidth : 0)
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             // room for the app bar on a phone, so the last row can scroll clear of it
                             if !wide && !keyboardUp { Color.clear.frame(height: 76) }
@@ -55,7 +58,7 @@ struct ShellView: View {
 
                     if docked {
                         RailView(sheet: false)
-                            .frame(width: Self.railWidth)
+                            .frame(width: railWidth)
                             .frame(maxWidth: .infinity, alignment: .trailing)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
@@ -81,7 +84,7 @@ struct ShellView: View {
                         .transition(.opacity)
                         .accessibilityHidden(true)
                     RailView(sheet: true, topInset: geo.safeAreaInsets.top)
-                        .frame(width: min(340, geo.size.width * 0.88))
+                        .frame(width: min(360, geo.size.width * 0.88))
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .transition(.move(edge: .trailing))
                         .zIndex(2)

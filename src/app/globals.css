@@ -24,6 +24,8 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* Room the feed gives up when comments are open beside it. */
   --comments-w: clamp(324px, 36vw, 408px);
+  /* The docked rail grows with the screen: 308px where it first docks (1100px), 330px on an iPad on its side, 360px from 1286px. */
+  --rail-w: clamp(300px, 28vw, 360px);
 }
 
 @media (prefers-color-scheme: dark) {

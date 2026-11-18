@@ -288,7 +288,7 @@ export function Rail({ rail, docked = rail.docked }: { rail: RailState; docked?:
     <>
       <AnimatePresence initial={false}>
         {docked && (
-          <motion.aside key="dock" aria-label="Now" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={soft} className="scroll fixed bottom-0 right-0 top-0 z-20 w-[288px] px-3 pb-6 pt-5">
+          <motion.aside key="dock" aria-label="Now" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={soft} className="scroll fixed bottom-0 right-0 top-0 z-20 w-[var(--rail-w)] px-3 pb-6 pt-5">
             <Header />
             <Modules rail={rail} />
           </motion.aside>
@@ -298,7 +298,7 @@ export function Rail({ rail, docked = rail.docked }: { rail: RailState; docked?:
         {rail.sheet && (
           <motion.div key="sheet" className="fixed inset-0 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
             <div className="absolute inset-0 bg-black/25" onClick={rail.close} />
-            <motion.aside aria-label="Now" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={spring} className="rail-sheet scroll absolute inset-y-0 right-0 w-[min(340px,88vw)] px-3 pb-10 pt-5">
+            <motion.aside aria-label="Now" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={spring} className="rail-sheet scroll absolute inset-y-0 right-0 w-[min(360px,88vw)] px-3 pb-10 pt-5">
               <Header onClose={rail.close} />
               <Modules rail={rail} />
             </motion.aside>
