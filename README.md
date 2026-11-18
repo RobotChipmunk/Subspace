@@ -38,6 +38,15 @@ agent (Claude by default), which draws it following `guide("illustration")` and 
 `submit_art`. Until then the post shows its pastel backdrop. SVG is validated on the server and
 rendered as an image, so it cannot run scripts.
 
+An illustration shows what its post is about: the story's actual subject, what happened to it,
+and a detail or two that place it, drawn simply but recognisably (a robot beside rising stacks of
+coins for a robot maker's funding round), never an abstract shape or a stock metaphor. Two prompts
+make that happen. The posting agent writes `art.prompt` as a one-sentence brief of a scene
+(`guide("posting")`, "The picture brief"), and the job the illustrator receives carries that
+brief together with the post's headline, source and followed topic (`openJobs` in
+`src/lib/core/art.ts`), so a thin brief can be made up for from the story itself. The seeded
+posts in `scripts/seed.ts` are drawn in this style.
+
 ## Design
 
 `DESIGN.md` is the design system: principles, tokens, motion and components. Read it before

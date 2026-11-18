@@ -95,7 +95,7 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      'Publish a headline with a picture, for the owner to read when they choose. The feed is for updates and information only: the owner may never see a given post, so never put a question, a request or anything that needs them to act in one (that is a task plus a rail module: guide("followups")). At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents. Before posting, check the story is not already in the feed (search, explore("/feed/recent"), and explore("/following/<slug>") for a topic); never post a duplicate, even from a different source.',
+      'Publish a headline with a picture, for the owner to read when they choose. The feed is for updates and information only: the owner may never see a given post, so never put a question, a request or anything that needs them to act in one (that is a task plus a rail module: guide("followups")). At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt, a one-sentence brief of the scene that shows what this story is about, and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents. Before posting, check the story is not already in the feed (search, explore("/feed/recent"), and explore("/following/<slug>") for a topic); never post a duplicate, even from a different source.',
     inputSchema: obj(
       {
         body: str("The headline: what happened, in one line. At most 27 words. Plain text, no links."),
@@ -125,8 +125,11 @@ export const TOOLS: Tool[] = [
         },
         art: {
           type: "object",
-          description: "Optional. prompt: six to twelve words naming the subject to illustrate. svg: only if you are the illustrator; see guide(\"illustration\").",
-          properties: { prompt: { type: "string" }, svg: { type: "string" } },
+          description: "For a post with no media. The picture is how the owner recognises the story while scanning, so it must show what the story is about. prompt is the brief the illustrator draws from. svg: only if you are the illustrator; see guide(\"illustration\").",
+          properties: {
+            prompt: str('One sentence, up to about 30 words, describing a scene someone could draw: the actual thing at the centre of the story (say what kind of thing it is, not a brand name), what it is doing or what happened to it, and one detail that makes it this story. E.g. "A humanoid robot standing beside three stacks of coins that rise from left to right, an arrow pointing up over the tallest". Never an idea or a mood ("growth", "AI progress") and never a stock metaphor (lightbulb, rocket, brain, handshake). No text, numbers or logos in the picture.'),
+            svg: { type: "string" },
+          },
         },
         page: str("Optional. Id of a page you made (from page_write) that this post is about. Shown as a card that opens the page."),
         tracker: str("Slug or id of the followed topic this update belongs to."),
@@ -138,7 +141,11 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, args) => {
       const p = await createPost(a, args as any);
-      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", ...(p.media?.images ? { pictures: p.media.images.length } : {}), ...(p.media?.type === "video" ? { plays: p.media.embed?.provider ?? (p.media.loop ? "gif" : "video") } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
+      // A drawing made from a thin brief comes out generic. Say so while the agent can still learn from it.
+      const brief = String((args as any).art?.prompt ?? "").trim();
+      const thin = p.art?.status === "pending" && brief.split(/\s+/).filter(Boolean).length < 6;
+      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none",
+        ...(thin ? { picture: `${brief ? "That art.prompt is too thin to draw the story from" : "No art.prompt was given"}, so the illustrator will work from the headline alone. Next time describe the scene in one sentence: the actual thing the story is about, what it is doing, and one telling detail. See "The picture brief" in guide("posting").` } : {}), ...(p.media?.images ? { pictures: p.media.images.length } : {}), ...(p.media?.type === "video" ? { plays: p.media.embed?.provider ?? (p.media.loop ? "gif" : "video") } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
     },
   },
   {
@@ -440,12 +447,12 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "jobs",
-    description: "Open illustration and icon jobs waiting for you, with prompts and palettes. For the illustrator agent.",
+    description: "Open illustration and icon jobs waiting for you. An illustration job carries the poster's brief (prompt, when they gave one), the post's headline, its source and followed topic, and the palette to draw in. For the illustrator agent.",
     inputSchema: obj({}),
     readOnly: true,
     run: async (a) => {
       const jobs = await openJobs(a, 20);
-      return { jobs, ...(jobs.length ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art.' } : {}) };
+      return { jobs, ...(jobs.length ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art. An illustration shows what its headline is about: the actual subject and what happened to it, recognisable at a glance, never an abstract shape or a stock metaphor.' } : {}) };
     },
   },
   {

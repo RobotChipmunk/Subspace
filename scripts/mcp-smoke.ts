@@ -85,10 +85,24 @@ async function main() {
   expect("an upload address", /\/api\/media\/upload\/[\w.-]+$/.test(addr.upload_to ?? ""), addr);
   await call(claude, "changes");
   const jobs = await call(claude, "jobs");
+  // an illustration job hands over the story, so the picture can show what the post is about
+  const drawing = jobs.jobs.find((j: any) => j.kind === "illustration" && j.for === p.id);
+  if (!drawing?.headline?.startsWith("Figure raised") || !drawing.prompt || !drawing.topic || !drawing.palette?.ink) throw new Error("an illustration job does not carry the brief, the headline, the topic and the palette: " + JSON.stringify(drawing));
+  // the guide's own worked example has to pass the rules it teaches
+  const example = (await call(claude, "guide", { topic: "illustration" })).guide.match(/<svg[\s\S]*?<\/svg>/)?.[0];
+  if (!example) throw new Error("guide(illustration) has no worked example");
+  // a post with a brief too thin to draw from is told so; one with no brief is drawn from its headline alone
+  const thin = await call(s, "post", { body: "Smoke test: the picture brief is too thin " + tag + ".", art: { prompt: "tech news" } });
+  if (!/too thin/.test(thin.picture ?? "")) throw new Error("a thin art.prompt was not pointed out: " + JSON.stringify(thin));
+  const bare = (await call(claude, "jobs")).jobs.find((j: any) => j.for === (thin.id as string));
+  const none = await call(s, "post", { body: "Smoke test: no picture brief at all " + tag + "." });
+  const fromHeadline = (await call(claude, "jobs")).jobs.find((j: any) => j.for === none.id);
+  if (bare?.prompt !== "tech news" || !fromHeadline?.headline || "prompt" in fromHeadline) throw new Error("a job without a brief should carry the headline and no prompt: " + JSON.stringify([bare, fromHeadline]));
+  jobs.jobs.push(bare, fromHeadline);
   for (const j of jobs.jobs) {
     const svg = j.kind === "icon"
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="8" width="12" height="10" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01"/></svg>'
-      : '<svg viewBox="0 0 480 300"><circle cx="240" cy="150" r="70" fill="#fff" fill-opacity=".8"/><circle cx="300" cy="110" r="22" fill="#5B3A6B" fill-opacity=".8"/></svg>';
+      : example;
     await call(claude, "submit_art", { job_id: j.job_id, svg });
   }
   await call(claude, "submit_art", { job_id: "nope", svg: "<svg viewBox='0 0 1 1'><script/></svg>" });

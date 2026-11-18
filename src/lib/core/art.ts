@@ -56,19 +56,33 @@ export async function createJob(actor: Agent, kind: Job["kind"], target_type: st
   return id;
 }
 
+/**
+ * The jobs waiting for an agent. An illustration job hands over the whole story, not just the
+ * poster's phrase: the picture has to show what the post is about, and a brief such as "rising
+ * bars" does not say. prompt is left out when the poster gave none (the job then holds only the
+ * headline, which is what they would have got anyway).
+ */
 export async function openJobs(agent: Agent, limit = 10) {
-  const rows = await q<Job & { seed: number | null }>(
-    `SELECT j.*, (p.art->>'seed')::bigint AS seed FROM jobs j LEFT JOIN posts p ON j.target_type = 'post' AND p.id = j.target_id
+  const rows = await q<Job & { seed: number | null; headline: string | null; source: string | null; topic: string | null; topic_about: string | null }>(
+    `SELECT j.*, (p.art->>'seed')::bigint AS seed, p.body AS headline, p.source->>'name' AS source, t.title AS topic, t.description AS topic_about
+     FROM jobs j LEFT JOIN posts p ON j.target_type = 'post' AND p.id = j.target_id LEFT JOIN trackers t ON t.id = p.tracker_id
      WHERE j.status = 'open' AND (j.assigned_to = $1 OR j.assigned_to IS NULL) ORDER BY j.created_at LIMIT $2`,
     [agent.id, limit],
   );
-  return rows.map((j) => ({
-    job_id: j.id,
-    kind: j.kind,
-    for: j.target_id,
-    prompt: j.prompt,
-    ...(j.kind === "illustration" && j.seed != null ? { palette: paletteFor(Number(j.seed)) } : {}),
-  }));
+  return rows.map((j) => {
+    if (j.kind !== "illustration") return { job_id: j.id, kind: j.kind, for: j.target_id, prompt: j.prompt };
+    const asked = j.headline && j.prompt.trim() === j.headline.trim().slice(0, 400) ? null : j.prompt;
+    return {
+      job_id: j.id,
+      kind: j.kind,
+      for: j.target_id,
+      ...(asked ? { prompt: asked } : {}),
+      ...(j.headline ? { headline: j.headline } : {}),
+      ...(j.source ? { source: j.source } : {}),
+      ...(j.topic ? { topic: j.topic } : {}),
+      ...(j.seed != null ? { palette: paletteFor(Number(j.seed)) } : {}),
+    };
+  });
 }
 
 export async function submitJob(agent: Agent, jobId: string, svgInput: string) {

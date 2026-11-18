@@ -160,3 +160,8 @@ being true. Read this list before starting work.
   any button clears it, nothing can be pinned, and what must last is a task ("Later", or `todo`).
   Do not add a way for a module to stay after it has been acted on, or a second block or third
   button "just this once"; the limits in `setModule` are the design.
+- Post illustrations were abstract ("three to eight soft shapes", "abstract over literal") and the
+  owner found them useless for telling stories apart (Nov 2026). A drawing must show the story's
+  actual subject and what happened to it. Keep `guide("illustration")`, "The picture brief" in
+  `guide("posting")` and the seeded scenes in `scripts/seed.ts` literal; do not steer them back
+  towards mood or metaphor.

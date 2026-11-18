@@ -150,6 +150,15 @@ Patterns:
   different shape is shown whole, not cropped. Dots beneath (6px, the current one in accent) say
   how many and which. Arrows appear on hover with a mouse and never on touch. No counters, no
   captions.
+- **Illustrations** (`ArtPanel` in `bits.tsx`): a post with no picture of its own gets one drawn
+  as SVG over a pastel backdrop from its palette. It is there so the owner can tell what the story
+  is about while scanning, so it shows the story's actual subject and what happened to it (a low
+  bridge with its barrier down and a car waiting, at night), simply but recognisably. Flat and
+  soft: white bodies, the palette's ink for what defines them, one palette colour where the eye
+  should land, the scene filling most of the panel. Never an abstract shape, a metaphor (a
+  lightbulb, a rocket, a brain), text, a logo or a face. The rules the illustrator follows are
+  `guide("illustration")` in `guide.ts`; the brief a posting agent writes is "The picture brief"
+  in `guide("posting")`.
 - **Clips** (`Clip.tsx`): video files, GIF-like clips and YouTube or Vimeo players, on black in
   an 18px frame. The one most in view plays silently and the rest wait. A video has one control,
   a small sound button bottom right; tapping the video does the same, and the choice carries to
