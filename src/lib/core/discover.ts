@@ -15,7 +15,7 @@ import { breadcrumb, children as contextChildren, getNode, recentPages } from ".
 import { listEntries, listMonths, monthLine } from "./journal";
 import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
-import { allModules, getModule } from "./rail";
+import { allModules, getModule, railGone } from "./rail";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
@@ -297,10 +297,9 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         until: m.show_until,
         ...(new Date(m.show_from) > new Date() ? { from: m.show_from } : {}),
         ...(m.todo_id ? { todo: m.todo_id } : {}),
-        clears_on: m.clears_on,
         ...railGone(m),
       })),
-      hint: "read([id]) returns a module in full. rail_set(key, ...) adds or updates your own; rail_remove(key) takes it down. clears_on says what takes each one off the rail; cleared_by_owner or dismissed_by_owner means the owner has seen it and it is no longer showing.",
+      hint: 'read([id]) returns a module in full. rail_set(key, ...) adds or updates your own; rail_remove(key) takes it down. A module leaves the rail when the owner acts on it. cleared_by_owner says how: "action" (they tapped one of its buttons), "todo_open" (they opened its task) or "later" (they kept it as a task; kept_as is that task\'s id). dismissed_by_owner means they closed it without acting. Either way they have seen it and it is no longer showing; do not put it back unless something has changed.',
     };
   }
 
@@ -505,6 +504,9 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
     // the owner dismissed or cleared a rail module this agent put up: it should know they have seen it
     const myModule = (e.type === "rail.cleared" || e.type === "rail.dismissed") && e.data?.author === agent.handle;
     if (myModule && e.data?.todo) item.todo = e.data.todo;
+    // how they cleared it: "action" (with the button they chose), "todo_open", "later" (todo is the task it became) or "dismiss"
+    if (myModule && e.data?.by) item.by_owner = e.data.by;
+    if (myModule && e.data?.action) item.action = e.data.action;
     const direct = e.mentions.includes(agent.handle) || e.type === "job.created" || myModule || (typeof e.data?.tracker === "string" && mine.has(e.data.tracker));
     (direct ? for_you : other).push(item);
   }
@@ -604,10 +606,6 @@ export async function search(opts: { query: string; types?: string[]; since?: st
 
 // ---------- Read ----------
 
-/** Why a rail module is no longer showing, if it is not: the owner dismissed it, or did the thing that clears it. */
-const railGone = (m: { dismissed_at: string | null; clears_on: string; task_done?: boolean | null }) =>
-  m.dismissed_at ? (m.clears_on === "dismiss" ? { dismissed_by_owner: true } : { cleared_by_owner: true }) : m.task_done ? { task_done: true } : {};
-
 const slimPost = (p: Post, handles: Map<string, string>) => ({
   id: p.id,
   by: "@" + (handles.get(p.author) ?? p.author),
@@ -629,7 +627,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
     try {
       if (id.startsWith("r_")) {
         const m = await getModule(id);
-        out.push({ type: "rail", id: m.id, key: m.key, by: "@" + (handles.get(m.author) ?? m.author), title: m.title, label: m.label, subtitle: m.subtitle, blocks: m.blocks, actions: m.actions, ...(m.page_id ? { page: m.page_id } : {}), ...(m.todo_id ? { todo: m.todo_id } : {}), clears_on: m.clears_on, from: m.show_from, until: m.show_until, ...railGone(m) });
+        out.push({ type: "rail", id: m.id, key: m.key, by: "@" + (handles.get(m.author) ?? m.author), title: m.title, label: m.label, ...(m.icon ? { icon: m.icon } : {}), subtitle: m.subtitle, blocks: m.blocks, actions: m.actions, ...(m.page_id ? { page: m.page_id } : {}), ...(m.todo_id ? { todo: m.todo_id } : {}), from: m.show_from, until: m.show_until, ...railGone(m) });
       } else if (id.startsWith("p_")) {
         const t = await getThread(id, { after: opts.after, limit: 60 });
         out.push({
@@ -727,7 +725,7 @@ export async function briefing(agent: Agent) {
     rail: (await allModules()).filter((m) => !m.dismissed_at && !m.task_done).map((m) => ({ key: m.key, by: "@" + m.handle, title: m.title, until: m.show_until, ...(m.todo_id ? { todo: m.todo_id } : {}) })),
     // said here as well as in the guide: an app may hold an old copy of the instructions, but it reads this every session
     when_you_need_the_owner:
-      'The feed is for reading and the owner may never see a given post, so never ask for anything in a post or a reply under your own post. Add a task with what they need in its notes (todo_add, tagged with its subject), then point a rail module at it: rail_set with todo set to the task\'s id and clears_on "todo_open". guide("followups") has the steps.',
+      'The feed is for reading and the owner may never see a given post, so never ask for anything in a post or a reply under your own post. Add a task with what they need in its notes (todo_add, tagged with its subject), then point a rail module at it: rail_set with todo set to the task\'s id. guide("followups") has the steps.',
     recent_pages: (await recentPages(5)).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })),
     your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),

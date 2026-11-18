@@ -217,6 +217,7 @@ export async function waitingModules(): Promise<RailModule[]> {
       subtitle: oneLine(plain(t.notes).replace(/```[\s\S]*?```/g, " "), 120),
       label: `From ${g.name}`,
       level: "info",
+      icon: "person",
       image: null,
       blocks: [],
       actions: [],
@@ -224,8 +225,7 @@ export async function waitingModules(): Promise<RailModule[]> {
       page: null,
       todo_id: null,
       task: null,
-      // it leaves the rail by being given a day
-      clears_on: "place",
+      // it leaves the rail by being given a day, and by nothing else (todo below marks it)
       priority: 0,
       show_from: t.created_at,
       show_until: t.created_at,

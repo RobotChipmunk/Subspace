@@ -1,6 +1,6 @@
 import { checkBlocks } from "../blocks";
 import { q, q1 } from "../db";
-import { taskChanged } from "./rail";
+import { TODO_RAIL, taskChanged, type TodoRail } from "./rail";
 import { addDays, bad, cleanTags, findMentions, indexDoc, listGuests, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
 
 export type Todo = {
@@ -28,6 +28,8 @@ export type Todo = {
   next_date?: string | null;
   /** Short labels the lists can be narrowed to ("finance", "house"). At most six. */
   tags: string[];
+  /** The rail module this task is tied to, while that module exists: the one pointing at it, or the one it was kept from with "Later". */
+  rail?: TodoRail | null;
   created_at: string;
   updated_at: string;
 };
@@ -173,14 +175,14 @@ export async function listTodos(view: string, opts: { tags?: string[] } = {}) {
 }
 
 export async function getTodo(id: string): Promise<Todo> {
-  const t = await q1<Todo>(`SELECT *, ${NEXT_DATE} FROM todos WHERE id = $1`, [id]);
+  const t = await q1<Todo>(`SELECT *, ${NEXT_DATE}, ${TODO_RAIL} FROM todos WHERE id = $1`, [id]);
   if (!t) throw notFound("No such todo");
   return t;
 }
 
 /**
- * The owner has a task open in front of them. A rail module that pointed at it, and asked to be
- * cleared by that, leaves the rail.
+ * The owner has a task open in front of them. That is the same as tapping "Open task" on a rail
+ * module that points at it, so any such module leaves the rail.
  */
 export async function openTodo(actor: Agent, id: string): Promise<Todo> {
   const t = await getTodo(id);

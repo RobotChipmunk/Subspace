@@ -394,6 +394,7 @@ struct TodosDetail: View {
                         .foregroundStyle(Theme.ink2)
                 }
             }
+            if let rail = todo.rail { fromRail(rail) }
             if todo.guest_id != nil {
                 HStack(alignment: .top, spacing: 8) {
                     TodosFromTag(guestID: todo.guest_id)
@@ -406,6 +407,45 @@ struct TodosDetail: View {
         }
         .padding(.leading, 42)
         .padding(.top, 6)
+    }
+
+    /// On a task tied to a rail module (one an agent pointed a module at, or one kept from the rail
+    /// with "Later"): the module has gone, so its buttons live on here and the owner can still act.
+    /// A kept task also says whose module it was.
+    @ViewBuilder private func fromRail(_ rail: TodoRail) -> some View {
+        let page: [RailAction] = rail.page_id.map { [RailAction(label: "Open page", url: "/page/\($0)")] } ?? []
+        let buttons = (rail.actions ?? []) + page
+        let by = rail.kept == true ? app.agent(rail.author) : nil
+        if by != nil || !buttons.isEmpty {
+            FlowRow(spacing: 6) {
+                if let by {
+                    HStack(spacing: 6) {
+                        AvatarView(agent: by, size: 16)
+                        Text("From \(by.name), kept for later")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.ink2)
+                    }
+                    .frame(minHeight: 32)
+                    .padding(.trailing, 4)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("todos.detail.rail.from")
+                }
+                ForEach(Array(buttons.enumerated()), id: \.offset) { item in
+                    let a = item.element
+                    Button {
+                        app.open(a.url)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(a.label)
+                            if a.url.hasPrefix("http") { Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.ink3) }
+                        }
+                    }
+                    .buttonStyle(PillStyle())
+                    .accessibilityIdentifier("todos.detail.rail.action.\(item.offset)")
+                }
+            }
+            .padding(.top, 2)
+        }
     }
 
     private func notesArea(_ notes: String) -> some View {
@@ -513,8 +553,8 @@ struct TodosDetail: View {
             let fresh: Todo = try await app.api.get("todos/\(id)")
             take(fresh)
             problem = nil
-            // Reading the task is opening it. A rail module that pointed here, and asked to be
-            // cleared by that, has gone: let the rail catch up.
+            // Reading the task is opening it, and a rail module that pointed here has gone for
+            // that: let the rail catch up.
             if !railTold {
                 railTold = true
                 if app.rail.contains(where: { $0.task?.id == id }) { await app.refreshRail() }

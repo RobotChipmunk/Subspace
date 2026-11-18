@@ -196,7 +196,7 @@ async function main() {
   await rest(`todos/${id}`, { method: "PATCH", body: { view: "today" } });
   const placed = await tool(G, gt.access_token, `get_task_for_${slug}`, { id });
   ok(placed.data.status === "scheduled" && /^\d{4}-\d{2}-\d{2}$/.test(placed.data.day), "after the owner gives it a day, the guest sees it scheduled for " + placed.data.day);
-  ok(!(await rest("rail")).json.modules.some((m: any) => m.todo?.id === id) && (await rest("todos/folders")).json.folders.find((f: any) => f.key === `guest:${guest.id}`).count === 0, "and it has left the rail and the From list");
+  ok(!(await rest("rail")).json.modules.some((m: any) => m.todo?.id === id) && (await rest("todos/folders")).json.folders.find((f: any) => f.key === `guest:${guest.id}`).count === 1, "and it has left the rail, while the From list keeps it");
   ok((await rest(`todos/${secretTodo.id}`, { method: "PATCH", body: { view: `guest:${guest.id}` } })).status === 400, "the owner's own task cannot be moved onto the guest's list by accident");
 
   const upd = await tool(G, gt.access_token, `update_task_for_${slug}`, { id, title: "Pick up the dry cleaning by Friday " + tag, notes_append: "They close at 6." });

@@ -182,12 +182,18 @@ final class AppModel {
         await refreshRail()
     }
 
-    /// One of a module's buttons was tapped (an action, its page or its task). A module that
-    /// clears on that leaves the rail at once; any other stays where it is.
-    func railActed(_ module: RailModule) async {
-        guard module.clears_on == "action" else { return }
+    /// One of a module's buttons was tapped (an action, its page, its task, or "Got it"). That is
+    /// what it was there for, so it leaves the rail at once; its author is told which button.
+    func railActed(_ module: RailModule, label: String) async {
         withAnimation(.ssSoft) { rail.removeAll { $0.id == module.id } }
-        try? await api.send("POST", "rail/\(module.id)/action")
+        try? await api.send("POST", "rail/\(module.id)/action", body: ["label": label])
+        await refreshRail()
+    }
+
+    /// "Later": the module becomes a task on that day ("today", "tomorrow", "week") and leaves the rail.
+    func railLater(_ module: RailModule, view: String) async {
+        withAnimation(.ssSoft) { rail.removeAll { $0.id == module.id } }
+        try? await api.send("POST", "rail/\(module.id)/later", body: ["view": view])
         await refreshRail()
     }
 

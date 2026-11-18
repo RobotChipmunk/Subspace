@@ -102,11 +102,11 @@ async function run(profile) {
   await page.waitForURL("**/feed");
   await settle(1500);
   if (process.env.DATABASE_URL) {
-    // an earlier screen size dismissed a rail module; bring it back so every size sees the same thing
+    // an earlier screen size cleared rail modules; bring them back so every size sees the same thing
     const { Client } = require("pg");
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     await db.connect();
-    await db.query("UPDATE rail_modules SET dismissed_at = NULL");
+    await db.query("UPDATE rail_modules SET dismissed_at = NULL, cleared_by = NULL");
     await db.end();
     await page.reload();
     await settle(1500);
@@ -138,15 +138,25 @@ async function run(profile) {
       await settle(700);
     }
     await reachable(hotel.getByText("Residence Inn, Pearl District"), "rail module title");
-    // minimal by default: details stay hidden until the module is expanded
+    // a glance by default: details stay hidden until the module is opened
     if (await hotel.getByText("84127763").count()) fail("rail: module details are showing before it is expanded");
-    if (await hotel.getByRole("link").count()) fail("rail: module buttons are showing before it is expanded");
+    // but what to do about it never hides: one button on every module, and only one until it is opened
+    await reachable(hotel.getByRole("link", { name: /Get directions/ }), "rail module: its one thing to do, closed");
+    if (await hotel.getByRole("link", { name: /Call|Open page/ }).count()) fail("rail: a closed module shows more than its first button");
+    const offered = await page.locator("[data-rail-module]").evaluateAll((mods) => mods.map((m) => `${m.dataset.railModule}: ${m.querySelector("[data-rail-actions]")?.children.length ?? 0}`));
+    if (offered.some((o) => !o.endsWith(": 1"))) fail(`rail: every closed module should offer exactly one thing to do (${offered.join(", ")})`);
+    // each says what kind of thing it is by the picture at its front
+    const tones = await page.locator("[data-rail-module]").evaluateAll((mods) => Object.fromEntries(mods.map((m) => [m.dataset.railModule, m.dataset.tone])));
+    if (tones["calendar-auth"] !== "error" || tones["agility-topup"] !== "act" || tones["portland-hotel"] !== "know") fail(`rail: modules are not told apart at a glance (${JSON.stringify(tones)})`);
+    if (await page.locator("[data-rail-module] .rail-tile svg").count() !== 4) fail("rail: a module is missing its icon");
     await shot("rail-closed");
     await press(hotel.getByRole("button", { expanded: false }));
     await settle(700);
     await reachable(hotel.getByText("84127763"), "rail module detail");
-    await reachable(hotel.getByRole("link", { name: /Directions/ }), "rail module action");
+    await reachable(hotel.getByRole("link", { name: /Get directions/ }), "rail module action");
+    await reachable(hotel.getByRole("link", { name: "Call" }), "rail module second action");
     await reachable(hotel.getByRole("link", { name: "Open page" }), "rail module page link");
+    await reachable(hotel.getByRole("button", { name: "Later" }), "rail module: Later");
     const count = await page.locator("[data-rail-module]").count();
     if (count !== 4) fail(`rail: ${count} modules shown, expected 4`);
     // an error from an agent is listed first and marked
@@ -155,16 +165,63 @@ async function run(profile) {
     await reachable(firstMod.getByText("Calendar connection expired"), "rail error title");
     await noSidewaysScroll("rail");
     await shot("rail");
-    // dismissing one removes it; hiding the rail gives the space back
-    await press(page.locator('[data-rail-module="roof-inspection"]').getByRole("button", { expanded: false }));
+    // one open at a time
+    const roof = page.locator('[data-rail-module="roof-inspection"]');
+    await press(roof.getByRole("button", { expanded: false }));
     await hotel
       .getByText("84127763")
       .waitFor({ state: "detached", timeout: 4000 })
       .catch(() => fail("rail: opening one module left the other expanded"));
-    await press(page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
+    // Nothing to do about the roofer but know it, so its button says so, and saying so clears it.
+    // Closing a module without acting does the same; a wide screen checks the one, a narrow screen the other.
+    await reachable(roof.getByRole("button", { name: "Got it" }), "rail: Got it on a module with nothing to do");
+    await press(wide ? roof.getByRole("button", { name: "Got it" }) : page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
     await settle(900);
-    if ((await page.locator("[data-rail-module]").count()) !== 3) fail("rail: dismissing a module did not remove it");
-    if (!wide) {
+    if ((await page.locator("[data-rail-module]").count()) !== 3) fail(`rail: ${wide ? "Got it" : "dismissing a module"} did not remove it`);
+
+    // "Later": not now, but not lost. The module becomes a task on the day chosen and leaves the rail.
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
+    const auth = page.locator('[data-rail-module="calendar-auth"]');
+    await press(auth.getByRole("button", { expanded: false }));
+    await settle(700);
+    await reachable(auth.getByText("I could not read your calendar this morning"), "rail error: what happened, once opened");
+    await press(auth.getByRole("button", { name: "Later" }));
+    await settle(500);
+    const days = auth.locator("[data-rail-later] button", { hasText: /^(Today|Tomorrow|This week)$/ });
+    if ((await days.count()) !== 3) fail("rail: Later does not offer Today, Tomorrow and This week");
+    const tops = await days.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+    if (new Set(tops).size !== 1) fail("rail: the days Later offers do not fit on one line");
+    for (const d of await days.all()) await reachable(d, "rail: a day to keep a module for");
+    await noSidewaysScroll("rail later");
+    await shot("rail-later");
+    await press(auth.getByRole("button", { name: "Tomorrow" }));
+    await auth.waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("rail: a module kept for later is still in the rail"));
+    await settle(600);
+    if ((await get("/api/v1/rail")).modules.some((m) => m.key === "calendar-auth")) fail("rail: Later did not clear the module");
+    const kept = (await get("/api/v1/todos?view=tomorrow")).todos.find((t) => t.title === "Calendar connection expired");
+    if (!kept) fail("rail: Later did not leave a task for tomorrow");
+    else {
+      // the follow-up remains: the task carries what the module said, and its button
+      const task = await get(`/api/v1/todos/${kept.id}`);
+      if (!task.rail || !task.rail.kept || task.rail.key !== "calendar-auth") fail("rail: the kept task is not tied to the module it came from");
+      if (!/could not read your calendar/.test(task.notes)) fail("rail: the kept task lost what the module said");
+      if (!wide) (await press(page.locator('aside[aria-label="Now"]').getByRole("button", { name: "Close" })), await settle(900));
+      await page.goto(`${BASE}/todos?open=${kept.id}`);
+      await page.getByLabel("Task name").waitFor({ timeout: 8000 });
+      await settle(900);
+      const from = page.locator("[data-from-rail]");
+      await reachable(from.getByText("From Atlas, kept for later"), "kept task: whose module it was");
+      await reachable(from.getByRole("link", { name: /Reconnect/ }), "kept task: the module's button");
+      await noSidewaysScroll("kept task");
+      await shot("rail-kept-task");
+      // taken out again, so the lists the later steps count are as they were seeded
+      await del(`/api/v1/todos/${kept.id}`);
+      await del(`/api/v1/todos/${kept.id}?forever=1`);
+      await page.goto(`${BASE}/feed`);
+      await settle(1500);
+    }
+    if (!wide && (await page.locator('aside[aria-label="Now"]').count())) {
       await press(page.locator('aside[aria-label="Now"]').getByRole("button", { name: "Close" }));
       await settle(900);
       if (await hotel.count()) fail("rail: closing the sheet left its modules on screen");
@@ -833,17 +890,16 @@ async function run(profile) {
     await settle(1500);
   });
   await step("follow-up from the rail", async () => {
-    // What an agent needs from the owner is a rail module pointing at a task. Opening the task clears the module.
+    // What an agent needs from the owner is a rail module pointing at a task. Its one button opens the
+    // task, and that clears the module; the task stays in the list.
     const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
     const before = (await get("/api/v1/rail")).modules.find((m) => m.key === "agility-topup");
     if (!before) return fail("follow-up: the seeded follow-up is not in the rail");
-    if (before.clears_on !== "todo_open" || !before.task) fail("follow-up: the module does not say that opening its task clears it");
-    if ((await get("/api/v1/rail")).modules.some((m) => !m.clears_on)) fail("follow-up: a rail module does not say what clears it");
+    if (!before.task) fail("follow-up: the module does not point at its task");
     if (!wide) (await press(page.getByRole("button", { name: /^Now/ })), await settle(800));
     const mod = page.locator('[data-rail-module="agility-topup"]');
     await mod.waitFor({ timeout: 6000 });
-    await press(mod.getByRole("button", { expanded: false }));
-    await settle(800);
+    // no need to open the module first: what to do is on its face
     const open = mod.getByRole("link", { name: "Open task" });
     await reachable(open, "rail follow-up: Open task");
     await noSidewaysScroll("rail follow-up");
@@ -856,6 +912,7 @@ async function run(profile) {
     if (!wide && (await page.locator('aside[aria-label="Now"]').count())) fail("follow-up: the rail sheet stayed open over the task");
     if (await mod.count()) fail("follow-up: the module is still in the rail after its task was opened");
     if ((await get("/api/v1/rail")).modules.some((m) => m.key === "agility-topup")) fail("follow-up: opening the task did not clear its module");
+    if ((await get(`/api/v1/todos/${before.task.id}`)).done !== false) fail("follow-up: the task did not stay in the list once its module had gone");
     await reachable(page.locator('[data-tag="finance"]'), "the follow-up task's tag");
     await noSidewaysScroll("follow-up task");
     await shot("todo-follow-up");
@@ -1361,8 +1418,13 @@ async function run(profile) {
     await settle(1500);
     if (wide) {
       // a long title in the rail runs to a second line and no further
-      const railTitle = page.locator(`[data-rail-module$="${task.id}"] button span.font-medium`).last();
+      const waitingMod = page.locator(`[data-rail-module$="${task.id}"]`);
+      const railTitle = waitingMod.locator("[data-rail-title]");
       await railTitle.waitFor({ timeout: 6000 });
+      // what to do with a task waiting for a day is to give it one; it cannot be dismissed instead
+      await reachable(waitingMod.getByRole("button", { name: "Today" }), "waiting task in the rail: Today");
+      await reachable(waitingMod.getByRole("button", { name: "Tomorrow" }), "waiting task in the rail: Tomorrow");
+      if (await waitingMod.getByRole("button", { name: /^Dismiss/ }).count()) fail("rail: a task waiting for a day can be dismissed without being placed");
       const lines = await railTitle.evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
       if (lines !== 2) fail(`rail: a long title takes ${lines} lines closed, expected 2`);
       await shot("rail-two-lines");

@@ -214,19 +214,19 @@ function Table({ d }: { d: Blocks["table"] }) {
 
 function Timeline({ d }: { d: Blocks["timeline"] }) {
   return (
-    <ol className="relative">
+    <ol className="block-timeline relative">
       {d.items.length > 1 && <span className="absolute bottom-3 left-[5px] top-3 w-px bg-[var(--fill-strong)]" />}
       {d.items.map((t, i) => (
         <li key={i} className="relative flex gap-4 pb-4 last:pb-0">
           <span className="relative mt-[7px] h-[11px] w-[11px] flex-none rounded-full border-2 border-[var(--surface-solid)] bg-accent" />
           <div className="min-w-0 flex-1">
-            {t.when && <div className="text-[12.5px] font-medium text-ink3">{t.when}</div>}
+            {t.when && <div className="timeline-when text-[12.5px] font-medium text-ink3">{t.when}</div>}
             {t.url ? (
-              <a href={t.url} {...external(t.url)} className="text-[15px] font-semibold hover:text-accent">
+              <a href={t.url} {...external(t.url)} className="timeline-title text-[15px] font-semibold hover:text-accent">
                 {t.title}
               </a>
             ) : (
-              <div className="text-[15px] font-semibold">{t.title}</div>
+              <div className="timeline-title text-[15px] font-semibold">{t.title}</div>
             )}
             {t.text && <p className="text-[14px] leading-snug text-ink2">{t.text}</p>}
           </div>

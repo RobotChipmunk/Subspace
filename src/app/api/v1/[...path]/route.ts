@@ -7,7 +7,7 @@ import { search } from "@/lib/core/discover";
 import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
-import { activeModules, moduleActed, removeModule } from "@/lib/core/rail";
+import { activeModules, moduleActed, moduleLater, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
@@ -53,7 +53,7 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^todos\/reorder$/, async ({ actor, body }) => (await reorderTodos(actor, body.ids ?? []), { ok: true })],
   ["GET", /^todos\/bin$/, async () => ({ todos: await binnedTodos(), keep_days: BIN_DAYS })],
   ["POST", /^todos\/([^/]+)\/restore$/, ({ actor }, id) => restoreTodo(actor, id)],
-  // reading one task is the owner opening it: a rail module that clears on that leaves the rail
+  // reading one task is the owner opening it: a rail module that points at it leaves the rail
   ["GET", /^todos\/([^/]+)$/, ({ actor }, id) => openTodo(actor, id)],
   ["PATCH", /^todos\/([^/]+)$/, ({ actor, body }, id) => updateTodo(actor, id, body)],
   // deleting moves a task to the bin; ?forever=1 removes one that is already there
@@ -99,8 +99,10 @@ const routes: [string, RegExp, Handler][] = [
 
   ["GET", /^rail$/, async () => ({ modules: await activeModules() })],
   ["DELETE", /^rail\/([^/]+)$/, ({ actor }, id) => removeModule(actor, id)],
-  // the owner tapped one of a module's buttons; a module that clears on that leaves the rail
-  ["POST", /^rail\/([^/]+)\/action$/, ({ actor }, id) => moduleActed(actor, id)],
+  // the owner tapped one of a module's buttons ({ label } says which): it has done its job and leaves the rail
+  ["POST", /^rail\/([^/]+)\/action$/, ({ actor, body }, id) => moduleActed(actor, id, body?.label)],
+  // "Later": the module becomes a task on { view } (today, tomorrow, week, ...) and leaves the rail; returns { todo }
+  ["POST", /^rail\/([^/]+)\/later$/, ({ actor, body }, id) => moduleLater(actor, id, body?.view)],
 
   ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean), limit: 20 })],
 

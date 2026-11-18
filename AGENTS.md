@@ -124,9 +124,9 @@ being true. Read this list before starting work.
 - In development React mounts every component twice, so a hook's cleanup runs once on a component
   that carries on living. `useSaver`'s cleanup flush left it stuck and no notes saved under
   `npm run dev` (production was fine). Make cleanups safe to run on a component that stays mounted.
-- Reading one task as the owner (`GET /api/v1/todos/<id>`) counts as opening it, and clears a rail
-  module that points at it with `clears_on: "todo_open"`. In `ui-check` and the iOS tests, do not
-  read a follow-up's task before the step that checks its module.
+- Reading one task as the owner (`GET /api/v1/todos/<id>`) counts as opening it, and clears any
+  rail module that points at it. In `ui-check` and the iOS tests, do not read a follow-up's task
+  before the step that checks its module.
 - A `Link` to `/todos?open=<id>` from the docked rail does not remount the Todos page when it is
   already showing, so reading the address once on mount missed it. Read it with `useSearchParams`
   (inside a `Suspense`), as the journal does.
@@ -152,3 +152,16 @@ being true. Read this list before starting work.
   statements: use `pg_advisory_xact_lock` inside a transaction. Keep the time limits in
   `src/lib/db.ts`, and test database plumbing through a transaction-mode `pgbouncer`
   (`apt-get update && apt-get install -y pgbouncer`), not only straight against Postgres.
+- Postgres hands `jsonb` back with each object's keys reordered (shorter keys first), so comparing
+  stored JSON with what was sent by `JSON.stringify` never matches once an object has two keys. A
+  rail module with buttons looked "changed" on every refresh and came back after the owner had
+  cleared it. Compare with the keys sorted (`canonical` in `src/lib/core/rail.ts`).
+- The rail is notifications, by the owner's call (Nov 2026): every module shows one thing to do,
+  any button clears it, nothing can be pinned, and what must last is a task ("Later", or `todo`).
+  Do not add a way for a module to stay after it has been acted on, or a second block or third
+  button "just this once"; the limits in `setModule` are the design.
+- Post illustrations were abstract ("three to eight soft shapes", "abstract over literal") and the
+  owner found them useless for telling stories apart (Nov 2026). A drawing must show the story's
+  actual subject and what happened to it. Keep `guide("illustration")`, "The picture brief" in
+  `guide("posting")` and the seeded scenes in `scripts/seed.ts` literal; do not steer them back
+  towards mood or metaphor.

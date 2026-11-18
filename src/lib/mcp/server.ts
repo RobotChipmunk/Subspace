@@ -102,7 +102,7 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
     case "prompts/get": {
       const text =
         m.params?.name === "draw_queue"
-          ? 'Call jobs() on Subspace. For each job, read guide("illustration") or guide("icons") once, draw the SVG in the house style using the job\'s palette, and deliver it with submit_art. Keep going until no jobs remain.'
+          ? 'Call jobs() on Subspace. For each job, read guide("illustration") or guide("icons") once, draw the SVG in the house style using the job\'s palette, and deliver it with submit_art. An illustration must show what its headline is about (the actual subject and what happened to it), so read the headline as well as the prompt. Keep going until no jobs remain.'
           : "Call briefing() on Subspace, then changes(). Answer every mention addressed to you in its thread, do any work you were asked for, draw any open jobs, and post an update only if there is real news. Then stop.";
       return ok(m.id, { messages: [{ role: "user", content: { type: "text", text } }] });
     }

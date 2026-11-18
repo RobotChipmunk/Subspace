@@ -6,7 +6,7 @@ import { categorize, createEntry, getEntry, plainText } from "../core/journal";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
-import { RAIL_BLOCKS, RAIL_CLEARS, removeModule, setModule } from "../core/rail";
+import { RAIL_BLOCKS, RAIL_ICONS, railGone, removeModule, setModule } from "../core/rail";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
@@ -39,8 +39,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "guide",
-    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, followups, pages, illustration, icons, context, todos, following.",
-    inputSchema: obj({ topic: str("design | posting | followups | pages | illustration | icons | context | todos | following") }),
+    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, context, todos, following.",
+    inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | context | todos | following") }),
     readOnly: true,
     run: async (_a, { topic }) => {
       if (topic && !TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
@@ -95,7 +95,7 @@ export const TOOLS: Tool[] = [
   {
     name: "post",
     description:
-      'Publish a headline with a picture, for the owner to read when they choose. The feed is for updates and information only: the owner may never see a given post, so never put a question, a request or anything that needs them to act in one (that is a task plus a rail module: guide("followups")). At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents. Before posting, check the story is not already in the feed (search, explore("/feed/recent"), and explore("/following/<slug>") for a topic); never post a duplicate, even from a different source.',
+      'Publish a headline with a picture, for the owner to read when they choose. The feed is for updates and information only: the owner may never see a given post, so never put a question, a request or anything that needs them to act in one (that is a task plus a rail module: guide("followups")). At most 27 words, shorter is better; no links or source names in the text. Give where it came from as source, attach media if the story has its own image, video (YouTube, Vimeo or a file) or animated GIF (several images only when each shows something different worth seeing), otherwise give art.prompt, a one-sentence brief of the scene that shows what this story is about, and the illustrator draws it. Use tracker for updates on a followed topic, channel "agents" to talk to other agents. Before posting, check the story is not already in the feed (search, explore("/feed/recent"), and explore("/following/<slug>") for a topic); never post a duplicate, even from a different source.',
     inputSchema: obj(
       {
         body: str("The headline: what happened, in one line. At most 27 words. Plain text, no links."),
@@ -125,8 +125,11 @@ export const TOOLS: Tool[] = [
         },
         art: {
           type: "object",
-          description: "Optional. prompt: six to twelve words naming the subject to illustrate. svg: only if you are the illustrator; see guide(\"illustration\").",
-          properties: { prompt: { type: "string" }, svg: { type: "string" } },
+          description: "For a post with no media. The picture is how the owner recognises the story while scanning, so it must show what the story is about. prompt is the brief the illustrator draws from. svg: only if you are the illustrator; see guide(\"illustration\").",
+          properties: {
+            prompt: str('One sentence, up to about 30 words, describing a scene someone could draw: the actual thing at the centre of the story (say what kind of thing it is, not a brand name), what it is doing or what happened to it, and one detail that makes it this story. E.g. "A humanoid robot standing beside three stacks of coins that rise from left to right, an arrow pointing up over the tallest". Never an idea or a mood ("growth", "AI progress") and never a stock metaphor (lightbulb, rocket, brain, handshake). No text, numbers or logos in the picture.'),
+            svg: { type: "string" },
+          },
         },
         page: str("Optional. Id of a page you made (from page_write) that this post is about. Shown as a card that opens the page."),
         tracker: str("Slug or id of the followed topic this update belongs to."),
@@ -138,7 +141,11 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, args) => {
       const p = await createPost(a, args as any);
-      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none", ...(p.media?.images ? { pictures: p.media.images.length } : {}), ...(p.media?.type === "video" ? { plays: p.media.embed?.provider ?? (p.media.loop ? "gif" : "video") } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
+      // A drawing made from a thin brief comes out generic. Say so while the agent can still learn from it.
+      const brief = String((args as any).art?.prompt ?? "").trim();
+      const thin = p.art?.status === "pending" && brief.split(/\s+/).filter(Boolean).length < 6;
+      return { id: p.id, channel: p.channel, illustration: p.art?.status ?? "none",
+        ...(thin ? { picture: `${brief ? "That art.prompt is too thin to draw the story from" : "No art.prompt was given"}, so the illustrator will work from the headline alone. Next time describe the scene in one sentence: the actual thing the story is about, what it is doing, and one telling detail. See "The picture brief" in guide("posting").` } : {}), ...(p.media?.images ? { pictures: p.media.images.length } : {}), ...(p.media?.type === "video" ? { plays: p.media.embed?.provider ?? (p.media.loop ? "gif" : "video") } : {}), words: p.body.split(/\s+/).length, ...(p.source ? { source: p.source.name } : {}) };
     },
   },
   {
@@ -203,7 +210,7 @@ export const TOOLS: Tool[] = [
     inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished.") }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
-      return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, title, show_until, todo: this id, clears_on: \"todo_open\")." };
+      return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, label, title, show_until, todo: this id)." };
     },
   },
   {
@@ -385,58 +392,67 @@ export const TOOLS: Tool[] = [
   {
     name: "rail_set",
     description:
-      'Show or update a small module in the rail beside the owner\'s screen: timely, personal things they need to know that are not news, such as today\'s hotel or flight details, a delivery arriving, a deadline, a booking, the day\'s plan. Also the only place to tell the owner about a problem in work you are doing for them (level: "error" or "warning"), and only when it is truly blocking: it has persisted across several attempts spread over an hour or more and needs them. Handle transient failures quietly. It is also how the owner learns that you need something from them: add the task with todo_add, then call this with todo set to its id and a title saying what is needed; the module opens that task and leaves the rail once the owner has. One module per thing. It needs an expiry (show_until), a key, and clears_on, which says what takes it off the rail; call again with the same key to update it. See the server instructions for when to use the rail.',
+      'Show or update a notification in the rail ("Now") beside the owner\'s screen. The rail is for short-lived, personal things that are not news: today\'s hotel or flight, a delivery arriving, a deadline, a booking, the day\'s plan; something you need the owner to do, decide or answer (add the task with todo_add first, then call this with todo set to its id); and a problem that truly blocks work you do for them (level "error" or "warning", only after several spaced-out retries). A module is a glance, not a document: label (when) and title (what) are all the owner sees until they open it, with an icon or picture and the first button, which must say the one thing to do. Opened, it adds one sentence (subtitle), at most one small block and a second button, and no more. Everything is transient: the module leaves the rail the moment the owner taps any of its buttons, opens its task, keeps it for later (it becomes a task in their list) or dismisses it, and in any case at show_until. So anything that must outlast the rail lives in a task (todo) or on a page (page), never in the module alone. One module per thing; call again with the same key to update it. See the server instructions (THE RAIL) before your first one.',
     inputSchema: obj(
       {
         key: str('Short stable name, lowercase with dashes, e.g. "portland-hotel". Reuse it to update the same module.'),
-        title: str("What this is, e.g. the hotel's name. Aim for under 30 characters so it fits one line (60 at most). With the label, this is all the owner sees until they expand the module."),
-        label: str('A few words about timing shown above the title, e.g. "Today · check-in 3 pm".'),
+        title: str('What it is, or what is needed, in a few words: "Residence Inn, Pearl District", "Agility top-up: decide". Aim for under 30 characters so it fits one line (60 at most). With the label, this is all the owner reads before opening the module.'),
+        label: str('When, or why now, in a few words above the title: "Today · check-in 3 pm", "By Friday", "Calendar · needs sign-in". At most 40 characters.'),
+        icon: { type: "string", enum: [...RAIL_ICONS], description: "The small picture at the front of the module, chosen by what it is about: plane for a flight, bed for a hotel, package for a delivery, calendar for an appointment, money for a payment, question for a decision, key for a sign-in. Leave it out when none fits; errors, warnings and follow-ups get their own." },
         level: { type: "string", enum: ["info", "warning", "error"], description: 'Default info. "error": work for the owner is blocked and has stayed blocked after several spaced-out retries. "warning": rare; the owner must decide something or will be caught out. Errors and warnings are shown first and marked in colour.' },
-        subtitle: str("One line of context, e.g. the address. Shown when expanded."),
-        image: str("Optional https picture shown across the top. Only a real, found image."),
+        subtitle: str("One sentence of detail, shown when the module is opened: the address, what happened, what you recommend. At most 120 characters. It adds to the title; it never repeats it."),
+        image: str("Optional https picture of the thing itself (the hotel, the parcel, the place), shown small in place of the icon. Only a real, found image; never a logo or a decoration."),
         blocks: {
           type: "array",
-          description: `Up to 3 compact blocks, each an object with a "type" and that block's fields (same fields as page blocks). Allowed types: ${RAIL_BLOCKS.join(", ")}. facts is the usual choice for details; timeline for a schedule; callout for one thing to act on; text is {"type":"text","markdown":"..."}.`,
+          description: `At most ONE compact block, shown when the module is opened, and only when it helps at a glance. An object with a "type" and that block's fields (same fields as page blocks). Allowed types: ${RAIL_BLOCKS.join(", ")}. facts for up to 4 details (confirmation number, gate, time); timeline for up to 4 steps of a schedule; map for where; stats for up to 3 numbers; cards for up to 3 options; callout or {"type":"text","markdown":"..."} for a sentence or two (240 characters). A follow-up usually needs none: its task holds the detail. More than this goes in the task's notes or on a page.`,
           items: { type: "object" },
+          maxItems: 1,
         },
         actions: {
           type: "array",
-          description: "Up to 3 buttons. url may be https://, tel:, mailto: or sms:.",
-          items: { type: "object", properties: { label: str("At most 24 characters, e.g. Directions."), url: str("Where it goes.") }, required: ["label", "url"] },
-        },
-        page: str("Optional id of a page with the full detail; adds an Open page button."),
-        todo: str("Id of the task in the owner's list that this module is about (from todo_add). Adds an Open task button. Set it whenever the module asks the owner to do, decide or answer something: the task holds the detail and stays in their list after the module has gone."),
-        clears_on: {
-          type: "string",
-          enum: [...RAIL_CLEARS],
           description:
-            'What takes this module off the rail before show_until. "dismiss": only the owner dismissing it; for things to know until they pass (a booking, the day\'s plan) and for errors you will remove yourself. "todo_open": the owner opens the task named in todo, from the rail or from their list; the usual choice for a follow-up. "todo_done": that task is finished; opening it is not enough. "action": the owner taps one of the module\'s buttons (an action, its page or its task). A module about a task also goes once that task is done or deleted.',
+            'Up to 2 buttons, most important first. The first is the one thing to do about this module and is shown before it is opened, so its label must be a plain verb that says what happens: "Get directions", "Reconnect", "Track parcel", "Call", "Pay". url may be https://, tel:, mailto: or sms:. Tapping any button clears the module from the rail. Leave actions out when there is nothing to tap: a module about a task gets "Open task", one with a page gets "Open page", and a module with nothing to do gets "Got it".',
+          items: { type: "object", properties: { label: str("At most 24 characters; a verb and a word."), url: str("Where it goes.") }, required: ["label", "url"] },
+          maxItems: 2,
         },
+        page: str("Optional id of a page with the full detail; adds an Open page button. Use it when there is more to read than a module may hold."),
+        todo: str("Id of the task in the owner's list that this module is about (from todo_add). Adds an Open task button. Set it whenever the owner has to do, decide or answer something that will not be finished by one tap: the task holds the detail and stays in their list after the module has gone, with the module's buttons on it."),
         show_until: str("When it stops being relevant: YYYY-MM-DD (shown through the end of that day) or an ISO date and time. At most 45 days ahead."),
         show_from: str("Optional. Do not show before this date or time."),
         priority: { type: "integer", description: "0 to 10. Higher shows first. Use above 0 only for things that need action today." },
       },
-      ["key", "title", "show_until", "clears_on"],
+      ["key", "title", "show_until"],
     ),
     run: async (a, args) => {
       const m = await setModule(a, args as any);
-      return { id: m.id, key: m.key, level: m.level, ...(m.todo_id ? { todo: m.todo_id } : {}), clears_on: m.clears_on, showing_from: m.show_from, showing_until: m.show_until };
+      const shown = !m.dismissed_at;
+      return {
+        id: m.id,
+        key: m.key,
+        level: m.level,
+        ...(m.icon ? { icon: m.icon } : {}),
+        ...(m.todo_id ? { todo: m.todo_id } : {}),
+        showing_from: m.show_from,
+        showing_until: m.show_until,
+        // an unchanged module the owner already cleared stays cleared: say so, so the agent does not think it is showing
+        ...(shown ? {} : { ...railGone(m), note: "The owner has already cleared this module and nothing in it changed, so it is not shown again. Change its content only if there is something new to tell them." }),
+      };
     },
   },
   {
     name: "rail_remove",
-    description: "Remove one of your modules from the rail as soon as it is no longer relevant, without waiting for it to expire.",
+    description: "Remove one of your modules from the rail as soon as it is no longer relevant (the trip is over, the problem is fixed, you found the answer yourself), without waiting for it to expire. Not needed after the owner has cleared it.",
     inputSchema: obj({ key: str("The module's key.") }, ["key"]),
     run: (a, { key }) => removeModule(a, key),
   },
   {
     name: "jobs",
-    description: "Open illustration and icon jobs waiting for you, with prompts and palettes. For the illustrator agent.",
+    description: "Open illustration and icon jobs waiting for you. An illustration job carries the poster's brief (prompt, when they gave one), the post's headline, its source and followed topic, and the palette to draw in. For the illustrator agent.",
     inputSchema: obj({}),
     readOnly: true,
     run: async (a) => {
       const jobs = await openJobs(a, 20);
-      return { jobs, ...(jobs.length ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art.' } : {}) };
+      return { jobs, ...(jobs.length ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art. An illustration shows what its headline is about: the actual subject and what happened to it, recognisable at a glance, never an abstract shape or a stock metaphor.' } : {}) };
     },
   },
   {
