@@ -99,7 +99,10 @@ private struct RailModuleView: View {
                         BlockView(block: item.element, compact: true)
                     }
                     if let todo = m.todo { place(todo.id) }
-                    let actions = (m.actions ?? []) + (m.page.map { [RailAction(label: "Open page", url: "/page/\($0.id)")] } ?? [])
+                    // the task it is about comes first: for a follow-up that is the one thing to do here
+                    let task: [RailAction] = m.task.map { [RailAction(label: "Open task", url: "/todos?open=\($0.id)")] } ?? []
+                    let page: [RailAction] = m.page.map { [RailAction(label: "Open page", url: "/page/\($0.id)")] } ?? []
+                    let actions: [RailAction] = task + (m.actions ?? []) + page
                     if !actions.isEmpty {
                         FlowRow(spacing: 6) {
                             ForEach(Array(actions.enumerated()), id: \.offset) { item in
@@ -107,6 +110,8 @@ private struct RailModuleView: View {
                                 Button {
                                     if a.url.hasPrefix("/") { withAnimation(.ssSpring) { app.railSheet = false } }
                                     app.open(a.url)
+                                    // a module that clears on a tap of its buttons goes now
+                                    Task { await app.railActed(m) }
                                 } label: {
                                     HStack(spacing: 4) {
                                         Text(a.label)
@@ -114,6 +119,7 @@ private struct RailModuleView: View {
                                     }
                                 }
                                 .buttonStyle(PillStyle())
+                                .accessibilityIdentifier("rail.action.\(m.key ?? m.id).\(item.offset)")
                             }
                         }
                     }

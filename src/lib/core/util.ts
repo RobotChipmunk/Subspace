@@ -135,6 +135,16 @@ export async function logEvent(e: {
   return r!.seq;
 }
 
+/** Tags as people write them: trimmed, at most 30 characters each, no repeats (whatever the capitals), at most six. */
+export function cleanTags(raw: unknown): string[] {
+  const out: string[] = [];
+  for (const t of Array.isArray(raw) ? raw : []) {
+    const tag = typeof t === "string" ? t.replace(/[\s,#]+/g, " ").trim().slice(0, 30).trim() : "";
+    if (tag && !out.some((o) => o.toLowerCase() === tag.toLowerCase())) out.push(tag);
+  }
+  return out.slice(0, 6);
+}
+
 export async function indexDoc(entity_type: string, entity_id: string, title: string, body: string) {
   await q(
     `INSERT INTO search_docs (entity_type, entity_id, title, body, ts) VALUES ($1,$2,$3,$4, now())

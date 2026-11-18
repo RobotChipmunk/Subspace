@@ -17,8 +17,18 @@ struct TodosDetail: View {
     @State private var sentSeen: Bool = false
     @State private var problem: String? = nil
     @State private var saver = TodosSaver()
+    /// The field that adds a tag is open in place of the "Add tag" pill.
+    @State private var addingTag: Bool = false
+    /// Whether the open tag field has had the keyboard. Losing it closes the field, but only after it had it.
+    @State private var tagFieldFocused: Bool = false
+    @State private var tagText: String = ""
+    /// Tag changes on their way to the server; what comes back meanwhile does not undo them.
+    @State private var tagBusy: Int = 0
+    /// The rail has been told this task was opened.
+    @State private var railTold: Bool = false
     @FocusState private var titleFocused: Bool
     @FocusState private var notesFocused: Bool
+    @FocusState private var tagFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,6 +52,10 @@ struct TodosDetail: View {
             configure()
             await poll()
         }
+        .onChange(of: tagText) { _, now in
+            if now.count > 30 { tagText = String(now.prefix(30)) }
+        }
+        .onChange(of: tagFocused) { _, on in tagFocusChanged(on) }
         .onDisappear {
             // leaving by any road: what was typed still goes to the server
             let waiting = saver
@@ -121,7 +135,9 @@ struct TodosDetail: View {
         let nextID = todo.done ? todo.next_id : nil
         let nextDate = todo.done ? todo.next_date : nil
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+            // One row of pills: the date, how often it repeats, then its tags and the way to add
+            // one. They wrap together on a narrow screen.
+            FlowRow(spacing: 6) {
                 Button {
                     withAnimation(.ssSoft) { showCalendar.toggle() }
                 } label: {
@@ -143,7 +159,11 @@ struct TodosDetail: View {
                 TodosRepeatMenu(rule: rule) { value in
                     Task { await setRepeat(value) }
                 }
+
+                tagPills(todo.tags ?? [])
             }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
             if showCalendar, let today = store.today {
                 monthCalendar(todo, today: today)
                     .transition(.opacity)
@@ -190,6 +210,174 @@ struct TodosDetail: View {
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
             .shadow(color: Theme.shadowLift, radius: 18, y: 8)
             .accessibilityIdentifier("todos.detail.calendar")
+    }
+
+    // MARK: Tags
+
+    /// Quiet chips, each with a way to take it off, and a pill that opens into a field to add one.
+    /// They follow the date and repeat pills (each is its own item in that row, so they wrap one
+    /// by one). While the field is open, tags other tasks already carry are offered beside it.
+    @ViewBuilder private func tagPills(_ tags: [String]) -> some View {
+        ForEach(tags, id: \.self) { tag in
+            tagChip(tag)
+        }
+        if tags.count < 6 {
+            tagAdder
+            if addingTag {
+                ForEach(tagSuggestions(tags), id: \.self) { tag in
+                    suggestionChip(tag)
+                }
+            }
+        }
+    }
+
+    /// Tags the tasks already use, offered while one is being typed: those that contain what is
+    /// typed, without the ones this task already has.
+    private func tagSuggestions(_ tags: [String]) -> [String] {
+        let typed = journalCleanTag(tagText).lowercased()
+        var out: [String] = []
+        for item in store.knownTags {
+            if out.count >= 6 { break }
+            let lower = item.tag.lowercased()
+            if tags.contains(where: { $0.lowercased() == lower }) { continue }
+            if typed.isEmpty || lower.contains(typed) { out.append(item.tag) }
+        }
+        return out
+    }
+
+    private func suggestionChip(_ tag: String) -> some View {
+        Button {
+            tagText = ""
+            closeTagField()
+            chooseTags((todo?.tags ?? []) + [tag])
+        } label: {
+            Text(tag)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink3)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+                .overlay(Capsule().strokeBorder(Theme.fill2, lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle(scale: 0.95))
+        .accessibilityLabel("Add tag \(tag)")
+        .accessibilityIdentifier("todos.detail.tags.suggest.\(tag)")
+    }
+
+    private func tagChip(_ tag: String) -> some View {
+        HStack(spacing: 0) {
+            Text(tag)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.ink2)
+                .lineLimit(1)
+                .accessibilityIdentifier("todos.detail.tags.item.\(tag)")
+            Button {
+                chooseTags((todo?.tags ?? []).filter { $0 != tag })
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.ink3)
+                    .frame(width: 28, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle(scale: 0.9))
+            .accessibilityLabel("Remove tag \(tag)")
+            .accessibilityIdentifier("todos.detail.tags.remove.\(tag)")
+        }
+        .padding(.leading, 12)
+        .frame(height: 36)
+        .background(Theme.fill, in: Capsule())
+    }
+
+    @ViewBuilder private var tagAdder: some View {
+        if addingTag {
+            TextField("Tag", text: $tagText)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink)
+                .tint(Theme.accent)
+                .submitLabel(.done)
+                .focused($tagFocused)
+                .onSubmit {
+                    addTag()
+                    closeTagField()
+                }
+                .onAppear { tagFocused = true }
+                .frame(width: 120)
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(Theme.fill, in: Capsule())
+                .accessibilityLabel("New tag")
+                .accessibilityIdentifier("todos.detail.tags.field")
+        } else {
+            Button {
+                tagFieldFocused = false
+                withAnimation(.ssSoft) { addingTag = true }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                    Text("Add tag").font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(Theme.ink3)
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle(scale: 0.95))
+            .accessibilityLabel("Add tag")
+            .accessibilityIdentifier("todos.detail.tags.add")
+        }
+    }
+
+    /// Adds what is typed as a tag, unless the task already has it. One the tasks already use
+    /// keeps the spelling it has there.
+    private func addTag() {
+        let typed = journalCleanTag(tagText)
+        tagText = ""
+        let tags = todo?.tags ?? []
+        let lower = typed.lowercased()
+        if typed.isEmpty || tags.contains(where: { $0.lowercased() == lower }) { return }
+        let known = store.knownTags.first(where: { $0.tag.lowercased() == lower })?.tag
+        chooseTags(tags + [known ?? typed])
+    }
+
+    /// Shows the task's new tags at once and saves them behind.
+    private func chooseTags(_ next: [String]) {
+        guard var current = todo else { return }
+        current.tags = next
+        withAnimation(.ssSoft) { todo = current }
+        tagBusy += 1
+        let api = app.api
+        let path = "todos/\(id)"
+        Task {
+            do {
+                let fresh: Todo = try await api.send("PATCH", path, body: ["tags": next])
+                tagBusy -= 1
+                problem = nil
+                if tagBusy == 0 { take(fresh) }
+            } catch {
+                tagBusy -= 1
+                problem = error.localizedDescription
+            }
+            // the lists offer the tags the tasks carry
+            await store.refreshFolders()
+        }
+    }
+
+    /// Closes the tag field and lets go of the keyboard, so no focus on a field that is gone lingers.
+    private func closeTagField() {
+        tagFieldFocused = false
+        withAnimation(.ssSoft) { addingTag = false }
+        if tagFocused { tagFocused = false }
+    }
+
+    private func tagFocusChanged(_ on: Bool) {
+        if on {
+            tagFieldFocused = true
+        } else if addingTag && tagFieldFocused {
+            addTag()
+            closeTagField()
+        }
     }
 
     @ViewBuilder private func origin(_ todo: Todo) -> some View {
@@ -295,7 +483,7 @@ struct TodosDetail: View {
     /// The same choices as the web's "Move to" picker.
     private func moveOptions(_ todo: Todo) -> [TodosFolder] {
         store.folders.filter { folder in
-            folder.key != "week" && folder.key != "later" && (folder.guest == nil || folder.guest == todo.guest_id)
+            folder.key != "week" && folder.key != "later" && folder.key != TodosStore.allKey && (folder.guest == nil || folder.guest == todo.guest_id)
         }
     }
 
@@ -325,6 +513,12 @@ struct TodosDetail: View {
             let fresh: Todo = try await app.api.get("todos/\(id)")
             take(fresh)
             problem = nil
+            // Reading the task is opening it. A rail module that pointed here, and asked to be
+            // cleared by that, has gone: let the rail catch up.
+            if !railTold {
+                railTold = true
+                if app.rail.contains(where: { $0.task?.id == id }) { await app.refreshRail() }
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -333,7 +527,10 @@ struct TodosDetail: View {
     }
 
     private func take(_ fresh: Todo) {
-        todo = fresh
+        var next = fresh
+        // tags changed here and not yet saved are kept over what the server last knew
+        if tagBusy > 0, let mine = todo?.tags { next.tags = mine }
+        todo = next
         if !titleLoaded {
             title = fresh.title
             titleLoaded = true
@@ -386,6 +583,8 @@ struct TodosDetail: View {
         if saved == nil {
             withAnimation(.ssSpring) { setDone(was) }
         }
+        // a rail module about this task goes when it is finished, and returns if it is unticked
+        await app.refreshRail()
     }
 
     private func setDone(_ value: Bool) {
@@ -464,6 +663,7 @@ struct TodosDetail: View {
     private func close() async {
         titleFocused = false
         notesFocused = false
+        tagFocused = false
         await saver.flush()
         await commitTitle()
         store.closeDetail()

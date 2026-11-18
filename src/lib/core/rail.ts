@@ -1,8 +1,9 @@
 /**
- * The rail: a column of small modules beside the main content, for timely things the owner needs
- * to know that are not news. "Your hotel today", "Flight leaves at 6:40", "Passport expires in
- * three weeks". Each module is a title plus a few compact blocks (the same blocks pages use), has
- * an expiry so it clears itself, and is identified by a key so its author updates it in place.
+ * The rail: a column of small modules beside the main content, for short-lived things the owner
+ * must see: what is happening today ("Your hotel today", "Flight leaves at 6:40"), and anything an
+ * agent needs them to follow up, which points at a task in their list. Each module is a title plus
+ * a few compact blocks (the same blocks pages use), has an expiry so it clears itself, is identified
+ * by a key so its author updates it in place, and says what clears it from the rail (clears_on).
  */
 import { validateBlock, type AnyBlock } from "../blocks";
 import { q, q1 } from "../db";
@@ -16,6 +17,18 @@ export type RailAction = { label: string; url: string };
 /** info: something to know. warning: something may go wrong or needs a decision. error: something failed. */
 export const RAIL_LEVELS = ["info", "warning", "error"] as const;
 export type RailLevel = (typeof RAIL_LEVELS)[number];
+/**
+ * What takes a module off the rail before it runs out. Its author chooses one:
+ * - dismiss: nothing but the owner dismissing it. For things to know (a booking, the day's plan).
+ * - action: the owner taps one of its buttons (an action, its page or its task).
+ * - todo_open: the owner opens the task it points at, from here or from their list.
+ * - todo_done: the task it points at is finished. Opening it is not enough.
+ * Whatever is chosen, a module about a task is gone while that task is finished or deleted, the
+ * owner can dismiss any module, and its author can remove it.
+ */
+export const RAIL_CLEARS = ["dismiss", "action", "todo_open", "todo_done"] as const;
+/** place: a task waiting for a day (one a guest added) clears by being given one. Never chosen by an agent. */
+export type RailClear = (typeof RAIL_CLEARS)[number] | "place";
 export type RailModule = {
   id: string;
   key: string;
@@ -29,6 +42,10 @@ export type RailModule = {
   actions: RailAction[];
   page_id: string | null;
   page?: { id: string; title: string } | null;
+  /** The task in the owner's list this module is about, if any. */
+  todo_id: string | null;
+  task?: { id: string; title: string } | null;
+  clears_on: RailClear;
   /** Set on a module that stands for a task waiting for a day (one a guest added): it shows until the owner places it. */
   todo?: { id: string; guest: string };
   priority: number;
@@ -40,6 +57,9 @@ export type RailModule = {
 };
 
 const okLink = (u: unknown) => typeof u === "string" && /^(https:\/\/|tel:|mailto:|sms:|\/page\/)/.test(u) && u.length < 2000;
+
+/** A module about a task shows only while that task is still to do. */
+const TASK_OPEN = "(m.todo_id IS NULL OR EXISTS (SELECT 1 FROM todos t WHERE t.id = m.todo_id AND NOT t.done AND t.deleted_at IS NULL))";
 
 /** "2026-11-14" means the end of that day where the owner lives; anything else is read as a date and time. */
 async function instant(v: unknown, endOfDay: boolean, what: string): Promise<string> {
@@ -67,6 +87,10 @@ export async function setModule(
     blocks?: unknown;
     actions?: unknown;
     page?: string;
+    /** id of the task in the owner's list this module is about; adds an "Open task" button */
+    todo?: string;
+    /** what clears the module from the rail: dismiss, action, todo_open or todo_done */
+    clears_on?: string;
     priority?: number;
     show_from?: string;
     show_until: string;
@@ -113,6 +137,20 @@ export async function setModule(
     pageId = p.id;
   }
 
+  let todoId: string | null = null;
+  if (input.todo) {
+    const ref = String(input.todo).trim().replace(/^\/todos\?open=/, "");
+    const t = await q1<{ id: string; done: boolean; deleted_at: string | null }>("SELECT id, done, deleted_at FROM todos WHERE id = $1", [ref]);
+    if (!t || t.deleted_at) throw notFound(`No todo "${input.todo}". Add the task with todo_add first, then pass the id it returns.`);
+    if (t.done) throw bad("That todo is already done, so there is nothing left to follow up.");
+    todoId = t.id;
+  }
+  // A module about a task clears once the owner has opened the task, unless its author says otherwise.
+  const clears = (input.clears_on ?? (todoId ? "todo_open" : "dismiss")) as (typeof RAIL_CLEARS)[number];
+  if (!RAIL_CLEARS.includes(clears)) throw bad(`clears_on says what takes the module off the rail. Use one of: ${RAIL_CLEARS.join(", ")}.`);
+  if ((clears === "todo_open" || clears === "todo_done") && !todoId) throw bad(`clears_on "${clears}" needs todo: the id of the task in the owner's list that this module is about.`);
+  if (clears === "action" && !actions.length && !pageId && !todoId) throw bad('clears_on "action" needs something for the owner to tap: an action button, a page or a todo.');
+
   const until = await instant(input.show_until, true, "show_until");
   const from = input.show_from ? await instant(input.show_from, false, "show_from") : new Date().toISOString();
   if (new Date(until) <= new Date()) throw bad("show_until is in the past. A module shows only while it is relevant.");
@@ -120,22 +158,24 @@ export async function setModule(
 
   const mine = await q1<RailModule>("SELECT * FROM rail_modules WHERE author = $1 AND key = $2", [actor.id, key]);
   if (!mine) {
-    const live = (await q1<{ n: number }>("SELECT count(*)::int AS n FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()"))!.n;
+    const live = (await q1<{ n: number }>(`SELECT count(*)::int AS n FROM rail_modules m WHERE m.dismissed_at IS NULL AND m.show_until > now() AND ${TASK_OPEN}`))!.n;
     if (live >= RAIL_MAX) throw bad(`The rail already holds ${live} modules. Remove one that is no longer needed (rail_remove) before adding another; see explore("/rail").`);
   }
-  const content = JSON.stringify({ title, subtitle, label, level, image: input.image ?? null, blocks, actions, pageId });
-  const same = mine && JSON.stringify({ title: mine.title, subtitle: mine.subtitle, label: mine.label, level: mine.level, image: mine.image, blocks: mine.blocks, actions: mine.actions, pageId: mine.page_id }) === content;
+  const content = JSON.stringify({ title, subtitle, label, level, image: input.image ?? null, blocks, actions, pageId, todoId, clears });
+  const same =
+    mine &&
+    JSON.stringify({ title: mine.title, subtitle: mine.subtitle, label: mine.label, level: mine.level, image: mine.image, blocks: mine.blocks, actions: mine.actions, pageId: mine.page_id, todoId: mine.todo_id, clears: mine.clears_on }) === content;
   const id = mine?.id ?? newId("r");
-  // Changed content brings back a module the owner had dismissed; a mere refresh does not.
+  // Changed content brings back a module the owner had dismissed or cleared; a mere refresh does not.
   await q(
-    `INSERT INTO rail_modules (id, key, author, title, subtitle, label, image, blocks, actions, page_id, priority, show_from, show_until, level)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$15)
+    `INSERT INTO rail_modules (id, key, author, title, subtitle, label, image, blocks, actions, page_id, priority, show_from, show_until, level, todo_id, clears_on)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$15,$16,$17)
      ON CONFLICT (author, key) DO UPDATE SET level = EXCLUDED.level, title = EXCLUDED.title, subtitle = EXCLUDED.subtitle, label = EXCLUDED.label, image = EXCLUDED.image,
-       blocks = EXCLUDED.blocks, actions = EXCLUDED.actions, page_id = EXCLUDED.page_id, priority = EXCLUDED.priority, show_from = EXCLUDED.show_from,
-       show_until = EXCLUDED.show_until, updated_at = now(), dismissed_at = CASE WHEN $14 THEN rail_modules.dismissed_at ELSE NULL END`,
-    [id, key, actor.id, title, subtitle, label, input.image ?? null, JSON.stringify(blocks), JSON.stringify(actions), pageId, Math.max(0, Math.min(Number(input.priority) || 0, 10)), from, until, !!same, level],
+       blocks = EXCLUDED.blocks, actions = EXCLUDED.actions, page_id = EXCLUDED.page_id, todo_id = EXCLUDED.todo_id, clears_on = EXCLUDED.clears_on, priority = EXCLUDED.priority,
+       show_from = EXCLUDED.show_from, show_until = EXCLUDED.show_until, updated_at = now(), dismissed_at = CASE WHEN $14 THEN rail_modules.dismissed_at ELSE NULL END`,
+    [id, key, actor.id, title, subtitle, label, input.image ?? null, JSON.stringify(blocks), JSON.stringify(actions), pageId, Math.max(0, Math.min(Number(input.priority) || 0, 10)), from, until, !!same, level, todoId, clears],
   );
-  if (!same) await logEvent({ actor: actor.id, type: mine ? "rail.updated" : "rail.added", entity_type: "rail", entity_id: id, summary: `${level === "info" ? "" : level.toUpperCase() + ": "}${title}${label ? ` (${label})` : ""}`, data: { key, level } });
+  if (!same) await logEvent({ actor: actor.id, type: mine ? "rail.updated" : "rail.added", entity_type: "rail", entity_id: id, summary: `${level === "info" ? "" : level.toUpperCase() + ": "}${title}${label ? ` (${label})` : ""}`, data: { key, level, clears_on: clears, ...(todoId ? { todo: todoId } : {}) } });
   return (await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1", [id]))!;
 }
 
@@ -148,16 +188,22 @@ export async function activeModules(): Promise<RailModule[]> {
 }
 
 async function storedModules(): Promise<RailModule[]> {
-  const rows = await q<RailModule>("SELECT * FROM rail_modules WHERE dismissed_at IS NULL AND show_from <= now() AND show_until > now() ORDER BY CASE level WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, priority DESC, show_until, created_at");
+  const rows = await q<RailModule>(
+    `SELECT m.* FROM rail_modules m WHERE m.dismissed_at IS NULL AND m.show_from <= now() AND m.show_until > now() AND ${TASK_OPEN}
+     ORDER BY CASE m.level WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, m.priority DESC, m.show_until, m.created_at`,
+  );
   const ids = [...new Set(rows.map((r) => r.page_id).filter(Boolean))] as string[];
   const pages = ids.length ? await q<{ id: string; title: string }>("SELECT id, title FROM context_nodes WHERE id = ANY($1) AND NOT archived", [ids]) : [];
-  return rows.map((r) => ({ ...r, page: pages.find((p) => p.id === r.page_id) ?? null }));
+  const taskIds = [...new Set(rows.map((r) => r.todo_id).filter(Boolean))] as string[];
+  const tasks = taskIds.length ? await q<{ id: string; title: string }>("SELECT id, title FROM todos WHERE id = ANY($1)", [taskIds]) : [];
+  return rows.map((r) => ({ ...r, page: pages.find((p) => p.id === r.page_id) ?? null, task: tasks.find((t) => t.id === r.todo_id) ?? null }));
 }
 
-/** Everything not yet expired, including modules scheduled for later and ones the owner dismissed. For agents. */
+/** Everything not yet expired, including modules scheduled for later and ones the owner dismissed or cleared. For agents. */
 export async function allModules() {
-  return q<RailModule & { handle: string }>(
-    "SELECT m.*, a.handle FROM rail_modules m JOIN agents a ON a.id = m.author WHERE m.show_until > now() ORDER BY m.dismissed_at IS NOT NULL, m.priority DESC, m.show_until",
+  return q<RailModule & { handle: string; task_done: boolean | null }>(
+    `SELECT m.*, a.handle, (SELECT t.done OR t.deleted_at IS NOT NULL FROM todos t WHERE t.id = m.todo_id) AS task_done
+     FROM rail_modules m JOIN agents a ON a.id = m.author WHERE m.show_until > now() ORDER BY m.dismissed_at IS NOT NULL, m.priority DESC, m.show_until`,
   );
 }
 
@@ -165,6 +211,12 @@ export async function getModule(ref: string) {
   const m = await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1 OR key = $1 ORDER BY updated_at DESC LIMIT 1", [ref]);
   if (!m) throw notFound(`No rail module "${ref}".`);
   return m;
+}
+
+/** Says in the log that a module left the rail and why, addressed to the agent that put it there. */
+async function logGone(actor: Agent, m: RailModule, type: string, by: string, summary: string) {
+  const author = await q1<{ handle: string }>("SELECT handle FROM agents WHERE id = $1", [m.author]);
+  await logEvent({ actor: actor.id, type, entity_type: "rail", entity_id: m.id, summary, data: { key: m.key, by, author: author?.handle, ...(m.todo_id ? { todo: m.todo_id } : {}) } });
 }
 
 /** An agent removes its own module by key; the owner dismisses any module by id. */
@@ -176,6 +228,36 @@ export async function removeModule(actor: Agent, ref: string) {
   if (!m) throw notFound(actor.kind === "human" ? "No such module." : `You have no rail module "${ref}". You can only remove your own.`);
   if (actor.kind === "human") await q("UPDATE rail_modules SET dismissed_at = now() WHERE id = $1", [m.id]);
   else await q("DELETE FROM rail_modules WHERE id = $1", [m.id]);
-  await logEvent({ actor: actor.id, type: actor.kind === "human" ? "rail.dismissed" : "rail.removed", entity_type: "rail", entity_id: m.id, summary: m.title, data: { key: m.key } });
+  if (actor.kind === "human") await logGone(actor, m, "rail.dismissed", "dismiss", m.title);
+  else await logEvent({ actor: actor.id, type: "rail.removed", entity_type: "rail", entity_id: m.id, summary: m.title, data: { key: m.key } });
   return { ok: true };
+}
+
+/**
+ * The owner tapped one of a module's buttons (an action, its page or its task). A module that
+ * clears on that leaves the rail; any other stays. Safe to call for every tap.
+ */
+export async function moduleActed(actor: Agent, id: string) {
+  if (actor.kind !== "human") return { cleared: false };
+  const m = await q1<RailModule>("UPDATE rail_modules SET dismissed_at = now() WHERE id = $1 AND clears_on = 'action' AND dismissed_at IS NULL RETURNING *", [id]);
+  if (m) await logGone(actor, m, "rail.cleared", "action", `${m.title}: the owner used it`);
+  return { cleared: !!m };
+}
+
+/**
+ * Something happened to a task that modules point at.
+ * - todo_open: the owner has it open. Modules that clear on that leave the rail for good.
+ * - todo_done, todo_deleted: nothing is left to follow up, so every module about it is gone from
+ *   the rail. They are hidden rather than dismissed (see TASK_OPEN), so unticking the task, or
+ *   bringing it back from the bin, shows them again.
+ * Each module's author is told.
+ */
+export async function taskChanged(actor: Agent, todoId: string, what: "todo_open" | "todo_done" | "todo_deleted") {
+  const rows =
+    what === "todo_open"
+      ? await q<RailModule>("UPDATE rail_modules SET dismissed_at = now() WHERE todo_id = $1 AND clears_on = 'todo_open' AND dismissed_at IS NULL AND show_from <= now() AND show_until > now() RETURNING *", [todoId])
+      : await q<RailModule>("SELECT * FROM rail_modules WHERE todo_id = $1 AND dismissed_at IS NULL AND show_until > now()", [todoId]);
+  const said = { todo_open: "the owner opened the task", todo_done: "the task is done", todo_deleted: "the task was deleted" }[what];
+  for (const m of rows) await logGone(actor, m, "rail.cleared", what, `${m.title}: ${said}`);
+  return rows.length;
 }

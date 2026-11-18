@@ -222,6 +222,10 @@ export async function waitingModules(): Promise<RailModule[]> {
       actions: [],
       page_id: null,
       page: null,
+      todo_id: null,
+      task: null,
+      // it leaves the rail by being given a day
+      clears_on: "place",
       priority: 0,
       show_from: t.created_at,
       show_until: t.created_at,

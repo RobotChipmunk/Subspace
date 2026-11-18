@@ -227,9 +227,10 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         title: "Todos",
         about: `Today is ${f.today}. Unfinished tasks roll forward automatically.`,
         children: [
-          ...f.folders.map((x) => ({ path: `/todos/${x.key}`, title: x.label + (x.hint ? ` (${x.hint})` : ""), count: x.count })),
+          ...f.folders.map((x) => ({ path: `/todos/${x.key}`, title: x.label + (x.hint ? ` (${x.hint})` : ""), ...(x.key === "all" ? { about: "Every unfinished task, wherever it is." } : {}), count: x.count })),
           { path: "/todos/done", title: "Done", about: "Completed tasks, by time." },
         ],
+        ...(f.tags.length ? { tags: f.tags.map((t) => ({ tag: t.tag, open: t.count })), hint: "tags are the labels the owner's tasks carry. Reuse one of these on a task you add rather than inventing a near-duplicate; todo_list(view, tag) narrows a list to one." } : {}),
       };
     }
     if (a === "done") {
@@ -246,7 +247,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       path: `/todos/${a}`,
       title: `Todos · ${a}`,
       count: l.todos.length,
-      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.has_notes ? { has_notes: true } : {}), ...share.tag(t.guest_id) })),
+      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope, ...(a === "all" && t.date ? { date: t.date } : {}) }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...share.tag(t.guest_id) })),
       hint: "read([id]) returns a todo's notes. A task marked shared_with is seen by that person: write nothing into it that is not meant for them.",
     };
   }
@@ -286,7 +287,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     return {
       path: "/rail",
       title: "Rail",
-      about: "Small modules beside the owner's screen for timely things that are not news. Check here before adding one, so nothing is shown twice.",
+      about: "Small modules beside the owner's screen for short-lived things they must see: what is happening today, and anything an agent needs them to follow up (each of those points at a task in their list). Check here before adding one, so nothing is shown twice.",
       items: mods.map((m) => ({
         id: m.id,
         key: m.key,
@@ -295,9 +296,11 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         ...(m.label ? { label: m.label } : {}),
         until: m.show_until,
         ...(new Date(m.show_from) > new Date() ? { from: m.show_from } : {}),
-        ...(m.dismissed_at ? { dismissed_by_owner: true } : {}),
+        ...(m.todo_id ? { todo: m.todo_id } : {}),
+        clears_on: m.clears_on,
+        ...railGone(m),
       })),
-      hint: "read([id]) returns a module in full. rail_set(key, ...) adds or updates your own; rail_remove(key) takes it down.",
+      hint: "read([id]) returns a module in full. rail_set(key, ...) adds or updates your own; rail_remove(key) takes it down. clears_on says what takes each one off the rail; cleared_by_owner or dismissed_by_owner means the owner has seen it and it is no longer showing.",
     };
   }
 
@@ -499,7 +502,10 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
       if (tagged.length) item.mentions = tagged.map((h) => "@" + h);
       if (others.length) item.agents_in_thread = others.map((h) => "@" + h);
     }
-    const direct = e.mentions.includes(agent.handle) || e.type === "job.created" || (typeof e.data?.tracker === "string" && mine.has(e.data.tracker));
+    // the owner dismissed or cleared a rail module this agent put up: it should know they have seen it
+    const myModule = (e.type === "rail.cleared" || e.type === "rail.dismissed") && e.data?.author === agent.handle;
+    if (myModule && e.data?.todo) item.todo = e.data.todo;
+    const direct = e.mentions.includes(agent.handle) || e.type === "job.created" || myModule || (typeof e.data?.tracker === "string" && mine.has(e.data.tracker));
     (direct ? for_you : other).push(item);
   }
   const head = (await q1<{ seq: number }>("SELECT COALESCE(max(seq), 0) AS seq FROM events"))!.seq;
@@ -598,6 +604,10 @@ export async function search(opts: { query: string; types?: string[]; since?: st
 
 // ---------- Read ----------
 
+/** Why a rail module is no longer showing, if it is not: the owner dismissed it, or did the thing that clears it. */
+const railGone = (m: { dismissed_at: string | null; clears_on: string; task_done?: boolean | null }) =>
+  m.dismissed_at ? (m.clears_on === "dismiss" ? { dismissed_by_owner: true } : { cleared_by_owner: true }) : m.task_done ? { task_done: true } : {};
+
 const slimPost = (p: Post, handles: Map<string, string>) => ({
   id: p.id,
   by: "@" + (handles.get(p.author) ?? p.author),
@@ -619,7 +629,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
     try {
       if (id.startsWith("r_")) {
         const m = await getModule(id);
-        out.push({ type: "rail", id: m.id, key: m.key, by: "@" + (handles.get(m.author) ?? m.author), title: m.title, label: m.label, subtitle: m.subtitle, blocks: m.blocks, actions: m.actions, ...(m.page_id ? { page: m.page_id } : {}), from: m.show_from, until: m.show_until, ...(m.dismissed_at ? { dismissed_by_owner: true } : {}) });
+        out.push({ type: "rail", id: m.id, key: m.key, by: "@" + (handles.get(m.author) ?? m.author), title: m.title, label: m.label, subtitle: m.subtitle, blocks: m.blocks, actions: m.actions, ...(m.page_id ? { page: m.page_id } : {}), ...(m.todo_id ? { todo: m.todo_id } : {}), clears_on: m.clears_on, from: m.show_from, until: m.show_until, ...railGone(m) });
       } else if (id.startsWith("p_")) {
         const t = await getThread(id, { after: opts.after, limit: 60 });
         out.push({
@@ -633,7 +643,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         });
       } else if (id.startsWith("t_")) {
         const t = await getTodo(id);
-        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(await sharingFor([t.guest_id])).warning(t.guest_id), notes: t.notes, updated_at: t.updated_at });
+        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.tags?.length ? { tags: t.tags } : {}), ...(await sharingFor([t.guest_id])).warning(t.guest_id), notes: t.notes, updated_at: t.updated_at });
       } else if (id.startsWith("f_") || (!id.startsWith("c_") && !id.includes("/") && (await q1("SELECT 1 FROM trackers WHERE slug = $1", [id])))) {
         const t = await getTracker(id);
         out.push({
@@ -714,7 +724,10 @@ export async function briefing(agent: Agent) {
       open_jobs: peek.open_jobs?.length ?? 0,
       next: "Call changes() to see them and move your cursor forward.",
     },
-    rail: (await allModules()).filter((m) => !m.dismissed_at).map((m) => ({ key: m.key, by: "@" + m.handle, title: m.title, until: m.show_until })),
+    rail: (await allModules()).filter((m) => !m.dismissed_at && !m.task_done).map((m) => ({ key: m.key, by: "@" + m.handle, title: m.title, until: m.show_until, ...(m.todo_id ? { todo: m.todo_id } : {}) })),
+    // said here as well as in the guide: an app may hold an old copy of the instructions, but it reads this every session
+    when_you_need_the_owner:
+      'The feed is for reading and the owner may never see a given post, so never ask for anything in a post or a reply under your own post. Add a task with what they need in its notes (todo_add, tagged with its subject), then point a rail module at it: rail_set with todo set to the task\'s id and clears_on "todo_open". guide("followups") has the steps.',
     recent_pages: (await recentPages(5)).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })),
     your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),

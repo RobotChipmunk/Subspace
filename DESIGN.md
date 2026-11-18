@@ -166,7 +166,19 @@ Patterns:
   until the module is opened; expands in place; errors first in
   red, warnings in amber. There is no toggle: from 1100px it docks on its own whenever it has
   modules and is absent when it has none. Below that, a Now button with a count appears in the nav
-  only while there are modules, and opens the rail as a sheet.
+  only while there are modules, and opens the rail as a sheet. A button that leads to another
+  screen of the app closes the sheet behind it.
+- **What clears a module** (`clears_on` in `core/rail.ts`): everything in the rail is transient,
+  and each module says what takes it away before it runs out. `dismiss`: only its Dismiss. `action`:
+  a tap on any of its buttons. `todo_open`: the owner opening the task it points at, from the
+  module or from the list. `todo_done`: that task being finished. A module about a task is also
+  gone while the task is done or deleted, and Dismiss is always there. The module itself says
+  nothing about this; it simply leaves when its job is done. A new kind of module chooses one of
+  these rather than inventing its own way out.
+- **Follow-ups** (rail and todos): the feed is for reading, so nothing that needs the owner goes
+  there. What an agent needs done is a task in the list, tagged, with the detail in its notes, and
+  a two-line rail module that points at it. Opened, the module has "Open task" first among its
+  buttons; that opens the task, and having opened it the module is gone (`todo_open`).
 - **Confirm delete** (`ConfirmDelete.tsx`): the only way to remove anything. A quiet bin; the
   first tap arms it into a red pill with the action's name; the second tap does it; it disarms
   after 4 seconds, on Escape, or on a tap elsewhere. Use it for every destructive action.
@@ -209,6 +221,24 @@ Patterns:
   side effect.
 - **Later** (todos): a list of tasks dated beyond next week, grouped by day. Like the bin, it
   is listed only while it holds something, and nothing is added to it directly.
+- **All** (todos): every unfinished task, wherever it is; a view across the lists, set a little
+  apart at their end. Its sections run the way the lists do: Today, This week, the days and weeks
+  after (named as a date pill names them: "Tomorrow", "Thursday", "Next week"), then Backlog and
+  "Waiting for a day". Each section that is a place adds and takes carried tasks like the list it
+  stands for; nothing can be carried onto "All" itself.
+- **Tags on a task** (`TagPills.tsx`, shared with the journal): in a task they follow the date and
+  repeat pills in the same row, as quiet chips with a remove button each, then "Add tag", which
+  opens into a field offering the tags tasks already carry (at most six). In a list a task shows
+  its first two tags at the end of its row as small `fill` chips with `ink2` text, and "+2" for
+  the rest. Never coloured.
+- **Tag filter** (`TagFilter` in `todos/page.tsx`): on any list that has tagged tasks, a quiet
+  control at the right of the heading: a tag icon and "Tags" in `ink3`, no surface. Tapping it
+  drops a menu of that list's tags with counts; each is ticked on and off, and the list shows the
+  tasks carrying every ticked one, so each tick narrows it further. While a choice is made the control is `accent-soft` and
+  names it, and "Show all" in the menu takes it off. The choice belongs to the list it was made
+  on and is dropped on leaving it, so no task is hidden by a choice made elsewhere. A task added
+  while the list is narrowed takes the chosen tags. On a list with no tagged tasks the control is
+  absent. In the iOS app it is the system menu, which stays open while tags are ticked.
 - **Journal** (`journal/page.tsx`): the owner's own writing, arranged by time. Under small month
   headings, newest first, each entry is a 22px glass card. It names its day once, at the left
   (the day number, in accent when it is today, over the short weekday; later entries of the same
@@ -231,7 +261,8 @@ Patterns:
   the one sentence worth remembering, with its mood first among the chips and its pictures
   beneath. The gist shows under an entry's title too. This is the same
   far-to-near reading agents get: months, then a line per entry, then the entry.
-- **Tags** (journal): quiet chips, `fill` with `ink2` text, never coloured. On an entry they share
+- **Tags** (journal): quiet chips, `fill` with `ink2` text, never coloured (`TagPills.tsx`, the
+  same component a task uses). On an entry they share
   the top row with the date and mood pills; each chip carries a small remove button, and a "Tag"
   pill after them opens into a field (known tags are
   offered as the owner types; at most six). The app chooses an entry's tags from its text a moment
@@ -255,6 +286,10 @@ Patterns:
 
 Plain words, sentence case, no exclamation marks. Buttons say what they do ("Add a link",
 "Stop following"). Errors say what happened and what to do next. Times are relative when recent.
+
+The feed is for reading: updates and information the owner may or may not get to. Nothing in it
+asks them for anything; what needs them is a task with a rail module pointing at it (see
+"Follow-ups" above, and `guide("followups")` in `guide.ts`).
 
 What agents write stays about the owner's things, never about the agents' own machinery.
 Comments under a post are about the story; process notes (sources checked, coverage, syncs,
