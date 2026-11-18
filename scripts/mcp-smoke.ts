@@ -1,5 +1,7 @@
 /** End-to-end check of the MCP surface against the database in DATABASE_URL. */
 import { createAgent, issueToken } from "../src/lib/core/agents";
+import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
+import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
 import { handleMcp } from "../src/lib/mcp/server";
 import { q } from "../src/lib/db";
@@ -124,14 +126,63 @@ async function main() {
   await call(s, "search", { query: "robot", types: ["context"] });
   await call(s, "read", { ids: [p.id, t.id, c.id, tr.slug] });
   await call(s, "todo_list", {});
-  // a follow-up: a tagged task, and a rail module that points at it and says what clears it
+  // a follow-up: a tagged task, and a rail module that points at it
   const followUp = await call(s, "todo_add", { title: "Decide on the smoke test " + tag, view: "week", tags: ["smoke"], notes: "Two options, pick one." });
   const onSubject = await call(s, "todo_list", { view: "all", tag: "smoke" });
   if (!onSubject.todos.some((x: { id: string }) => x.id === followUp.id)) throw new Error("todo_list(view: all, tag) did not return the tagged task");
-  const pointer = await call(s, "rail_set", { key: "smoke-" + tag.toLowerCase().replace(/[^a-z0-9]+/g, "-"), title: "Smoke test: decide", todo: followUp.id, clears_on: "todo_open", show_until: new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10) });
-  if (pointer.todo !== followUp.id || pointer.clears_on !== "todo_open") throw new Error("rail_set did not keep the task and what clears it");
+  const railKey = "smoke-" + tag.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const until = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
+  // clears_on is what an app holding an older tool list still sends: accepted, and it changes nothing
+  const pointer = await call(s, "rail_set", { key: railKey, icon: "question", title: "Smoke test: decide", todo: followUp.id, clears_on: "todo_open", show_until: until });
+  if (pointer.todo !== followUp.id || pointer.icon !== "question") throw new Error("rail_set did not keep the task and the icon: " + JSON.stringify(pointer));
+  // a module is a notification, not a page: a second block, a long block, a third button and an unknown icon are refused, each with a reason
+  const fact = { type: "facts", items: [{ label: "Gate", value: "C7" }] };
+  const tooMuch: [string, Record<string, unknown>, RegExp][] = [
+    ["two blocks", { blocks: [fact, fact] }, /at most one block/],
+    ["five facts", { blocks: [{ type: "facts", items: Array.from({ length: 5 }, (_, i) => ({ label: "Row " + i, value: "x" })) }] }, /at most 4/],
+    ["a long callout", { blocks: [{ type: "callout", text: "word ".repeat(60) }] }, /sentence or two/],
+    ["three buttons", { actions: ["One", "Two", "Three"].map((label) => ({ label, url: "https://example.com/" })) }, /at most 2 buttons/],
+    ["an unknown icon", { icon: "rocket" }, /icon must be one of/],
+  ];
+  for (const [what, extra, why] of tooMuch) {
+    const r = await call(s, "rail_set", { key: railKey + "-x", title: "Smoke test: too much", show_until: until, ...extra });
+    if (!r.ERROR || !why.test(r.ERROR)) throw new Error(`rail_set accepted ${what}, or did not say why not: ${JSON.stringify(r)}`);
+  }
   await call(s, "todo_update", { id: followUp.id, done: true });
   await call(s, "rail_remove", { key: pointer.key });
+  // The owner acts on a module and it is gone: a tap on a button, then "Later", then closing it. Each time its author hears how.
+  const parcel = { key: railKey + "-p", icon: "package", label: "Arrives today", title: "Smoke test parcel " + tag, subtitle: "Two boxes, signature needed.", blocks: [fact], actions: [{ label: "Track parcel", url: "https://example.com/track" }], show_until: until };
+  const shown = await call(s, "rail_set", parcel);
+  await call(s, "changes");
+  const heardOf = async (type: string) => (await call(s, "changes")).for_you.find((i: any) => i.id === shown.id && i.type === type);
+  const inRail = async () => (await call(s, "explore", { path: "/rail" })).items.find((i: any) => i.key === parcel.key);
+  if (!(await moduleActed(owner, shown.id, "Track parcel")).cleared) throw new Error("a tap on a module's button did not clear it");
+  const tapped = await heardOf("rail.cleared");
+  if (tapped?.by_owner !== "action" || tapped.action !== "Track parcel") throw new Error("the author was not told which button the owner chose: " + JSON.stringify(tapped));
+  // the same content does not put a cleared module back, and the answer says so; something new does
+  const again = await call(s, "rail_set", parcel);
+  if (again.cleared_by_owner !== "action" || !again.note) throw new Error("rail_set did not say that the owner had already cleared the module: " + JSON.stringify(again));
+  const news = await call(s, "rail_set", { ...parcel, label: "Arrives tomorrow" });
+  if (news.cleared_by_owner || (await inRail())?.cleared_by_owner) throw new Error("a module with something new to say did not come back");
+  // "Later": it becomes a task of the owner's, carrying what the module said, and leaves the rail
+  const later = await moduleLater(owner, shown.id, "tomorrow");
+  const keptTask = await getTodo(later.todo!);
+  if (keptTask.title !== parcel.title || !keptTask.notes.includes("Two boxes") || !keptTask.notes.includes("```facts") || !keptTask.rail?.kept || keptTask.rail.actions[0]?.label !== "Track parcel") throw new Error("the task a module was kept as does not carry it: " + JSON.stringify(keptTask));
+  const put = await heardOf("rail.cleared");
+  if (put?.by_owner !== "later" || put.todo !== later.todo) throw new Error("the author was not told the module became a task: " + JSON.stringify(put));
+  const gone = await inRail();
+  if (gone?.cleared_by_owner !== "later" || gone.kept_as !== later.todo) throw new Error("explore(/rail) does not say the module was kept for later: " + JSON.stringify(gone));
+  // kept again after a change, it moves that task rather than making a second one
+  await call(s, "rail_set", { ...parcel, label: "Arrives Friday" });
+  if ((await moduleLater(owner, shown.id, "week")).todo !== later.todo) throw new Error("keeping a module for later twice made two tasks");
+  // closed without acting
+  await call(s, "rail_set", { ...parcel, label: "Arrives Saturday" });
+  await removeModule(owner, shown.id);
+  if (!(await heardOf("rail.dismissed")) || !(await inRail())?.dismissed_by_owner) throw new Error("the author was not told the owner dismissed the module");
+  await call(s, "rail_remove", { key: parcel.key });
+  if ((await getTodo(later.todo!)).rail) throw new Error("a task still offers the buttons of a module its author has removed");
+  await deleteTodo(owner, later.todo!);
+  await deleteTodo(owner, later.todo!, true);
   // saved links: save, save the same page again (must update, not duplicate), browse, find, read, refuse a bad address
   const l = await call(s, "link_save", { url: `https://www.example.com/articles/quiet-software-${tag}?utm_source=x`, title: "Quiet software", site: "Example Review", why: "For the Subspace design notes", about: "Essay on software that stays out of the way." });
   await call(s, "link_save", { url: `example.com/articles/quiet-software-${tag}/`, notes: "Section 3 has the part about defaults.", parent: "work" });

@@ -131,27 +131,34 @@ all. The agent-facing reference is `guide("pages")` in `src/lib/mcp/guide.ts`.
 
 ## The rail
 
-A column beside the content for short-lived things the owner must see: today's hotel, a flight,
-a delivery, a deadline, and anything an agent needs them to follow up. Each module shows only two
-lines (when, and what) until it is tapped; expanded, it has a few compact blocks (the same blocks
-pages use), optional buttons and a dismiss. Every module has an expiry. Agents add or update one
-with `rail_set(key, ...)` and take it down with `rail_remove`; the owner can dismiss any module.
-It docks on wide screens and opens as a sheet on narrow ones. Logic is in `src/lib/core/rail.ts`,
-the UI in `src/components/Rail.tsx`.
+A short stack of notifications beside the content ("Now") for short-lived things the owner must
+see: today's hotel, a flight, a delivery, a deadline, anything an agent needs them to follow up,
+and the rare problem that blocks an agent's work. A module is a glance: an icon or a small
+picture, when, what, and one button that says the one thing to do ("Get directions", "Reconnect",
+"Open task", or "Got it" when there is nothing to do). Opened, it adds one sentence, at most one
+compact block (the same blocks pages use) and a second button, and no more. Agents add or update
+one with `rail_set(key, ...)` and take it down with `rail_remove`. It docks on wide screens and
+opens as a sheet on narrow ones. Logic is in `src/lib/core/rail.ts`, the UI in
+`src/components/Rail.tsx`.
 
-Every module is transient and says what clears it (`clears_on`): `dismiss` (only the owner
-dismissing it), `action` (the owner taps one of its buttons), `todo_open` (the owner opens the
-task it points at) or `todo_done` (that task is finished). A module about a task also goes while
-the task is done or deleted. Its author hears of it through `changes` (`rail.cleared`).
+Everything in it is transient. A module leaves the moment the owner acts on it: taps any of its
+buttons, opens the task it points at, dismisses it, or chooses "Later", which puts it on a day in
+their list as a task. It also leaves when it runs out (every module has an expiry) and while its
+task is done or deleted. Agents do not choose this and cannot pin a module. What must outlast the
+rail is a task: the one the module points at, or the one "Later" made of it. That task shows the
+module's buttons, so the owner can still act from there. A module's author hears how it was
+cleared through `changes` (`rail.cleared` with `by_owner`: `action`, `todo_open` or `later`;
+`rail.dismissed`). `guide("rail")` in `src/lib/mcp/guide.ts` is the agent-facing version, with an
+example of each kind of module.
 
 ## The feed is for reading; follow-ups are tasks
 
 The feed carries updates and information, and the owner may never read a given post. So an agent
 never asks for anything there. When it needs the owner to do, decide or answer something it adds
 a task (`todo_add`, with what they need in the notes and a tag for the subject) and points a rail
-module at it (`rail_set` with `todo` and `clears_on: "todo_open"`). The module opens the task and
-leaves the rail once the owner has opened it; the task stays in their list. `guide("followups")`
-in `src/lib/mcp/guide.ts` is the agent-facing version.
+module at it (`rail_set` with `todo`). The module's button opens the task, and the module leaves
+the rail once the owner has acted on it; the task stays in their list until they finish it.
+`guide("followups")` in `src/lib/mcp/guide.ts` is the agent-facing version.
 
 ## Tags and the All list
 

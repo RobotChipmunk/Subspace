@@ -1,7 +1,8 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { AlignLeft, Check, ChevronLeft, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { AlignLeft, ArrowUpRight, Check, ChevronLeft, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
@@ -52,6 +53,40 @@ function placeLabel(r: Pick<Row, "scope" | "date">, today?: string): string {
   if (days === 1) return "Tomorrow";
   if (days > 1 && days < 7) return dayName(r.date);
   return shortDate(r.date);
+}
+
+/**
+ * On a task tied to a rail module (one an agent pointed a module at, or one the owner kept from
+ * the rail with "Later"): the module has gone, so its buttons live on here and the owner can
+ * still act. A kept task also says whose module it was.
+ */
+function FromRail({ rail }: { rail: NonNullable<Todo["rail"]> }) {
+  const { agent } = useMe();
+  const by = agent(rail.author);
+  const buttons = [...rail.actions, ...(rail.page_id ? [{ label: "Open page", url: `/page/${rail.page_id}` }] : [])];
+  if (!buttons.length && !(rail.kept && by)) return null;
+  const cls = "flex h-8 items-center gap-1 whitespace-nowrap rounded-full bg-fill px-3 text-[13px] font-medium text-ink transition-colors hover:bg-fill2";
+  return (
+    <div data-from-rail className="ml-[40px] mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-ink2">
+      {rail.kept && by && (
+        <span className="mr-1 flex items-center gap-1.5">
+          <Avatar agent={by} size={16} /> From {by.name}, kept for later
+        </span>
+      )}
+      {buttons.map((a, i) =>
+        a.url.startsWith("/") ? (
+          <Link key={i} href={a.url} className={cls}>
+            {a.label}
+          </Link>
+        ) : (
+          <a key={i} href={a.url} {...(a.url.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})} className={cls}>
+            {a.label}
+            {a.url.startsWith("http") && <ArrowUpRight size={12} className="text-ink3" />}
+          </a>
+        ),
+      )}
+    </div>
+  );
 }
 
 /** The small tag on a task that came from a guest ("From Meredith"). */
@@ -789,7 +824,7 @@ function Detail({ id, backLabel, folders, tags, today, onOpen, onBack }: { id: s
   // Take the server's notes only when nothing typed here is waiting to be saved.
   useEffect(() => {
     if (!todo) return;
-    // opening a task clears a rail module that pointed at it and asked for that: let the rail catch up
+    // opening a task clears a rail module that pointed at it: let the rail catch up
     if (!railTold.current) ((railTold.current = true), globalMutate("rail"));
     if (title === null) setTitle(todo.title);
     if (!saver.dirty()) setNotes(todo.notes);
@@ -888,6 +923,7 @@ function Detail({ id, backLabel, folders, tags, today, onOpen, onBack }: { id: s
           <Avatar agent={creator} size={16} /> Added by {creator.name}
         </div>
       )}
+      {todo.rail && <FromRail rail={todo.rail} />}
       {todo.guest_id && (
         <div className="ml-[40px] mt-1.5 text-[13px] text-ink2 [&>span]:ml-0">
           <FromTag id={todo.guest_id} />

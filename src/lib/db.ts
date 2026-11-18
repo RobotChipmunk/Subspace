@@ -447,6 +447,12 @@ const MIGRATIONS: string[] = [
    ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS todo_id text;
    ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS clears_on text NOT NULL DEFAULT 'dismiss';
    CREATE INDEX IF NOT EXISTS rail_modules_todo ON rail_modules (todo_id) WHERE todo_id IS NOT NULL`,
+  // The rail as notifications: a module has an icon, every module clears when the owner acts on it
+  // (cleared_by records how: dismiss, action, todo_open or later; clears_on is no longer read), and
+  // "Later" turns a module into a task in the owner's list (kept_todo_id) so the follow-up outlasts it.
+  `ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS icon text;
+   ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS cleared_by text;
+   ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS kept_todo_id text`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

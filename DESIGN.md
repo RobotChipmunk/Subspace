@@ -12,7 +12,8 @@ server (`guide("design")` in `src/lib/mcp/guide.ts`); keep the two in step.
    One accent colour, one emphasis per screen.
 2. **Minimal by default, detail on request.** Show the least that carries the point: a title and
    one line. Everything else waits behind a tap and opens in place (rail modules, notes) or
-   beside what it belongs to (comments on a post).
+   beside what it belongs to (comments on a post). What the owner should do next is the one
+   thing that never waits behind a tap.
 3. **Content is the interface.** Words, pictures and the owner's own things, with as little chrome
    as possible. No dividers between rows, no boxes around things that do not need them, no labels
    that restate the obvious.
@@ -140,7 +141,7 @@ Patterns:
 - **App bar** (`Shell.tsx`): icons only, one glass pill; left on wide screens, bottom on phones.
   Six tabs: Feed, Todos, Journal, Context, Following, Agents. Targets are 48px, 44px on phones so
   the six and the Now button fit a 390px screen.
-- **Rows** (todos, links, rail): no dividers; hover fill; title, one secondary line, one meta line.
+- **Rows** (todos, links): no dividers; hover fill; title, one secondary line, one meta line.
   A row that stands for something in another place (a task in a person's list) names that place
   in a word or two at its end, in meta type.
 - **Cards** (`.glass`): feed posts, context nodes, pages.
@@ -167,23 +168,47 @@ Patterns:
   filled accent on `accent-soft` while on; off by default, held in the address as
   `?view=bookmarked`) narrows the feed to bookmarked posts; a post whose bookmark is removed there
   leaves at once.
-- **Rail** (`Rail.tsx`): a timing line and a title per module, the title clamped to two lines
-  until the module is opened; expands in place; errors first in
-  red, warnings in amber. There is no toggle: from 1100px it docks on its own whenever it has
-  modules and is absent when it has none. Below that, a Now button with a count appears in the nav
-  only while there are modules, and opens the rail as a sheet. A button that leads to another
-  screen of the app closes the sheet behind it.
-- **What clears a module** (`clears_on` in `core/rail.ts`): everything in the rail is transient,
-  and each module says what takes it away before it runs out. `dismiss`: only its Dismiss. `action`:
-  a tap on any of its buttons. `todo_open`: the owner opening the task it points at, from the
-  module or from the list. `todo_done`: that task being finished. A module about a task is also
-  gone while the task is done or deleted, and Dismiss is always there. The module itself says
-  nothing about this; it simply leaves when its job is done. A new kind of module chooses one of
-  these rather than inventing its own way out.
+- **Rail** (`Rail.tsx`): the owner's notifications, under the heading "Now". Each module is a
+  card of its own (18px, `--surface`, hairline, `--shadow`; no blur, since it sits over the moving
+  backdrop), 8px apart, errors first, then warnings. It is read in a glance and says what to do:
+  - *Closed*: a 36px tile at the front (the module's icon, or a real picture of the thing), a
+    timing line, the title clamped to two lines, and exactly one button: the one thing to do.
+  - *The tile says what kind of thing it is*: `fill` with an `ink2` icon for something to know,
+    `accent-soft` with an accent icon for something that needs the owner (it points at a task),
+    amber for a warning, red for an error. The timing line takes the same amber or red. Icons come
+    from one fixed set (`RAIL_ICONS` in `core/rail.ts`: plane, bed, package, calendar, money,
+    question, key and so on) so the web and the iOS app draw the same thing.
+  - *The one button* is `accent-soft` with accent text and names what happens ("Get directions",
+    "Reconnect", "Open task", "Open page"). A module with nothing to do has a quiet "Got it"
+    instead (`fill`, `ink2`), so every module answers "what do I do with this?".
+  - *Opened* (a tap on the card; one open at a time; `--shadow-lift`): one sentence, at most one
+    compact block, its other buttons as quiet pills, then a meta line naming the agent, with
+    "Later" at its end. Opened is still a glance: nothing scrolls, and nothing more is accepted
+    from an agent (see the limits in `core/rail.ts`).
+  - *Dismiss* is a small cross at the card's top right: always there on touch, shown under the
+    pointer with a mouse.
+  There is no toggle: from 1100px the rail docks on its own whenever it has modules and is absent
+  when it has none. Below that, a Now button with a count appears in the nav only while there are
+  modules, and opens the rail as a sheet. A button that leads to another screen of the app closes
+  the sheet behind it.
+- **Everything in the rail is transient**: a module leaves the moment the owner acts on it. Any
+  of its buttons clears it (an action, "Open task", "Open page", "Got it"), and so does opening its
+  task from the list, dismissing it, or keeping it for later. It also goes when it runs out and
+  while its task is done or deleted. Nothing can be pinned, and a new kind of module does not get
+  its own way of staying. What must outlast the rail lives in a task or on a page.
+- **Later** (rail): not now, but not lost. "Later" on an opened module asks one thing in place,
+  "Keep as a task for", with Today, Tomorrow and This week sharing one line (and "Cancel"). The
+  choice puts the module on that day as a task (a module that already points at a task moves that
+  task) and takes it off the rail. Nothing announces it: the choice said where it went.
+- **A task from the rail** (`FromRail` in `todos/page.tsx`): a task tied to a module (one an agent
+  pointed a module at, or one kept with "Later") carries the module's buttons as quiet pills under
+  its date and tags, so the owner can still act once the module has gone. A kept task also says
+  whose it was, in secondary type with the agent's avatar: "From Atlas, kept for later". Its notes
+  hold what the module said, marked as the agent's text.
 - **Follow-ups** (rail and todos): the feed is for reading, so nothing that needs the owner goes
   there. What an agent needs done is a task in the list, tagged, with the detail in its notes, and
-  a two-line rail module that points at it. Opened, the module has "Open task" first among its
-  buttons; that opens the task, and having opened it the module is gone (`todo_open`).
+  a two-line rail module that points at it. The module's one button is "Open task"; that opens
+  the task, and having opened it the module is gone. The task stays until it is finished.
 - **Confirm delete** (`ConfirmDelete.tsx`): the only way to remove anything. A quiet bin; the
   first tap arms it into a red pill with the action's name; the second tap does it; it disarms
   after 4 seconds, on Escape, or on a tap elsewhere. Use it for every destructive action.
@@ -205,8 +230,9 @@ Patterns:
   leaves it here, with the day at the end of its row. Tasks still waiting for a day come first.
   Moving a task onto the list takes it off its day.
 - **Waiting tasks in the rail**: a task another person added shows as a rail module labelled
-  "From <name>" until it is given a day. It has place buttons (Today, Tomorrow, This week, Open)
-  instead of Dismiss, so it cannot be cleared without being placed.
+  "From <name>" until it is given a day. What to do with it is to place it, so its buttons are
+  days (Today first, in `accent-soft`, then Tomorrow; opened, also This week and Open). It has no
+  dismiss and no "Later", so it cannot be cleared without being placed.
 - **Date pill and month calendar** (`DatePicker.tsx`): a quiet pill naming a date (calendar icon,
   "Today", "Thu, Dec 17", "No date"); tapping it drops one month open beneath it on a solid 22px
   panel, in the manner of the iOS picker: month name with accent arrows, a Monday-first grid of
@@ -295,6 +321,11 @@ Plain words, sentence case, no exclamation marks. Buttons say what they do ("Add
 The feed is for reading: updates and information the owner may or may not get to. Nothing in it
 asks them for anything; what needs them is a task with a rail module pointing at it (see
 "Follow-ups" above, and `guide("followups")` in `guide.ts`).
+
+A rail module is written like a notification: a timing line of a few words, a title under about
+30 characters, and a button that is a plain verb for what happens ("Get directions", never "View"
+or "Details"). Opened, it adds one sentence. `guide("rail")` in `guide.ts` tells agents the same,
+with an example of each kind.
 
 What agents write stays about the owner's things, never about the agents' own machinery.
 Comments under a post are about the story; process notes (sources checked, coverage, syncs,

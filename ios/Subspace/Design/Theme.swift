@@ -108,13 +108,20 @@ struct PressStyle: ButtonStyle {
 /// A quiet round button on `fill`: "Today", "Reconnect", "Open".
 struct PillStyle: ButtonStyle {
     var prominent = false
+    /// The one thing to do in its place (a rail module's first button): accent on a soft accent wash.
+    var soft = false
+    /// Stands back: an acknowledgement rather than an action ("Got it").
+    var quiet = false
+    /// Less padding at the sides, for pills that share one line equally.
+    var tight = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(prominent ? Color.white : Theme.ink)
-            .padding(.horizontal, 12)
+            .foregroundStyle(prominent ? Color.white : soft ? Theme.accent : quiet ? Theme.ink2 : Theme.ink)
+            .padding(.horizontal, tight ? 4 : 12)
             .frame(minHeight: 32)
-            .background(prominent ? Theme.accent : (configuration.isPressed ? Theme.fill2 : Theme.fill), in: Capsule())
+            .background(prominent ? Theme.accent : soft ? Theme.accentSoft : (configuration.isPressed ? Theme.fill2 : Theme.fill), in: Capsule())
+            .opacity(soft && configuration.isPressed ? 0.7 : 1)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.ssSpring, value: configuration.isPressed)
     }

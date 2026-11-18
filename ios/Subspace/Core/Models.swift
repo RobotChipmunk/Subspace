@@ -138,6 +138,22 @@ struct Todo: Codable, Identifiable, Hashable {
     var next_date: String?
     /// Short labels the lists can be narrowed to ("finance", "house"). At most six.
     var tags: [String]?
+    /// The rail module this task is tied to, while that module exists: the one pointing at it, or
+    /// the one it was kept from with "Later". Sent when one task is read.
+    var rail: TodoRail?
+}
+
+/// What a task shows of the rail module it came from, so the owner can still act from the task.
+struct TodoRail: Codable, Hashable {
+    var id: String?
+    var key: String?
+    var author: String?
+    var title: String?
+    var label: String?
+    var actions: [RailAction]?
+    var page_id: String?
+    /// True when the owner made this task of the module with "Later".
+    var kept: Bool?
 }
 
 /// A node of the context tree: a note, a page an agent made, a saved link or a journal entry.
@@ -193,15 +209,24 @@ struct RailTaskRef: Codable, Hashable {
     var title: String?
 }
 
+/// A notification in the Now rail. It leaves the rail when the owner acts on it: taps any of its
+/// buttons, opens its task, keeps it for later (it becomes a task) or dismisses it.
 struct RailModule: Codable, Identifiable, Hashable {
     let id: String
     var key: String?
     var author: String?
     var title: String
+    /// One sentence of detail, shown when the module is opened.
     var subtitle: String?
+    /// A few words about timing, above the title.
     var label: String?
+    /// The small picture at its front: one of a fixed set of names ("plane", "bed", "package"), or nil for the usual one.
+    var icon: String?
+    /// A real picture of the thing, shown small in place of the icon.
     var image: String?
+    /// At most one small block, shown when the module is opened.
     var blocks: [JSONValue]?
+    /// Its buttons. The first is the one thing to do, and shows before the module is opened.
     var actions: [RailAction]?
     var page_id: String?
     var page: PageRef?
@@ -209,10 +234,6 @@ struct RailModule: Codable, Identifiable, Hashable {
     var todo: RailTodoRef?
     /// The task this module is about, when an agent needs the owner to follow something up.
     var task: RailTaskRef?
-    /// What takes the module off the rail before it runs out: "dismiss" (only the owner dismissing
-    /// it), "action" (tapping one of its buttons), "todo_open" (opening its task), "todo_done"
-    /// (finishing its task) or "place" (a waiting task given a day).
-    var clears_on: String?
     /// "info", "warning" or "error".
     var level: String?
     var updated_at: String?

@@ -182,48 +182,49 @@ async function main() {
   const find = await createTodo(owner, { title: "Find a restaurant in Portland", view: "today" });
   await updateTodo(owner, find.id, { notes: "@claude please look for this for us. Italian, with fish and plenty of dishes without cheese." });
   await updateTodo(claude, find.id, { notes_append: ["## Options", block("cards", { layout: "list", items: places.slice(0, 3).map(card) })].join("\n\n") });
-  // ---- The rail: timely things to know ----
+  // ---- The rail: notifications for what is passing. Each says the one thing to do; any of them clears on a tap. ----
   const inAWeek = new Date(Date.now() + 6 * 86400_000).toISOString().slice(0, 10);
+  // a booking: one tap helps (directions), and there is more to read on a page
   await setModule(atlas, {
     key: "portland-hotel",
+    icon: "bed",
     label: "Today · check-in 3 pm",
     title: "Residence Inn, Pearl District",
-    subtitle: "1150 NW 9th Ave, Portland",
-    blocks: [
-      { type: "facts", items: [{ label: "Check-in", value: "Fri 13 Nov, from 3:00 pm" }, { label: "Check-out", value: "Sun 15 Nov, by 11:00 am" }, { label: "Confirmation", value: "84127763" }, { label: "Room", value: "One-bedroom suite, king" }] },
-      { type: "callout", tone: "info", text: "Parking is valet only, $55 a night. The garage on NW 10th is $18." },
-    ],
-    actions: [{ label: "Directions", url: "https://maps.apple.com/?q=1150+NW+9th+Ave+Portland" }, { label: "Call", url: "tel:+15032201339" }],
+    subtitle: "1150 NW 9th Ave. Parking is valet only; the garage on NW 10th is $18.",
+    blocks: [{ type: "facts", items: [{ label: "Check-in", value: "Fri 13 Nov, from 3:00 pm" }, { label: "Check-out", value: "Sun 15 Nov, by 11:00 am" }, { label: "Confirmation", value: "84127763" }] }],
+    actions: [{ label: "Get directions", url: "https://maps.apple.com/?q=1150+NW+9th+Ave+Portland" }, { label: "Call", url: "tel:+15032201339" }],
     page: dinner.id,
-    clears_on: "dismiss",
     show_until: inAWeek,
     priority: 5,
   });
+  // a blocking problem: the fix is one tap
   await setModule(atlas, {
     key: "calendar-auth",
     level: "error",
+    icon: "key",
     label: "Calendar · needs sign-in",
     title: "Calendar connection expired",
-    blocks: [{ type: "callout", tone: "warn", text: "I could not read your calendar this morning, so the day plan is missing. Reconnect Google Calendar and I will try again." }],
+    subtitle: "I could not read your calendar this morning, so the day plan is missing.",
     actions: [{ label: "Reconnect", url: "https://example.com/connect" }],
-    clears_on: "dismiss",
     show_until: new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10),
   });
+  // something to know, with nothing to do: its button is "Got it"
   await setModule(atlas, {
     key: "roof-inspection",
+    icon: "tool",
     label: "Monday 9 am",
     title: "Roofer comes to inspect",
-    blocks: [{ type: "timeline", items: [{ when: "9:00 am", title: "Arrives", text: "Needs side-gate access" }, { when: "10:00 am", title: "Written quote by email" }] }],
-    clears_on: "dismiss",
+    subtitle: "Needs the side gate unlocked.",
+    blocks: [{ type: "timeline", items: [{ when: "9:00 am", title: "Arrives" }, { when: "10:00 am", title: "Written quote by email" }] }],
     show_until: inAWeek,
   });
-  // A follow-up: two lines that point at the task. Opening the task is what clears it from the rail.
+  // A follow-up: two lines that point at the task. The task carries it once the module has gone.
   await setModule(scout, {
     key: "agility-topup",
+    icon: "question",
     label: "Before the 12 Dec lock-up",
     title: "Agility top-up: decide",
     todo: topUp.id,
-    clears_on: "todo_open",
     show_until: inAWeek,
   });
 
