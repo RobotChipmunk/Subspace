@@ -197,8 +197,10 @@ Patterns:
   - *Dismiss* is a small cross at the card's top right: always there on touch, shown under the
     pointer with a mouse.
   There is no toggle: from 1100px the rail docks on its own whenever it has modules and is absent
-  when it has none. Below that, a Now button with a count appears in the nav only while there are
-  modules, and opens the rail as a sheet. A button that leads to another screen of the app closes
+  when it has none. Docked, its width grows with the screen (`--rail-w`: 28% of the width, from
+  308px where it first docks, through 330px on an iPad on its side, to 360px from 1286px), and the
+  content gives up exactly that much. Below 1100px, a Now button with a count appears in the nav
+  only while there are modules, and opens the rail as a sheet (360px, or 88% of a narrower screen). A button that leads to another screen of the app closes
   the sheet behind it.
 - **Everything in the rail is transient**: a module leaves the moment the owner acts on it. Any
   of its buttons clears it (an action, "Open task", "Open page", "Got it"), and so does opening its

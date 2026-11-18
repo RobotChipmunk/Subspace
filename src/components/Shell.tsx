@@ -93,7 +93,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </>
         )}
       </nav>
-      <main className="scroll h-dvh min-w-0 flex-1 transition-[padding] duration-500 ease-out-soft md:pl-[92px] min-[1100px]:group-data-[rail=open]/shell:pr-[280px] md:group-data-[comments=open]/shell:pr-[var(--comments-w)]">
+      <main className="scroll h-dvh min-w-0 flex-1 transition-[padding] duration-500 ease-out-soft md:pl-[92px] min-[1100px]:group-data-[rail=open]/shell:pr-[calc(var(--rail-w)-8px)] md:group-data-[comments=open]/shell:pr-[var(--comments-w)]">
         <motion.div key={path.split("/")[1]} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} className="min-h-full px-4 pb-32 pt-10 md:px-8 md:pt-14">
           <Comments.Provider value={comments}>{children}</Comments.Provider>
         </motion.div>
