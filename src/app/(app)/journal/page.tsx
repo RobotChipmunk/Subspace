@@ -1,5 +1,5 @@
 "use client";
-import { ChevronRight, Plus, X } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -8,6 +8,7 @@ import useSWRInfinite from "swr/infinite";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
+import { TagPills } from "@/components/TagPills";
 import { api, fetcher, soft, useSaver } from "@/lib/client";
 import type { ContextNode } from "@/lib/core/context";
 import type { JournalEntry, JournalMonth, JournalPage } from "@/lib/core/journal";
@@ -420,56 +421,17 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
 }
 
 /**
- * An entry's tags: quiet chips, each with a way to take it off, and a pill that opens into a field
- * to add one. They sit in the entry's top row after the date and mood pills, and wrap with them.
- * Tags chosen by the app say so, in a meta note at the end of the row, until the owner changes them.
+ * An entry's tags (`TagPills`): they sit in the entry's top row after the date and mood pills, and
+ * wrap with them. Tags chosen by the app say so, in a meta note at the end of the row, until the
+ * owner changes them.
  */
 function Tags({ tags, auto, onChange }: { tags: string[]; auto: boolean; onChange: (tags: string[]) => void }) {
   const [adding, setAdding] = useState(false);
-  const [text, setText] = useState("");
   // tags already used anywhere in the journal are offered as the owner types
   const { data } = useSWR<JournalPage>(adding ? "journal?" : null, fetcher);
-  const known = (data?.tags ?? []).map((t) => t.tag).filter((t) => !tags.some((x) => x.toLowerCase() === t.toLowerCase()));
-
-  function add() {
-    const typed = text.replace(/[\s,#]+/g, " ").trim().slice(0, 30).trim();
-    setText("");
-    if (!typed || tags.some((t) => t.toLowerCase() === typed.toLowerCase())) return;
-    // a tag the journal already has keeps its spelling
-    onChange([...tags, known.find((k) => k.toLowerCase() === typed.toLowerCase()) ?? typed]);
-  }
-
   return (
-    <div className="contents" role="group" aria-label="Tags">
-      <AnimatePresence initial={false} mode="popLayout">
-        {tags.map((t) => (
-          <motion.span key={t} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={soft} data-tag={t} className="flex h-8 items-center rounded-full bg-fill pl-3 text-[13px] font-medium text-ink2">
-            {t}
-            <button type="button" onClick={() => onChange(tags.filter((x) => x !== t))} aria-label={`Remove tag ${t}`} className="grid h-8 w-7 place-items-center rounded-full text-ink3 transition-colors hover:text-ink">
-              <X size={13} />
-            </button>
-          </motion.span>
-        ))}
-      </AnimatePresence>
-      {tags.length < 6 && (
-        <motion.form layout transition={soft} onSubmit={(e) => (e.preventDefault(), add())} className={`flex h-8 items-center rounded-full text-[13px] transition-colors ${adding ? "bg-fill px-3" : "text-ink3 hover:bg-fill hover:text-ink2"}`}>
-          {adding ? (
-            <>
-              <input value={text} onChange={(e) => setText(e.target.value)} onBlur={() => (add(), setAdding(false))} onKeyDown={(e) => e.key === "Escape" && (setText(""), setAdding(false))} autoFocus maxLength={30} list="journal-tags" placeholder="Tag" aria-label="New tag" className="w-[120px] text-[13px]" />
-              <datalist id="journal-tags">
-                {known.map((k) => (
-                  <option key={k} value={k} />
-                ))}
-              </datalist>
-            </>
-          ) : (
-            <button type="button" onClick={() => setAdding(true)} className="flex h-8 items-center gap-1 px-2.5 font-medium">
-              <Plus size={13} /> Tag
-            </button>
-          )}
-        </motion.form>
-      )}
+    <TagPills tags={tags} known={(data?.tags ?? []).map((t) => t.tag)} onChange={onChange} onAdding={setAdding}>
       {auto && tags.length > 0 && <span className="pl-1 text-[12px] text-ink3">Tagged for you</span>}
-    </div>
+    </TagPills>
   );
 }

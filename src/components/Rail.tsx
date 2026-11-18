@@ -47,6 +47,16 @@ export function useRail() {
       await api(`rail/${id}`, { method: "DELETE" });
       mutate();
     },
+    /**
+     * One of a module's buttons was tapped (an action, its page or its task). A module that
+     * clears on that leaves the rail at once; any other stays where it is.
+     */
+    acted: async (m: RailModule) => {
+      if (m.clears_on !== "action") return;
+      mutate({ modules: modules.filter((x) => x.id !== m.id) }, false);
+      await api(`rail/${m.id}/action`, { method: "POST" }).catch(() => {});
+      mutate();
+    },
   };
 }
 export type RailState = ReturnType<typeof useRail>;
@@ -56,7 +66,7 @@ export type RailState = ReturnType<typeof useRail>;
  * (picture, details, buttons) waits behind a tap.
  */
 /** For a task waiting for a day: one tap puts it on the list. It leaves the rail as soon as it has a place. */
-function Place({ id }: { id: string }) {
+function Place({ id, onOpen }: { id: string; onOpen: () => void }) {
   const { mutate } = useSWRConfig();
   const [busy, setBusy] = useState(false);
   const move = async (view: string) => {
@@ -76,17 +86,18 @@ function Place({ id }: { id: string }) {
           {label}
         </button>
       ))}
-      <Link href={`/todos?open=${id}`} className={`${cls} text-ink2`}>
+      <Link href={`/todos?open=${id}`} onClick={onOpen} className={`${cls} text-ink2`}>
         Open
       </Link>
     </div>
   );
 }
 
-function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean; onToggle: () => void; onDismiss: () => void }) {
+function Module({ m, open, onToggle, onDismiss, onAct }: { m: RailModule; open: boolean; onToggle: () => void; onDismiss: () => void; /** one of its buttons was tapped; inside: it leads to another screen of the app */ onAct: (inside: boolean) => void }) {
   const { agent } = useMe();
   const by = agent(m.author);
-  const actions = [...m.actions, ...(m.page ? [{ label: "Open page", url: `/page/${m.page.id}` }] : [])];
+  // the task it is about comes first: for a follow-up that is the one thing to do here
+  const actions = [...(m.task ? [{ label: "Open task", url: `/todos?open=${m.task.id}` }] : []), ...m.actions, ...(m.page ? [{ label: "Open page", url: `/page/${m.page.id}` }] : [])];
   return (
     <motion.article layout="position" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={soft} className={`rail-module overflow-hidden rounded-[18px] ${open ? "is-open" : ""}`} data-rail-module={m.key} data-level={m.level}>
       <button onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2.5 text-left">
@@ -118,16 +129,16 @@ function Module({ m, open, onToggle, onDismiss }: { m: RailModule; open: boolean
                   ))}
                 </div>
               )}
-              {m.todo && <Place id={m.todo.id} />}
+              {m.todo && <Place id={m.todo.id} onOpen={() => onAct(true)} />}
               {actions.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {actions.map((a, i) =>
                     a.url.startsWith("/") ? (
-                      <Link key={i} href={a.url} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
+                      <Link key={i} href={a.url} onClick={() => onAct(true)} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
                         {a.label}
                       </Link>
                     ) : (
-                      <a key={i} href={a.url} {...(a.url.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
+                      <a key={i} href={a.url} onClick={() => onAct(false)} {...(a.url.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})} className="flex h-8 items-center gap-1 rounded-full bg-fill px-3 text-[13px] font-medium transition-colors hover:bg-fill2">
                         {a.label}
                         {a.url.startsWith("http") && <ArrowUpRight size={12} className="text-ink3" />}
                       </a>
@@ -162,7 +173,7 @@ function Modules({ rail }: { rail: RailState }) {
     <div className="flex flex-col gap-0.5">
       <AnimatePresence initial={false} mode="popLayout">
         {rail.modules.map((m) => (
-          <Module key={m.id} m={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} onDismiss={() => rail.dismiss(m.id)} />
+          <Module key={m.id} m={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} onDismiss={() => rail.dismiss(m.id)} onAct={(inside) => (inside && rail.close(), rail.acted(m))} />
         ))}
       </AnimatePresence>
       {rail.modules.length === 0 && <p className="px-3 py-8 text-[13.5px] text-ink3">Nothing timely right now.</p>}

@@ -15,10 +15,19 @@ struct TodosFolder: Codable, Identifiable, Hashable {
     var id: String { key }
 }
 
+/// A tag in use on the tasks, with how many unfinished tasks carry it.
+struct TodosTagCount: Codable, Identifiable, Hashable {
+    var tag: String
+    var count: Int
+    var id: String { tag }
+}
+
 struct TodosFoldersResponse: Codable {
     var today: String
     var folders: [TodosFolder]
     var bin: Int
+    /// Every tag the tasks carry, most used first. Older servers send none.
+    var tags: [TodosTagCount]?
 }
 
 struct TodosListResponse: Codable {

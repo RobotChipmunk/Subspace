@@ -1,6 +1,7 @@
 import { checkBlocks } from "../blocks";
 import { q, q1 } from "../db";
-import { addDays, bad, findMentions, indexDoc, listGuests, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
+import { taskChanged } from "./rail";
+import { addDays, bad, cleanTags, findMentions, indexDoc, listGuests, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
 
 export type Todo = {
   id: string;
@@ -25,6 +26,8 @@ export type Todo = {
   next_id: string | null;
   /** The day that following task is on, while it exists. */
   next_date?: string | null;
+  /** Short labels the lists can be narrowed to ("finance", "house"). At most six. */
+  tags: string[];
   created_at: string;
   updated_at: string;
 };
@@ -46,13 +49,15 @@ export function nextDate(from: string, repeat: Repeat): string {
 }
 
 export type Folder = { key: string; label: string; hint?: string; count: number; guest?: string };
+/** A tag in use on the tasks, with how many unfinished tasks carry it. */
+export type TagCount = { tag: string; count: number };
 /** How long a deleted task can still be brought back. */
 export const BIN_DAYS = 15;
 export type BinnedTodo = { id: string; title: string; done: boolean; has_notes: boolean; deleted_at: string; days_left: number };
 
 const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const NEXT_DATE = "(SELECT n.date FROM todos n WHERE n.id = todos.next_id AND n.deleted_at IS NULL) AS next_date";
-const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}`;
+const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, tags, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}`;
 
 /** Unfinished tasks never get left behind: past days roll to today, past weeks roll to this week. */
 async function rollover(today: string) {
@@ -93,11 +98,13 @@ function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec
   // dated beyond next week: nothing else shows these until their week comes
   if (view === "later") return { where: "((scope = 'day' AND date > $1) OR (scope = 'week' AND date > $2))", params: [addDays(nextMonday, 6), nextMonday], add: { scope: "day", date: addDays(nextMonday, 7) } };
   if (view === "backlog") return { where: "scope = 'backlog'", params: [], add: { scope: "backlog", date: null } };
+  // every task, wherever it is: a view across the lists, so a task added to it goes on today
+  if (view === "all") return { where: "TRUE", params: [], add: { scope: "day", date: today } };
   if (/^\d{4}-\d{2}-\d{2}$/.test(view)) return { where: "scope = 'day' AND date = $1", params: [view], add: { scope: "day", date: view } };
-  throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, later, backlog or a YYYY-MM-DD date.`);
+  throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, later, backlog, all or a YYYY-MM-DD date.`);
 }
 
-export async function folders(): Promise<{ today: string; folders: Folder[]; bin: number }> {
+export async function folders(): Promise<{ today: string; folders: Folder[]; bin: number; tags: TagCount[] }> {
   const cal = await calendar();
   await rollover(cal.today);
   await emptyOldBin();
@@ -109,7 +116,7 @@ export async function folders(): Promise<{ today: string; folders: Folder[]; bin
   for (let d = cal.dow + 1; d <= 5; d++) list.push({ key: addDays(cal.monday, d - 1), label: d === cal.dow + 1 ? "Tomorrow" : DAY_NAMES[d], hint: d === cal.dow + 1 ? DAY_NAMES[d] : undefined });
   if (cal.dow <= 5) list.push({ key: "weekend", label: "Weekend" });
   else if (cal.dow === 6) list.push({ key: cal.sunday, label: "Tomorrow", hint: "Sunday" });
-  list.push({ key: "next_week", label: "Next week" }, { key: "later", label: "Later" }, { key: "backlog", label: "Backlog" });
+  list.push({ key: "next_week", label: "Next week" }, { key: "later", label: "Later" }, { key: "backlog", label: "Backlog" }, { key: "all", label: "All" });
   for (const g of await listGuests()) list.push({ key: `guest:${g.id}`, label: `From ${g.name}`, guest: g.id });
 
   const out: Folder[] = [];
@@ -121,21 +128,46 @@ export async function folders(): Promise<{ today: string; folders: Folder[]; bin
     out.push({ ...f, count: r?.n ?? 0 });
   }
   const bin = (await q1<{ n: number }>("SELECT count(*)::int AS n FROM todos WHERE deleted_at IS NOT NULL"))!.n;
-  return { today: cal.today, folders: out, bin };
+  return { today: cal.today, folders: out, bin, tags: await tagCounts() };
 }
 
-export async function listTodos(view: string) {
+/** Every tag in use, most used first. The count is of unfinished tasks, so a tag stays known after its tasks are done. */
+export async function tagCounts(): Promise<TagCount[]> {
+  return q<TagCount>("SELECT tag, (count(*) FILTER (WHERE NOT done))::int AS count FROM todos, unnest(tags) AS tag WHERE deleted_at IS NULL GROUP BY tag ORDER BY 2 DESC, lower(tag)");
+}
+
+/** Tags as given (a list, or one string with commas), tidied, each in the spelling the tasks already use. */
+async function readTags(raw: unknown): Promise<string[]> {
+  const tags = cleanTags(typeof raw === "string" ? raw.split(",") : raw);
+  if (!tags.length) return tags;
+  const known = await q<{ tag: string }>("SELECT DISTINCT tag FROM todos, unnest(tags) AS tag WHERE deleted_at IS NULL AND lower(tag) = ANY($1)", [tags.map((t) => t.toLowerCase())]);
+  return tags.map((t) => known.find((k) => k.tag.toLowerCase() === t.toLowerCase())?.tag ?? t);
+}
+
+/** A task as search finds it: its title, then its notes and tags. */
+const indexTodo = (t: Pick<Todo, "id" | "title" | "notes" | "tags">) => indexDoc("todo", t.id, t.title, t.tags?.length ? `${t.notes}\n${t.tags.join(", ")}` : t.notes);
+
+export async function listTodos(view: string, opts: { tags?: string[] } = {}) {
   const cal = await calendar();
   await rollover(cal.today);
   const spec = viewSpec(view, cal);
   // Finished tasks stay visible in the undated lists only for a day so they keep moving.
   const guest = view.startsWith("guest:");
-  const doneClause = view === "backlog" || guest ? "AND (NOT done OR done_at > now() - interval '1 day')" : "";
+  const all = view === "all";
+  const doneClause = view === "backlog" || guest || all ? "AND (NOT done OR done_at > now() - interval '1 day')" : "";
   // A guest's list spans every day: what still needs a day comes first, then by day, with the backlog last.
-  const order = guest ? "(scope = 'guest') DESC, (scope = 'backlog'), date, scope DESC, position, id" : "date NULLS FIRST, scope DESC, position, id";
+  // "All" runs by day too, with the backlog and what still waits for a day at the end.
+  const order = guest
+    ? "(scope = 'guest') DESC, (scope = 'backlog'), date, scope DESC, position, id"
+    : all
+      ? "(scope = 'guest'), (scope = 'backlog'), date, scope DESC, position, id"
+      : "date NULLS FIRST, scope DESC, position, id";
+  // narrowed to tasks carrying every one of these tags, whatever their capitals
+  const wanted = cleanTags(opts.tags).map((t) => t.toLowerCase());
+  const tagClause = wanted.length ? `AND $${spec.params.length + 1}::text[] <@ ARRAY(SELECT lower(x) FROM unnest(tags) AS x)` : "";
   const todos = await q<Todo & { has_notes: boolean }>(
-    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ORDER BY ${order}`,
-    spec.params,
+    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ${tagClause} ORDER BY ${order}`,
+    wanted.length ? [...spec.params, wanted] : spec.params,
   );
   return { view, today: cal.today, todos };
 }
@@ -143,6 +175,16 @@ export async function listTodos(view: string) {
 export async function getTodo(id: string): Promise<Todo> {
   const t = await q1<Todo>(`SELECT *, ${NEXT_DATE} FROM todos WHERE id = $1`, [id]);
   if (!t) throw notFound("No such todo");
+  return t;
+}
+
+/**
+ * The owner has a task open in front of them. A rail module that pointed at it, and asked to be
+ * cleared by that, leaves the rail.
+ */
+export async function openTodo(actor: Agent, id: string): Promise<Todo> {
+  const t = await getTodo(id);
+  if (actor.kind === "human" && !(t as Todo & { deleted_at?: string | null }).deleted_at) await taskChanged(actor, id, "todo_open");
   return t;
 }
 
@@ -177,7 +219,7 @@ export function markAgentText(md: string, handle: string): string {
 }
 
 async function afterWrite(actor: Agent, t: Todo, type: string, summary: string, extraMentions: string[] = []) {
-  await indexDoc("todo", t.id, t.title, t.notes);
+  await indexTodo(t);
   // A guest's task carries someone else's words: an @handle in its title must not call on the owner's agents.
   const mentions = [...new Set([...(t.guest_id ? [] : await findMentions(t.title)), ...extraMentions])];
   await logEvent({ actor: actor.id, type, entity_type: "todo", entity_id: t.id, summary, mentions, data: { scope: t.scope, date: t.date } });
@@ -193,16 +235,16 @@ function readRepeat(v: unknown): Repeat | null {
 async function createNext(actor: Agent, t: Todo, today: string): Promise<string> {
   const id = newId("t");
   const date = nextDate(today, t.repeat!);
-  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, guest_id, repeat) VALUES ($1,$2,$3,'day',$4,$5,$6,$7,$8)", [
-    id, t.title, t.notes, date, await nextPosition("day", date), t.created_by, t.guest_id, t.repeat,
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, guest_id, repeat, tags) VALUES ($1,$2,$3,'day',$4,$5,$6,$7,$8,$9)", [
+    id, t.title, t.notes, date, await nextPosition("day", date), t.created_by, t.guest_id, t.repeat, t.tags ?? [],
   ]);
   const next = await getTodo(id);
-  await indexDoc("todo", id, next.title, next.notes);
+  await indexTodo(next);
   await logEvent({ actor: actor.id, type: "todo.created", entity_type: "todo", entity_id: id, summary: `${t.title} (repeats ${t.repeat})`, mentions: [], data: { scope: "day", date, repeat_of: t.id } });
   return id;
 }
 
-export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null }) {
+export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null; tags?: string[] | string }) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Todo needs a title.");
   const cal = await calendar();
@@ -212,8 +254,9 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   if (input.notes) guardBlocks(actor, input.notes);
   const notes = input.notes ? (actor.kind === "agent" ? markAgentText(input.notes, actor.handle) : input.notes) : "";
   const repeat = input.repeat === undefined ? null : readRepeat(input.repeat);
-  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", [
-    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat,
+  const tags = input.tags === undefined ? [] : await readTags(input.tags);
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat, tags) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", [
+    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat, tags,
   ]);
   const t = await getTodo(id);
   await afterWrite(actor, t, "todo.created", title, await findMentions(notes));
@@ -233,6 +276,8 @@ export async function updateTodo(
     seen?: boolean;
     /** daily, every_3_days, weekly, biweekly, monthly, yearly; null or "none" to stop repeating */
     repeat?: string | null;
+    /** the whole set of tags, replacing what is there; an empty list takes them all off */
+    tags?: string[] | string;
   },
 ) {
   const before = await getTodo(id);
@@ -252,6 +297,10 @@ export async function updateTodo(
   }
   const repeat = patch.repeat === undefined ? before.repeat : readRepeat(patch.repeat);
   if (repeat !== before.repeat) set("repeat", repeat);
+  if (patch.tags !== undefined) {
+    const tags = await readTags(patch.tags);
+    if (tags.join("\n") !== (before.tags ?? []).join("\n")) set("tags", tags);
+  }
   // made after the update, so the next round carries any new title or notes from the same change
   let makeNext = false;
   if (patch.done !== undefined && patch.done !== before.done) {
@@ -311,6 +360,8 @@ export async function updateTodo(
 
   if (sets.length === 1) return before;
   await q(`UPDATE todos SET ${sets.join(", ")} WHERE id = $1`, params);
+  // a finished task has nothing left to follow up: whatever the rail says about it goes
+  if (patch.done === true && !before.done) await taskChanged(actor, id, "todo_done");
   let t = await getTodo(id);
   if (makeNext) {
     await q("UPDATE todos SET next_id = $2 WHERE id = $1", [id, await createNext(actor, t, todayIn(await timezone()))]);
@@ -320,7 +371,7 @@ export async function updateTodo(
   const quiet = actor.kind === "human" && type === "todo.updated" && notes !== undefined && sets.length === 2;
   const onlySeen = patch.seen && sets.length === 2;
   if (!quiet && !onlySeen) await afterWrite(actor, t, type, summary, newMentions);
-  else await indexDoc("todo", t.id, t.title, t.notes);
+  else await indexTodo(t);
   return t;
 }
 
@@ -337,6 +388,7 @@ export async function deleteTodo(actor: Agent, id: string, forever = false) {
     return;
   }
   if ((t as Todo & { deleted_at?: string | null }).deleted_at) return;
+  await taskChanged(actor, id, "todo_deleted");
   await q("UPDATE todos SET deleted_at = now() WHERE id = $1", [id]);
   await unindexDoc("todo", id);
   await logEvent({ actor: actor.id, type: "todo.deleted", entity_type: "todo", entity_id: id, summary: t.title });
@@ -346,7 +398,7 @@ export async function deleteTodo(actor: Agent, id: string, forever = false) {
 export async function restoreTodo(actor: Agent, id: string) {
   const t = await getTodo(id);
   await q("UPDATE todos SET deleted_at = NULL WHERE id = $1", [id]);
-  await indexDoc("todo", t.id, t.title, t.notes);
+  await indexTodo(t);
   await logEvent({ actor: actor.id, type: "todo.restored", entity_type: "todo", entity_id: id, summary: t.title });
   return getTodo(id);
 }

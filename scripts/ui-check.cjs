@@ -148,7 +148,7 @@ async function run(profile) {
     await reachable(hotel.getByRole("link", { name: /Directions/ }), "rail module action");
     await reachable(hotel.getByRole("link", { name: "Open page" }), "rail module page link");
     const count = await page.locator("[data-rail-module]").count();
-    if (count !== 3) fail(`rail: ${count} modules shown, expected 3`);
+    if (count !== 4) fail(`rail: ${count} modules shown, expected 4`);
     // an error from an agent is listed first and marked
     const firstMod = page.locator("[data-rail-module]").first();
     if ((await firstMod.getAttribute("data-level")) !== "error") fail("rail: the error module is not shown first");
@@ -163,7 +163,7 @@ async function run(profile) {
       .catch(() => fail("rail: opening one module left the other expanded"));
     await press(page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
     await settle(900);
-    if ((await page.locator("[data-rail-module]").count()) !== 2) fail("rail: dismissing a module did not remove it");
+    if ((await page.locator("[data-rail-module]").count()) !== 3) fail("rail: dismissing a module did not remove it");
     if (!wide) {
       await press(page.locator('aside[aria-label="Now"]').getByRole("button", { name: "Close" }));
       await settle(900);
@@ -709,6 +709,160 @@ async function run(profile) {
     await page.reload();
     await settle(1500);
   });
+  await step("todos all and tags", async () => {
+    // "All" shows every task under the day or list it is on; any list with tagged tasks can be narrowed to tags.
+    const nav = page.getByRole("navigation", { name: "Lists" });
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const filter = page.locator("[data-tag-filter]");
+    const titles = () => page.locator("main ul li").evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
+    const allBtn = nav.locator("[data-folder=all]");
+    await allBtn.scrollIntoViewIfNeeded();
+    await press(allBtn);
+    await page.locator("h1", { hasText: /^All$/ }).waitFor({ timeout: 4000 });
+    await settle(1200);
+    const every = (await get("/api/v1/todos?view=all")).todos;
+    const shownAll = await titles();
+    for (const t of every) if (!shownAll.includes(t.title)) fail(`todos all: "${t.title}" is missing from All`);
+    const heads = await page.locator("[data-group] h2").evaluateAll((els) => els.map((e) => e.textContent.trim()));
+    if (heads[0] !== "Today") fail(`todos all: the first section is "${heads[0]}", expected Today`);
+    if (heads.indexOf("Backlog") !== heads.length - 1) fail(`todos all: Backlog is not the last section (${heads.join(", ")})`);
+    if (await page.getByRole("button", { name: "Add task", exact: true }).count()) fail("todos all: a list with sections has one add button for the whole list");
+    await reachable(page.getByRole("button", { name: "Add task to Today" }), "todos all: Today's add button");
+    // a tagged task carries its tag at the end of its row
+    if (!(await page.locator(".todo-row", { hasText: "Replace the hallway light" }).locator("[data-tags]", { hasText: "house" }).count())) fail("todos tags: a tagged task does not show its tag in the list");
+    await noSidewaysScroll("todos all");
+    await shot("todos-all");
+
+    // the filter sits quietly at the right of the heading and opens the tags to choose from
+    await reachable(filter, "todos tag filter");
+    const side = await filter.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const h = el.closest("header").getBoundingClientRect();
+      return { gap: h.right - r.right, left: r.left - h.left, width: h.width };
+    });
+    if (side.gap > 12 || side.left < side.width / 2) fail("todos tags: the tag filter is not at the right of the heading");
+    await press(filter);
+    const tagMenu = page.getByRole("menu", { name: "Tags" });
+    await tagMenu.waitFor({ timeout: 4000 });
+    await settle(500);
+    for (const t of ["finance", "house"]) await reachable(tagMenu.getByRole("menuitemcheckbox", { name: new RegExp("^" + t) }), `tag filter choice "${t}"`);
+    await noSidewaysScroll("todos tag menu");
+    await shot("todos-tag-menu");
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^house/ }));
+    await settle(800);
+    const house = every.filter((t) => t.tags.includes("house")).map((t) => t.title);
+    let now = await titles();
+    if (now.slice().sort().join("|") !== house.slice().sort().join("|")) fail(`todos tags: narrowed to house, the list shows ${now.join(", ") || "nothing"}`);
+    // a second tag narrows it further: only tasks carrying both
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^diy/ }));
+    await settle(800);
+    now = await titles();
+    const both = every.filter((t) => t.tags.includes("house") && t.tags.includes("diy")).map((t) => t.title);
+    if (!both.length || both.length === house.length) fail("todos tags: the seeded tasks do not tell one tag from two");
+    if (now.slice().sort().join("|") !== both.slice().sort().join("|")) fail(`todos tags: narrowed to house and diy, the list shows ${now.join(", ") || "nothing"}, expected ${both.join(", ")}`);
+    // tags that no task carries together leave nothing, and the list says what it is narrowed to
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^finance/ }));
+    await settle(800);
+    if ((await titles()).length) fail("todos tags: tasks are shown that do not carry every chosen tag");
+    await page.getByText("Nothing tagged house and diy and finance here.").waitFor({ timeout: 3000 }).catch(() => fail("todos tags: an empty narrowed list does not say what it is narrowed to"));
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^finance/ }));
+    await settle(800);
+    await page.keyboard.press("Escape");
+    await settle(500);
+    if (await tagMenu.count()) fail("todos tags: the tag menu stayed open after Escape");
+    if (!/house/.test(await filter.innerText()) || !/diy/.test(await filter.innerText())) fail("todos tags: the filter does not name the chosen tags");
+    await noSidewaysScroll("todos all, narrowed");
+    await shot("todos-all-tagged");
+    // "Show all" takes the choice off again
+    await press(filter);
+    await press(tagMenu.getByRole("menuitem", { name: "Show all" }));
+    await settle(800);
+    if ((await titles()).length !== shownAll.length) fail("todos tags: Show all did not bring every task back");
+    // a choice belongs to the list it was made on
+    await press(filter);
+    await press(tagMenu.getByRole("menuitemcheckbox", { name: /^house/ }));
+    await page.keyboard.press("Escape");
+    const todayBtn = nav.getByRole("button", { name: /^Today/ });
+    await todayBtn.scrollIntoViewIfNeeded();
+    await press(todayBtn);
+    await settle(1000);
+    if ((await filter.getAttribute("aria-label")) !== "Filter by tag") fail("todos tags: a choice of tags followed to another list");
+    // and a list with no tagged tasks offers no filter
+    for (const f of (await get("/api/v1/todos/folders")).folders) {
+      if (f.key === "all" || f.guest) continue;
+      if ((await get(`/api/v1/todos?view=${f.key}`)).todos.some((t) => t.tags.length)) continue;
+      const b = nav.locator(`[data-folder="${f.key}"]`);
+      await b.scrollIntoViewIfNeeded();
+      await press(b);
+      await settle(1000);
+      if (await filter.count()) fail(`todos tags: "${f.label}" has no tagged tasks but offers a tag filter`);
+      break;
+    }
+
+    // in a task, "Add tag" follows the repeat pill; a tag is added, shown, saved, and taken off again
+    const backlog = nav.getByRole("button", { name: /^Backlog/ });
+    await backlog.scrollIntoViewIfNeeded();
+    await press(backlog);
+    await settle(1000);
+    await press(page.locator(".todo-row", { hasText: "Replace the hallway light" }).getByText("Replace the hallway light"));
+    const addTag = page.getByRole("button", { name: "Add tag" });
+    await addTag.waitFor({ timeout: 5000 });
+    await settle(700);
+    await reachable(addTag, "todo add tag button");
+    const after = await addTag.evaluate((el) => !!(document.querySelector('select[aria-label="Repeat"]').compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
+    if (!after) fail("todo tags: Add tag does not follow the repeat pill");
+    await reachable(page.locator('[data-tag="house"]'), "todo tag chip");
+    await press(addTag);
+    await settle(300);
+    await reachable(page.getByLabel("New tag"), "todo new tag field");
+    await page.keyboard.type("Check tag", { delay: 15 });
+    await page.keyboard.press("Enter");
+    await page.locator('[data-tag="Check tag"]').waitFor({ timeout: 3000 });
+    await page.keyboard.press("Escape");
+    await settle(900);
+    const lamp = every.find((t) => t.title === "Replace the hallway light");
+    if (!(await get(`/api/v1/todos/${lamp.id}`)).tags.includes("Check tag")) fail("todo tags: a tag added to a task was not saved");
+    await noSidewaysScroll("todo tags");
+    await shot("todo-tags");
+    await reachable(page.getByLabel("Remove tag Check tag"), "todo remove tag button");
+    await press(page.getByLabel("Remove tag Check tag"));
+    await page.locator('[data-tag="Check tag"]').waitFor({ state: "detached", timeout: 3000 });
+    await settle(900);
+    if ((await get(`/api/v1/todos/${lamp.id}`)).tags.includes("Check tag")) fail("todo tags: a tag taken off a task was not removed");
+    await page.goto(`${BASE}/todos`);
+    await settle(1500);
+  });
+  await step("follow-up from the rail", async () => {
+    // What an agent needs from the owner is a rail module pointing at a task. Opening the task clears the module.
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const before = (await get("/api/v1/rail")).modules.find((m) => m.key === "agility-topup");
+    if (!before) return fail("follow-up: the seeded follow-up is not in the rail");
+    if (before.clears_on !== "todo_open" || !before.task) fail("follow-up: the module does not say that opening its task clears it");
+    if ((await get("/api/v1/rail")).modules.some((m) => !m.clears_on)) fail("follow-up: a rail module does not say what clears it");
+    if (!wide) (await press(page.getByRole("button", { name: /^Now/ })), await settle(800));
+    const mod = page.locator('[data-rail-module="agility-topup"]');
+    await mod.waitFor({ timeout: 6000 });
+    await press(mod.getByRole("button", { expanded: false }));
+    await settle(800);
+    const open = mod.getByRole("link", { name: "Open task" });
+    await reachable(open, "rail follow-up: Open task");
+    await noSidewaysScroll("rail follow-up");
+    await shot("rail-follow-up");
+    // this screen is already Todos: the link must still open the task
+    await press(open);
+    await page.getByLabel("Task name").waitFor({ timeout: 6000 }).catch(() => fail("follow-up: Open task did not open the task"));
+    await settle(1800);
+    if ((await page.getByLabel("Task name").inputValue()) !== before.task.title) fail("follow-up: Open task showed a different task");
+    if (!wide && (await page.locator('aside[aria-label="Now"]').count())) fail("follow-up: the rail sheet stayed open over the task");
+    if (await mod.count()) fail("follow-up: the module is still in the rail after its task was opened");
+    if ((await get("/api/v1/rail")).modules.some((m) => m.key === "agility-topup")) fail("follow-up: opening the task did not clear its module");
+    await reachable(page.locator('[data-tag="finance"]'), "the follow-up task's tag");
+    await noSidewaysScroll("follow-up task");
+    await shot("todo-follow-up");
+    await page.goto(`${BASE}/todos`);
+    await settle(1500);
+  });
+
 
   // ---------- Context ----------
   await step("context browse and edit", async () => {

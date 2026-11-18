@@ -438,6 +438,15 @@ const MIGRATIONS: string[] = [
      said text NOT NULL DEFAULT ''
    );
    CREATE INDEX IF NOT EXISTS agent_runs_agent ON agent_runs (agent_id, started_at DESC)`,
+  // Tags on tasks, chosen by the owner or the agent that added the task; the lists can be narrowed to them.
+  // A rail module can point at a task (todo_id), and says what clears it from the rail (clears_on):
+  // 'dismiss' (the owner dismisses it, or it runs out), 'action' (the owner taps one of its buttons),
+  // 'todo_open' (the owner opens the task) or 'todo_done' (the task is finished).
+  `ALTER TABLE todos ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
+   CREATE INDEX IF NOT EXISTS todos_tags ON todos USING gin (tags) WHERE deleted_at IS NULL;
+   ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS todo_id text;
+   ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS clears_on text NOT NULL DEFAULT 'dismiss';
+   CREATE INDEX IF NOT EXISTS rail_modules_todo ON rail_modules (todo_id) WHERE todo_id IS NOT NULL`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

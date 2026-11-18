@@ -27,7 +27,8 @@ jobs:
   test:
     name: UI tests (${{ matrix.device }})
     runs-on: macos-26
-    timeout-minutes: 45
+    # longer than the tests' own watchdog (40 minutes, in ios/scripts/ci-test.sh) plus the set-up before them
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
