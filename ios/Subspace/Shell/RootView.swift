@@ -39,30 +39,24 @@ struct ShellView: View {
             let wide = sizeClass == .regular
             let docked = geo.size.width >= Self.railDockWidth && !app.rail.isEmpty && !app.commentsBeside
             ZStack {
-                screens
-                    .padding(.leading, wide ? 84 : 0)
-                    .padding(.trailing, docked ? Self.railWidth : 0)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        // room for the app bar on a phone, so the last row can scroll clear of it
-                        if !wide && !keyboardUp { Color.clear.frame(height: 76) }
+                ZStack {
+                    screens
+                        .padding(.leading, wide ? 84 : 0)
+                        .padding(.trailing, docked ? Self.railWidth : 0)
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            // room for the app bar on a phone, so the last row can scroll clear of it
+                            if !wide && !keyboardUp { Color.clear.frame(height: 76) }
+                        }
+
+                    if docked {
+                        RailView(sheet: false)
+                            .frame(width: Self.railWidth)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
-
-                // Content scrolls up behind the status bar; soften it there so the clock stays readable.
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.65), .init(color: .black.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom))
-                    .frame(height: geo.safeAreaInsets.top + 18)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-
-                if docked {
-                    RailView(sheet: false)
-                        .frame(width: Self.railWidth)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
+                // No bar at the top: what scrolls up under the status bar blurs and fades away.
+                .softTopEdge(geo.safeAreaInsets.top)
 
                 if wide {
                     NavBar(vertical: true, showNow: !docked, indicator: indicator)
@@ -81,7 +75,7 @@ struct ShellView: View {
                         .onTapGesture { withAnimation(.ssSpring) { app.railSheet = false } }
                         .transition(.opacity)
                         .accessibilityHidden(true)
-                    RailView(sheet: true)
+                    RailView(sheet: true, topInset: geo.safeAreaInsets.top)
                         .frame(width: min(340, geo.size.width * 0.88))
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .transition(.move(edge: .trailing))

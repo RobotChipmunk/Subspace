@@ -75,6 +75,9 @@ it in full for editing.
   fully round. Nothing has a sharp corner.
 - Glass (`.glass`): translucent surface, 28px blur, hairline border, soft shadow. Use it for things
   that float over content: the nav, cards, the composer. Lists of rows sit directly on the page.
+- In the iOS app there is no bar under the status bar. Content that scrolls up beneath it blurs
+  and fades away, barely at first and completely by the top edge (`softTopEdge`). At rest nothing
+  is drawn there: no tint, no line. Do not add a material strip or a navigation bar at the top.
 - Shadows: `--shadow` at rest, `--shadow-lift` for something picked up or opened.
 - Spacing: 4px steps. Row padding about 10px by 12px; cards 16px; panels 24px. Content column
   maxes at about 880px.
