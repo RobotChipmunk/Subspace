@@ -109,6 +109,8 @@ export async function assignRoutine(actor: Agent, key: string, agentRef: string 
  * its next day.
  */
 export async function tick(): Promise<{ due: string[] }> {
+  // the same heartbeat tells the writers of notes that have passed their day (core/current.ts)
+  await import("./current").then((c) => c.tellLapsed()).catch((e) => console.error("current: tellLapsed failed", (e as Error).message));
   if (!(await q1("SELECT 1 FROM routines WHERE agent_id IS NOT NULL AND next_at <= now() LIMIT 1").catch(() => null))) return { due: [] };
   const due: string[] = [];
   for (const r of ROUTINES) {

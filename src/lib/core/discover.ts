@@ -11,6 +11,7 @@
  */
 import { q, q1 } from "../db";
 import { describeAccess, sightOf, visibleNodes } from "./access";
+import { currentNotes } from "./current";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
 import { listEntries, listMonths, monthLine } from "./journal";
@@ -503,9 +504,11 @@ const linkItem = (r: Record<string, unknown>, where = false): Item => ({
   saved: new Date(r.created_at as string).toISOString().slice(0, 10),
 });
 
-const contextChild = (k: { path: string; title: string; summary: string; kind?: string; blurb?: string | null; child_count?: number; body_chars: number; updated_at: string }): Child => ({
+/** How a note that holds only for a while says so in a listing. The day is compared in UTC, which is near enough for a label. */
+const untilNote = (until?: string | null) => (until ? (until < new Date().toISOString().slice(0, 10) ? ` (lapsed: it held until ${until})` : ` (until ${until})`) : "");
+const contextChild = (k: { path: string; title: string; summary: string; kind?: string; blurb?: string | null; child_count?: number; body_chars: number; updated_at: string; until?: string | null }): Child => ({
   path: `/context/${k.path}`,
-  title: k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.kind === "journal" ? `${k.title} (journal entry)` : k.title,
+  title: (k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.kind === "journal" ? `${k.title} (journal entry)` : k.title) + untilNote(k.until),
   about: k.summary || k.blurb || undefined,
   ...(k.child_count ? { count: k.child_count } : {}),
   latest: k.updated_at,
@@ -744,6 +747,7 @@ export async function read(ids: string[], opts: { after?: string; /** the agent 
           trail: crumbs.map((c) => c.title).join(" › "),
           title: n.title,
           summary: n.summary,
+          ...(n.until ? { until: n.until } : {}),
           body: n.body,
           version: n.version,
           updated_by: "@" + (handles.get(n.updated_by) ?? n.updated_by),
@@ -791,9 +795,19 @@ export async function briefing(agent: Agent) {
   const mine = (await listRoutines()).filter((r) => r.agent_id === agent.id);
   // said here as well as on connecting: an app may hold instructions from the day it connected, but it reads this every session
   const rules = sight.node({ path: SYSTEM, kind: "note" }) ? await houseRules().catch(() => "") : "";
+  // what is true for now, so every session starts knowing it; a note past its day is left out, and its writer is reminded of it
+  const now = (await currentNotes().catch(() => [])).filter(sight.node);
+  const handleOf = (id: string) => "@" + (agents.find((a) => a.id === id)?.handle ?? id);
+  const mineLapsed = now.filter((c) => c.lapsed && c.updated_by === agent.id);
   return {
     you: { handle: "@" + agent.handle, name: agent.name, roles: agent.roles, bio: agent.bio },
     ...(access ? { your_access: access } : {}),
+    ...(now.some((c) => !c.lapsed)
+      ? { current: now.filter((c) => !c.lapsed).slice(0, 12).map((c) => ({ path: "/context/" + c.path, title: c.title, about: c.summary || undefined, ...(c.until ? { until: c.until } : {}), set_by: handleOf(c.updated_by) })) }
+      : {}),
+    ...(mineLapsed.length && !sight.readOnly
+      ? { lapsed_notes_of_yours: mineLapsed.map((c) => ({ path: "/context/" + c.path, title: c.title, until: c.until })), lapsed_hint: "These notes of yours under /context/current have passed their day. Renew each with a new until, fold what lasted into long-term context, or archive it." }
+      : {}),
     ...(rules ? { house_rules: rules.length > 3500 ? rules.slice(0, 3500).trimEnd() + '… (cut short: read the rest under explore("/context/system"))' : rules } : {}),
     owner: "@" + agents.find((a) => a.kind === "human")?.handle,
     now: { today: cal.today, timezone: tz },

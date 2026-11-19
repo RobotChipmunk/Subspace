@@ -497,6 +497,11 @@ const MIGRATIONS: string[] = [
      decided_at timestamptz
    );
    CREATE INDEX IF NOT EXISTS rule_proposals_pending ON rule_proposals (created_at) WHERE status = 'pending'`,
+  // A context note can say until when it holds (core/current.ts). lapse_told records that its
+  // writer has been told it passed that day, so they are told once.
+  `ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS until date;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS lapse_told boolean NOT NULL DEFAULT false;
+   CREATE INDEX IF NOT EXISTS context_until ON context_nodes (until) WHERE until IS NOT NULL AND NOT lapse_told AND NOT archived`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

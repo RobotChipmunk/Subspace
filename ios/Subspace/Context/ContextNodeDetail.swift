@@ -175,14 +175,21 @@ struct ContextNodeDetail: View {
         let name = by?.name ?? "someone"
         var line = "Updated by \(name) · \(ago(shown.updated_at))"
         if let v = shown.version { line += " · version \(v)" }
-        return HStack(spacing: 6) {
-            if let by { AvatarView(agent: by, size: 15) }
-            Text(line).font(.ssMeta).foregroundStyle(Theme.ink3)
+        // a note that is only true for now says until when; one under Current always offers the day
+        let offersUntil = (shown.kind ?? "note") == "note" && (shown.until != nil || (shown.path ?? "").hasPrefix("current/"))
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if let by { AvatarView(agent: by, size: 15) }
+                Text(line).font(.ssMeta).foregroundStyle(Theme.ink3)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("page.meta")
+            if offersUntil {
+                ContextUntilRow(until: shown.until) { day in setUntil(day) }
+            }
         }
         .padding(.top, 8)
         .padding(.bottom, 22)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("page.meta")
     }
 
     @ViewBuilder private var bodyArea: some View {
@@ -255,6 +262,26 @@ struct ContextNodeDetail: View {
     }
 
     // MARK: Behaviour
+
+    /// Moves the day the note holds until, or takes it off.
+    private func setUntil(_ day: String?) {
+        let before = shown.until
+        shown.until = day
+        Task {
+            do {
+                let saved = try await app.api.send("PATCH", "context/\(node.id)", body: ["until": day ?? NSNull()], as: ContextNode.self)
+                shown.until = saved.until
+                shown.version = saved.version
+                shown.updated_at = saved.updated_at
+                shown.updated_by = saved.updated_by
+                error = ""
+                onChanged(saved)
+            } catch let e {
+                shown.until = before
+                error = e.localizedDescription
+            }
+        }
+    }
 
     private func begin() {
         saver.start(api: app.api, nodeID: node.id, baseline: ContextDraft(title: node.title, summary: node.summary ?? "", body: node.body ?? ""))

@@ -26,6 +26,8 @@ export type ContextNode = {
   /** Journal entries only: how the entry feels (one of MOODS), and who said so ("auto" or "owner"). */
   mood: string | null;
   mood_by: string | null;
+  /** The last day this note holds, for what is only true for now (core/current.ts); null for what lasts. */
+  until: string | null;
   version: number;
   updated_by: string;
   archived: boolean;
@@ -33,8 +35,18 @@ export type ContextNode = {
   updated_at: string;
 };
 
-export const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, entry_date, tags, tags_by, mood, mood_by, version, updated_by, created_at, updated_at, length(body) AS body_chars";
+export const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, entry_date, tags, tags_by, mood, mood_by, until, version, updated_by, created_at, updated_at, length(body) AS body_chars";
 export type ContextLite = Omit<ContextNode, "body" | "archived"> & { body_chars: number; child_count?: number };
+
+/** The top-level section for what is only true for now (core/current.ts). A note an agent adds there must say until when. */
+export const CURRENT = "current";
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** An end day as given: a day, or null (or "") for none. */
+function readUntil(v: unknown): string | null {
+  if (v === null || v === "" || v === "none") return null;
+  if (typeof v !== "string" || !DAY.test(v) || isNaN(new Date(v + "T12:00:00Z").getTime())) throw bad("until is the last day the note holds, written YYYY-MM-DD, or null for no end.");
+  return v;
+}
 
 /** The top-level section that holds the house rules (core/rules.ts). Agents change it only through a proposal the owner approves. */
 export const SYSTEM = "system";
@@ -101,7 +113,7 @@ const docType = (kind: string) => (kind === "link" ? "link" : "context");
 
 const okCover = (c: unknown) => (typeof c === "string" && /^https:\/\//.test(c) && c.length < 2000 ? c : null);
 
-export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string; kind?: "note" | "page" | "link" | "journal"; cover?: string; link?: { url: string; key: string; site: string; blurb: string }; journal?: { date: string; tags?: string[] } },
+export async function createNode(actor: Agent, input: { parent?: string | null; title: string; /** the last day the note holds, YYYY-MM-DD; required from an agent for a note under Current */ until?: string | null; summary?: string; body?: string; kind?: "note" | "page" | "link" | "journal"; cover?: string; link?: { url: string; key: string; site: string; blurb: string }; journal?: { date: string; tags?: string[] } },
   opts: Opts = {},
 ) {
   const title = (input.title ?? "").trim();
@@ -118,11 +130,16 @@ export async function createNode(actor: Agent, input: { parent?: string | null; 
   const journal = input.kind === "journal" ? input.journal : undefined;
   const kind = link ? "link" : journal ? "journal" : input.kind === "page" ? "page" : "note";
   if (kind === "page" && !parent) throw bad("A page needs a parent. Put it under the context area it belongs to, in a folder for its topic.");
+  const until = input.until === undefined ? null : readUntil(input.until);
+  const inCurrent = !!parent && (parent.path === CURRENT || parent.path.startsWith(CURRENT + "/"));
+  if (inCurrent && kind === "note" && !until && actor.kind === "agent")
+    throw bad("A note under /context/current says what is true for now, so it needs until: the last day it holds (YYYY-MM-DD). Choose the day you would expect to look at it again: the end of the trip, the end of the month.");
   await q("INSERT INTO context_nodes (id, parent_id, path, title, summary, body, updated_by, kind, cover, url, url_key, site, blurb, entry_date, tags, tags_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)", [
     id, parent?.id ?? null, path, title.slice(0, 120), (input.summary ?? "").slice(0, 400), body, actor.id, kind, okCover(input.cover),
     link?.url ?? null, link?.key ?? null, link?.site ?? null, link?.blurb ?? null,
     journal?.date ?? null, journal?.tags ?? [], journal?.tags?.length ? "owner" : null,
   ]);
+  if (until) await q("UPDATE context_nodes SET until = $2 WHERE id = $1", [id, until]);
   await indexDoc(docType(kind), id, title, docText({ summary: input.summary ?? "", body, url: link?.url, site: link?.site, blurb: link?.blurb, tags: journal?.tags }));
   await logEvent({ actor: actor.id, type: kind === "link" ? "link.saved" : kind === "page" ? "page.created" : kind === "journal" ? "journal.created" : "context.created", entity_type: "context", entity_id: id, summary: `${path}: ${input.summary || title}`, mentions: await findMentions(body), data: { path } });
   return getNode(id);
@@ -131,7 +148,7 @@ export async function createNode(actor: Agent, input: { parent?: string | null; 
 export async function updateNode(
   actor: Agent,
   ref: string,
-  patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string; tags?: string[]; entry_date?: string; mood?: string | null },
+  patch: { title?: string; summary?: string; body?: string; body_append?: string; /** the last day the note holds; null takes the end day off */ until?: string | null; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string; tags?: string[]; entry_date?: string; mood?: string | null },
   opts: Opts = {},
 ) {
   const before = await getNode(ref);
@@ -176,7 +193,8 @@ export async function updateNode(
     path = await uniquePath(parent?.path ?? null, title, before.id);
   }
 
-  const changed = body !== before.body || title !== before.title || summary !== before.summary || cover !== before.cover || kind !== before.kind || blurb !== before.blurb;
+  const until = patch.until === undefined ? before.until : readUntil(patch.until);
+  const changed = body !== before.body || title !== before.title || summary !== before.summary || cover !== before.cover || kind !== before.kind || blurb !== before.blurb || until !== before.until;
   const filed = tags.join("\n") !== before.tags.join("\n") || entryDate !== before.entry_date || mood !== before.mood || moodBy !== before.mood_by;
   if (!changed && !filed && path === before.path) return before;
 
@@ -195,6 +213,8 @@ export async function updateNode(
     // Keep every descendant's address in step with its ancestor.
     await q("UPDATE context_nodes SET path = $2 || substr(path, $3) WHERE path LIKE $1", [before.path.replace(/[%_\\]/g, "\\$&") + "/%", path, before.path.length + 1]);
   }
+  // a new end day starts the note's time afresh: its writer is told again if it passes this one too
+  if (until !== before.until) await q("UPDATE context_nodes SET until = $2, lapse_told = false WHERE id = $1", [before.id, until]);
   await indexDoc(docType(kind), before.id, title, docText({ summary, body, url: before.url, site: before.site, blurb, tags }));
   const was = new Set(await findMentions(before.body));
   const mentions = (await findMentions(body)).filter((h) => !was.has(h));

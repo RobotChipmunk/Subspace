@@ -4,6 +4,7 @@ import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
 import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
+import { currentNotes } from "@/lib/core/current";
 import { search } from "@/lib/core/discover";
 import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
@@ -65,7 +66,8 @@ const routes: [string, RegExp, Handler][] = [
 
   ["GET", /^context$/, async ({ url }) => {
     const ref = url.searchParams.get("node");
-    if (!ref) return { node: null, trail: [], children: await children(null) };
+    // the top of the tree also says what is true for now (the notes under Current), soonest to end first
+    if (!ref) return { node: null, trail: [], children: await children(null), current: await currentNotes() };
     const node = await getNode(ref);
     return { node, trail: await breadcrumb(node), children: await children(node.id) };
   }],

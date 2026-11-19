@@ -252,6 +252,7 @@ export const TOOLS: Tool[] = [
       body_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement.") }, required: ["find", "replace"] },
       about: str("Saved links only: the line on what the page is."),
       expect_version: { type: "integer", description: "Version you last read. The write fails if someone else edited since." },
+      until: str("For what is only true for now: the last day the note holds, YYYY-MM-DD. Required for a new note under /context/current. Pass null to take an end day off."),
       why: str("Only for a house rule (a note under /context/system): one sentence, at most 120 characters, telling the owner why the change is worth making. Such a change is not made at once: it is put to the owner, and applied if they approve."),
     }),
     run: async (a, args) => {
@@ -260,8 +261,8 @@ export const TOOLS: Tool[] = [
       const parent = args.parent === undefined ? undefined : ["", "/", "/context", "/context/"].includes(args.parent) ? null : args.parent;
       const n = args.id
         ? await updateNode(a, args.id, { ...args, parent } as any)
-        : await createNode(a, { parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append });
-      return { id: n.id, path: "/context/" + n.path, version: n.version };
+        : await createNode(a, { parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append, until: args.until });
+      return { id: n.id, path: "/context/" + n.path, version: n.version, ...(n.until ? { until: n.until } : {}) };
     },
   },
   {

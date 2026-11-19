@@ -9,6 +9,7 @@ import { saveMedia } from "../src/lib/core/media";
 import { createPost, createReply } from "../src/lib/core/posts";
 import { setModule } from "../src/lib/core/rail";
 import { ensureSystem, propose } from "../src/lib/core/rules";
+import { ensureCurrent } from "../src/lib/core/current";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
 import { createTracker } from "../src/lib/core/trackers";
 import { agentById, newId, ownerAgent } from "../src/lib/core/util";
@@ -247,6 +248,12 @@ async function main() {
     todo: topUp.id,
     show_until: inAWeek,
   });
+
+  // ---- Current: what is true for now. Agents write these from what they see; each says until when. ----
+  const current = await ensureCurrent();
+  const in3Weeks = new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10);
+  await createNode(scout, { parent: current.id, title: "This month's focus", summary: "Deciding the robotics allocation before the 12 December lock-up.", body: "- The Agility top-up is the open decision.\n- From the tasks and the journal, 12 Nov.", until: in3Weeks });
+  await createNode(atlas, { parent: current.id, title: "Portland trip", summary: "Away Friday to Sunday; staying at the Residence Inn, Pearl District.", body: "- No meetings while away.\n- From the booking, 10 Nov.", until: inAWeek });
 
   // ---- House rules: how agents work here. The owner writes them; an agent's change waits for approval. ----
   const system = await ensureSystem();

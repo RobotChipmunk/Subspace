@@ -235,6 +235,16 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **Current** (`CurrentShelf` and the end-day row in `context/page.tsx`; `ContextCurrent.swift` in
+  the app): what is true for now, between the rail and long-term context. At the top of Context,
+  under a small capitals heading "Current", the notes under the Current section sit two across
+  (one on a phone) as 20px glass cards: title, two lines of summary, and a meta line with the
+  avatar and name of whoever set it and "until 30 Nov". A note past its day stays, at 60%
+  opacity, reading "ended 12 Nov", until its writer renews or archives it. Opened, a note that
+  has an end day, and any note under Current, shows it beneath the "Updated by" line as a date
+  pill ("Until 30 Nov"; the system date picker in the app) with a small x to take the day off.
+  The group is absent when there is nothing current. Agents write these unasked, so who set each
+  one is always shown.
 - **House rules and proposals** (`Proposals` in `context/page.tsx`; `ContextProposals.swift` in the
   app): System is an ordinary top-level section of Context that holds the house rules. The owner
   edits it like any note. An agent's change to it does not happen: it waits as a proposal, asked

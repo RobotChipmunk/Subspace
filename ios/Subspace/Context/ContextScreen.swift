@@ -96,6 +96,9 @@ struct ContextScreen: View {
                 .padding(.bottom, 24)
             // house rules: what agents have proposed waits here as well as in the rail
             ContextProposals(onDecided: { Task { await load() } })
+            if let current = tree?.current, !current.isEmpty {
+                ContextCurrentShelf(notes: current, wide: wide) { id in go(id) }
+            }
             if !pages.isEmpty {
                 ContextPagesShelf(pages: pages) { id in go(id) }
             }

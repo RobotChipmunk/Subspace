@@ -982,6 +982,27 @@ async function run(profile) {
     await settle(1100);
     await noSidewaysScroll("context note");
   });
+  await step("current", async () => {
+    // What is true for now sits at the top of Context: each note with who set it and until when.
+    await page.goto(`${BASE}/context`);
+    await settle(1200);
+    const shelf = page.locator("[data-current]");
+    await reachable(shelf.getByRole("button", { name: /This month's focus/ }), "current: a note that holds for now");
+    const labels = await shelf.locator("[data-current-note]").allInnerTexts();
+    if (labels.length !== 2 || !labels.every((t) => /until \d/.test(t))) fail(`current: each note should say until when (${labels.map((t) => t.replace(/\s+/g, " ")).join(" | ")})`);
+    if (!/Scout/.test(labels.find((t) => t.includes("This month's focus")) ?? "")) fail("current: a note does not say who set it");
+    await noSidewaysScroll("current");
+    await shot("context-current");
+    // opened, a current note offers its end day, which the owner can move or take off
+    await press(shelf.getByRole("button", { name: /Portland trip/ }));
+    await page.getByLabel("Title").waitFor({ timeout: 5000 });
+    await settle(700);
+    const until = page.locator("[data-until]");
+    await reachable(until.getByRole("button", { name: /^Date: Until / }), "current: the end day on a note");
+    await reachable(until.getByRole("button", { name: "Take the end day off" }), "current: taking the end day off");
+    await shot("context-current-note");
+  });
+
   await step("house rules", async () => {
     // System holds the house rules. What an agent has proposed waits at the top of Context and inside System.
     const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);

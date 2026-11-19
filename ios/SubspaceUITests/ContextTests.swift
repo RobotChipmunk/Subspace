@@ -23,6 +23,20 @@ final class ContextTests: SubspaceTestCase {
         shot("21-page-scrolled")
     }
 
+    /// What is true for now sits at the top of Context, each note with who set it and until when.
+    func testCurrentNotesSayUntilWhen() {
+        launchSignedIn()
+        go("context")
+        expect(app.descendants(matching: .any)["context.current"], "the Current group at the top of Context")
+        let focus = expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'context.current.' AND label CONTAINS 'This month’s focus' OR identifier BEGINSWITH 'context.current.' AND label CONTAINS \"This month's focus\"")).firstMatch, "a note that holds for now")
+        XCTAssertTrue(focus.label.contains("until"), "A current note should say until when: \(focus.label)")
+        XCTAssertTrue(focus.label.contains("Scout"), "A current note should say who set it: \(focus.label)")
+        shot("25-context-current")
+        focus.tap()
+        expect(app.descendants(matching: .any)["context.until"], "the end day, on the note")
+        shot("25-context-current-note")
+    }
+
     /// House rules live under System. A change an agent proposed waits at the top of Context
     /// with who, why and what; approving it applies it and the proposal goes.
     func testApproveAProposedHouseRule() {

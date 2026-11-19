@@ -7,14 +7,24 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import useSWRInfinite from "swr/infinite";
 import { Avatar, mesh } from "@/components/bits";
+import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
 import { ago, api, fetcher, hash, soft, useMe, useSaver } from "@/lib/client";
 import type { ContextLite, ContextNode } from "@/lib/core/context";
+import type { CurrentNote } from "@/lib/core/current";
 import type { LinkPage } from "@/lib/core/links";
 import type { Proposal } from "@/lib/core/rules";
 import { PALETTES } from "@/lib/palettes";
 
-type View = { node: ContextNode | null; trail: { id: string; path: string; title: string }[]; children: ContextLite[] };
+type View = { node: ContextNode | null; trail: { id: string; path: string; title: string }[]; children: ContextLite[]; /** at the top of the tree: what is true for now */ current?: CurrentNote[] };
+
+/** A day as people say it: "30 Nov", with the year only when it is not this one. */
+const dayLabel = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", ...(d.slice(0, 4) === String(new Date().getFullYear()) ? {} : { year: "numeric" }) });
+/** Today where the owner is sitting, as YYYY-MM-DD. */
+const localToday = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+};
 type Hit = { id: string; type: string; title?: string; path?: string; snippet: string; at: string };
 
 export default function ContextPage() {
@@ -105,6 +115,7 @@ function Inner() {
             {!data.node && <p className="-mt-4 mb-6 px-1 text-[14px] text-ink2">What your agents know about you, your life and their work. They keep it current; you can change anything.</p>}
             {/* house rules: what agents have proposed waits here as well as in the rail */}
             {(!data.node || data.node.path === "system" || data.node.path.startsWith("system/")) && <Proposals onDecided={() => mutate()} />}
+            {!data.node && <CurrentShelf notes={data.current ?? []} onOpen={go} />}
             {!data.node && <RecentPages onOpen={go} />}
             <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
               {data.children.filter((c) => c.kind !== "link").map((c, i) => (
@@ -126,6 +137,36 @@ function Inner() {
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * What is true for now: the notes under Current, soonest to end first, each with the day it holds
+ * until and who set it. Agents write these from what they see; opening one lets the owner change
+ * or remove it. Nothing shows when there are none.
+ */
+function CurrentShelf({ notes, onOpen }: { notes: CurrentNote[]; onOpen: (id: string) => void }) {
+  const { agent } = useMe();
+  if (!notes.length) return null;
+  return (
+    <section data-current aria-label="Current" className="mb-6">
+      <h2 className="mb-2 px-1 text-[13px] font-semibold uppercase tracking-[0.05em] text-ink3">Current</h2>
+      <div className="grid grid-cols-2 gap-2.5 max-sm:grid-cols-1">
+        {notes.map((n, i) => {
+          const by = agent(n.updated_by);
+          return (
+            <motion.button key={n.id} data-current-note={n.lapsed ? "lapsed" : "holds"} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...soft, delay: Math.min(i, 8) * 0.03 }} whileTap={{ scale: 0.985 }} onClick={() => onOpen(n.id)} className={`glass rounded-[20px] px-4 py-3 text-left ${n.lapsed ? "opacity-60" : ""}`}>
+              <div className="truncate text-[15px] font-semibold">{n.title}</div>
+              {n.summary && <p className="line-clamp-2 text-[13.5px] leading-snug text-ink2">{n.summary}</p>}
+              <div className="mt-1.5 flex items-center gap-1.5 text-[12px] text-ink3">
+                {by && <Avatar agent={by} size={14} />}
+                <span className="truncate">{[by?.name, n.until ? (n.lapsed ? `ended ${dayLabel(n.until)}` : `until ${dayLabel(n.until)}`) : "no end day"].filter(Boolean).join(" · ")}</span>
+              </div>
+            </motion.button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -487,10 +528,24 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
           </a>
         </div>
       )}
-      <div className="mb-6 mt-2 flex items-center gap-1.5 pr-10 text-[12.5px] text-ink3">
+      <div className="mt-2 flex items-center gap-1.5 pr-10 text-[12.5px] text-ink3">
         {by && <Avatar agent={by} size={15} />}
         Updated by {by?.name ?? "someone"} · {ago(node.updated_at)} · version {node.version}
       </div>
+      {/* a note that is only true for now says until when; one under Current always offers the day */}
+      {node.kind === "note" && (node.until || node.path.startsWith("current/")) ? (
+        <div data-until className="mb-6 mt-2.5 flex items-center gap-1.5">
+          <DatePill label={node.until ? `Until ${dayLabel(node.until)}` : "No end day"} value={node.until} today={localToday()} onPick={(d) => patch({ until: d })} />
+          {node.until && (
+            <button onClick={() => patch({ until: null })} aria-label="Take the end day off" title="Take the end day off" className="grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink">
+              <X size={14} />
+            </button>
+          )}
+          {node.until && node.until < localToday() && <span className="text-[12.5px] text-ink3">It has passed its day.</span>}
+        </div>
+      ) : (
+        <div className="mb-6" />
+      )}
       <div className="editor-compact">
         <Editor
           value={body}

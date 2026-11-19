@@ -183,6 +183,8 @@ struct ContextNode: Codable, Identifiable, Hashable {
     var site: String?
     var blurb: String?
     var body: String?
+    /// The last day the note holds ("YYYY-MM-DD"), for what is only true for now; nil for what lasts.
+    var until: String?
     var version: Int?
     var updated_by: String?
     var created_at: String?

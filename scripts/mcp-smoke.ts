@@ -3,6 +3,7 @@ import { createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
 import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
 import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
+import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
 import { archiveNode, createNode, getNode } from "../src/lib/core/context";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
@@ -294,6 +295,29 @@ async function main() {
     const freed = (await agentByToken(await issueToken(made.id)))!;
     if (!(await call(freed, "explore", { path: "/feed" })).children) throw new Error("an agent whose limits were lifted still cannot see the feed");
     await updateAgent(owner, made.id, { archived: true });
+  }
+
+  {
+    // Current: a note under /context/current says what is true for now and until when. It is in every briefing while it holds; past its day it drops out and its writer is told once.
+    await ensureCurrent();
+    const noDay = await call(s, "context_write", { parent: "/context/current", title: "Smoke focus " + tag, summary: "Testing the current tier." });
+    if (!noDay.ERROR || !/until/.test(noDay.ERROR)) throw new Error("a current note was accepted without an end day: " + JSON.stringify(noDay));
+    const soon = new Date(Date.now() + 5 * 86400_000).toISOString().slice(0, 10);
+    const focus = await call(s, "context_write", { parent: "/context/current", title: "Smoke focus " + tag, summary: "Testing the current tier.", body: "- From the smoke test.", until: soon });
+    if (focus.until !== soon) throw new Error("context_write did not keep the end day: " + JSON.stringify(focus));
+    const told = (await call(claude, "briefing")).current?.find((x: any) => x.path === focus.path);
+    if (told?.until !== soon || told.set_by !== "@" + s.handle) throw new Error("the briefing does not list what is current: " + JSON.stringify(told));
+    if ((await call(claude, "read", { ids: [focus.id] }))[0]?.until !== soon) throw new Error("read() does not give a note's end day");
+    await call(s, "changes");
+    await q("UPDATE context_nodes SET until = current_date - 2 WHERE id = $1", [focus.id]);
+    if ((await tellLapsed()) < 1 || (await tellLapsed()) !== 0) throw new Error("a note past its day should be told of once");
+    if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "context.lapsed" && i.id === focus.id)) throw new Error("the writer was not told its note passed its day");
+    const after = await call(s, "briefing");
+    if (after.current?.some((x: any) => x.path === focus.path) || !after.lapsed_notes_of_yours?.some((x: any) => x.path === focus.path)) throw new Error("a lapsed note should leave current and be named to its writer: " + JSON.stringify(after).slice(0, 300));
+    // renewed, it is current again
+    await call(s, "context_write", { id: focus.id, until: soon });
+    if (!(await call(claude, "briefing")).current?.some((x: any) => x.path === focus.path)) throw new Error("a renewed note did not come back into current");
+    await call(s, "context_archive", { id: focus.id });
   }
 
   {
