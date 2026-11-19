@@ -37,13 +37,15 @@ export const meaningOn = () => !!process.env.OPENAI_API_KEY || fake();
 
 const SAME: Record<string, string> = { holiday: "travel", holidays: "travel", vacation: "travel", trip: "travel", journey: "travel", car: "vehicle", automobile: "vehicle" };
 /**
- * Each word lights two places out of several thousand, chosen by two unrelated hashes. Two
- * different words then share both places almost never, and sharing one is worth too little to
- * count as a match, so the stand-in never "finds" a made-up word in text that does not hold it.
- * (With one place out of 256 it sometimes did, and a check that a nonsense search finds nothing
- * failed about one run in eight.)
+ * Each word lights sixteen places out of several thousand, chosen from two unrelated hashes. Two
+ * different words may share one of them now and then, but one in sixteen is worth far too little
+ * to count as a match, even against a text of a single word, so the stand-in never "finds" a
+ * made-up word in text that does not hold it. (With one place out of 256 it sometimes did, and
+ * with two out of 4096 it still did against texts of a word or two, where sharing one place is
+ * half the likeness: a check that a nonsense search finds nothing failed now and then.)
  */
 const FAKE_DIMS = 4096;
+const FAKE_PLACES = 16;
 function fakeEmbed(text: string): number[] {
   const v = new Array<number>(FAKE_DIMS).fill(0);
   for (const raw of text.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []) {
@@ -54,8 +56,12 @@ function fakeEmbed(text: string): number[] {
       h1 = Math.imul(h1 ^ w.charCodeAt(i), 16777619);
       h2 = (Math.imul(h2, 33) + w.charCodeAt(i)) | 0;
     }
-    v[Math.abs(h1) % FAKE_DIMS] += Math.SQRT1_2;
-    v[Math.abs(h2 ^ (h2 >>> 13)) % FAKE_DIMS] += Math.SQRT1_2;
+    for (let i = 0; i < FAKE_PLACES; i++) {
+      // each place from both hashes, well mixed, so two words' places have nothing to do with each other
+      let x = Math.imul(h1 ^ Math.imul(i + 1, 0x9e3779b1), 0x85ebca6b) ^ h2;
+      x = Math.imul(x ^ (x >>> 15), 0xc2b2ae35);
+      v[((x ^ (x >>> 13)) >>> 0) % FAKE_DIMS] += 1;
+    }
   }
   const len = Math.sqrt(v.reduce((sum, x) => sum + x * x, 0)) || 1;
   return v.map((x) => x / len);

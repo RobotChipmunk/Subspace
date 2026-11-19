@@ -307,9 +307,26 @@ struct AgentsConnectButton: View {
     }
 }
 
+/// An answer the owner sent to an agent from one of its rail modules.
+struct AgentsSentAnswer: Decodable, Identifiable, Hashable {
+    let id: String
+    var agent_id: String?
+    var title: String?
+    var label: String?
+    var at: String?
+    /// True once the agent has read far enough to have seen it.
+    var picked_up: Bool?
+}
+
+struct AgentsSentReply: Decodable {
+    var sent: [AgentsSentAnswer]?
+}
+
 /// One agent: who it is, what it does, and the ways to reach and set it up.
 struct AgentsAgentRow: View {
     var agent: Agent
+    /// What the owner has answered this agent from the rail, newest first.
+    var sent: [AgentsSentAnswer] = []
     var open: Bool
     var onToggle: () -> Void
     var onChat: () -> Void
@@ -323,8 +340,9 @@ struct AgentsAgentRow: View {
     @State private var problem = ""
     @FocusState private var bioFocused: Bool
 
-    init(agent: Agent, open: Bool, onToggle: @escaping () -> Void, onChat: @escaping () -> Void) {
+    init(agent: Agent, sent: [AgentsSentAnswer] = [], open: Bool, onToggle: @escaping () -> Void, onChat: @escaping () -> Void) {
         self.agent = agent
+        self.sent = sent
         self.open = open
         self.onToggle = onToggle
         self.onChat = onChat
@@ -332,6 +350,8 @@ struct AgentsAgentRow: View {
     }
 
     private var live: Bool { agent.runtime?["enabled"]?.bool ?? false }
+    /// Answers this agent has not read yet.
+    private var waiting: Int { sent.filter { $0.picked_up != true }.count }
     private var illustrator: Bool { (agent.roles ?? []).contains("illustrator") }
 
     var body: some View {
@@ -395,6 +415,15 @@ struct AgentsAgentRow: View {
             }
             if live { AgentsBadge(icon: "bolt.fill", text: "Realtime") }
             if illustrator { AgentsBadge(icon: "wand.and.stars", text: "Illustrator") }
+            if waiting > 0 {
+                Text("\(waiting) waiting")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.ink2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Theme.fill, in: Capsule())
+                    .accessibilityIdentifier("agents.waiting.\(agent.id)")
+            }
             if let access = agent.access {
                 AgentsBadge(icon: "eye", text: access.read_only == true ? "Read only" : "Limited", quiet: true)
                     .accessibilityIdentifier("agents.access.badge.\(agent.id)")
@@ -482,12 +511,41 @@ struct AgentsAgentRow: View {
                 .fixedSize(horizontal: false, vertical: true)
             AgentsCopyField(label: "Connector address", value: origin + "/api/mcp/" + agent.handle, identifier: "agents.address.\(agent.id)")
             AgentsConnections(id: agent.id, empty: "No app has signed in yet.")
+            if !sent.isEmpty { answers }
             AgentsAccess(agent: agent)
             AgentsRoutines(agent: agent)
             scriptsBox(origin: origin)
             footer
         }
         .padding(.top, 14)
+    }
+
+    /// What the owner has answered this agent from the rail: the button they tapped, on which
+    /// module, and whether the agent has picked it up. A record; nothing here can be tapped.
+    private var answers: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            AgentsSectionLabel("Your answers")
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(sent.prefix(6).enumerated()), id: \.element.id) { item in
+                    if item.offset > 0 { Rectangle().fill(Theme.line).frame(height: 1) }
+                    let x = item.element
+                    VStack(alignment: .leading, spacing: 2) {
+                        (Text("“\(x.label ?? "")”").fontWeight(.medium).foregroundStyle(Theme.ink) + Text(" on \(x.title ?? "")").foregroundStyle(Theme.ink2))
+                            .font(.system(size: 13.5))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(agentsAgoPhrase(x.at)) · \(x.picked_up == true ? "\(agent.name) has picked it up" : "waiting for \(agent.name)")")
+                            .font(.ssMeta)
+                            .foregroundStyle(Theme.ink3)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("agents.sent.\(agent.id)")
     }
 
     private func scriptsBox(origin: String) -> some View {

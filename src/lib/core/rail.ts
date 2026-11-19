@@ -22,7 +22,7 @@
 import { validateBlock, type AnyBlock } from "../blocks";
 import { q, q1 } from "../db";
 import { addDays, bad, logEvent, newId, notFound, timezone, type Agent } from "./util";
-import { pushRail } from "./push";
+import { pushRail, railCategory } from "./push";
 
 /** Blocks that read well in a narrow column. A module holds one. */
 export const RAIL_BLOCKS = ["facts", "timeline", "callout", "stats", "cards", "map", "text"] as const;
@@ -236,9 +236,18 @@ export async function setModule(
   );
   // A new or changed module that shows now reaches the owner's phone; one that waits for show_from
   // is left to the app, which notices it the next time it looks at the rail.
-  if (!same && new Date(from) <= new Date()) pushRail({ id, title, subtitle, label, badge: (await activeModules()).length });
+  if (!same && new Date(from) <= new Date()) pushRail({ id, title, subtitle, label, badge: (await activeModules()).length, actions });
   if (!same) await logEvent({ actor: actor.id, type: mine ? "rail.updated" : "rail.added", entity_type: "rail", entity_id: id, summary: `${level === "info" ? "" : level.toUpperCase() + ": "}${title}${label ? ` (${label})` : ""}`, data: { key, level, ...(todoId ? { todo: todoId } : {}) } });
   return (await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1", [id]))!;
+}
+
+/**
+ * The sets of buttons modules have carried lately, as notification categories (see core/push.ts).
+ * The iOS app registers them, so a notification that arrives while it is closed shows its buttons.
+ */
+export async function buttonSets(): Promise<string[]> {
+  const rows = await q<{ actions: RailAction[] }>("SELECT actions FROM rail_modules WHERE updated_at > now() - interval '90 days' AND jsonb_array_length(actions) > 0 ORDER BY updated_at DESC LIMIT 200");
+  return [...new Set(rows.map((r) => railCategory(r.actions)).filter((c): c is string => !!c))].slice(0, 40);
 }
 
 /** What the owner sees now: warnings and errors, then tasks a guest added that still need a day, then the rest. */
@@ -356,6 +365,24 @@ async function moduleSent(actor: Agent, m: RailModule, action: RailAction) {
   const { decideByModule, isProposalModule } = await import("./rules");
   if (isProposalModule(m.key)) await decideByModule(m.id, action.send === "approve");
   return { cleared: true, sent: { label: action.label, to } };
+}
+
+/** An answer the owner sent to an agent from one of its modules, as the Agents screen lists it. */
+export type SentAnswer = { id: string; agent_id: string; title: string; label: string; at: string; picked_up: boolean };
+
+/**
+ * The answers the owner has sent to agents in the last two weeks, newest first: which module,
+ * which button, when, and whether the agent has read far enough to have seen it. An agent that
+ * has acted usually removes its module, and the answer goes with it.
+ */
+export async function sentAnswers(): Promise<SentAnswer[]> {
+  return q<SentAnswer>(
+    `SELECT m.id, m.author AS agent_id, m.title, m.sent->>'label' AS label, m.sent->>'at' AS at,
+            COALESCE(a.cursor_seq >= (m.sent->>'seq')::bigint, false) AS picked_up
+     FROM rail_modules m JOIN agents a ON a.id = m.author
+     WHERE m.sent IS NOT NULL AND (m.sent->>'at')::timestamptz > now() - interval '14 days'
+     ORDER BY (m.sent->>'at')::timestamptz DESC LIMIT 60`,
+  );
 }
 
 /** What a module says beyond its title, as the notes of the task it becomes: its sentence, then its block. */

@@ -10,7 +10,7 @@ import { createPost, createReply } from "../src/lib/core/posts";
 import { setModule } from "../src/lib/core/rail";
 import { ensureSystem, propose } from "../src/lib/core/rules";
 import { ensureCurrent } from "../src/lib/core/current";
-import { addItem, connect as connectPieces, createIdea, getIdea, grow, updateItem } from "../src/lib/core/ideas";
+import { addItem, connect as connectPieces, createIdea, getIdea, grow, relate, sayRipe, updateItem } from "../src/lib/core/ideas";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
 import { createTracker } from "../src/lib/core/trackers";
 import { agentById, newId, ownerAgent } from "../src/lib/core/util";
@@ -258,6 +258,11 @@ async function main() {
   await grow(atlas, trailer.id, { from: seedPiece.id, kind: "found", text: "Burley's flatbed trailer carries 45 kg and folds to 15 cm.", source: { name: "Burley", url: "https://example.com/burley-flatbed" } });
   await updateItem(owner, folded.id, { kept: true });
   await connectPieces(scout, trailer.id, use.id, folded.id, "decides the size");
+  // A second idea that shares something with the first, and the first is ready to act on: an agent has named the step.
+  const corner = await createIdea(owner, { text: "A workshop corner in the garage" });
+  await addItem(owner, corner.id, { kind: "text", text: "A bench under the window", x: 240, y: 150, size: 2 });
+  await relate(scout, trailer.id, corner.id, "both want the garage wall");
+  await sayRipe(scout, trailer.id, "Measure the garage wall for a fold-flat trailer");
 
   // ---- Current: what is true for now. Agents write these from what they see; each says until when. ----
   const current = await ensureCurrent();

@@ -73,6 +73,9 @@ IDEAS
 - It is their thinking space, not a place for reports. A piece is one thought in a line or two. No preamble, no summary, no list of options: one thing, placed where it belongs, and let the owner ask for more.
 - The owner steers without telling you: what they keep, grow more like; what they prune, do not go that way again. idea_read gives both under steering. When they press and hold a piece they are asking for more from it: it reaches you as idea.more under for_you, and you answer by growing from that piece, soon.
 - The server limits how much is added to an idea each day, and by each agent. That limit is the design: a canvas the owner cannot keep up with is worse than an empty one. Add the piece that matters most and stop.
+- An idea the owner leaves untouched for a fortnight rests by itself, and a resting idea takes nothing, with one exception: something real you have found that bears on it (kind found, with its source), once it has rested a week. That wakes it, and the owner is shown why.
+- Two ideas that would help each other can be paired with idea_relate. When the owner has kept enough on an idea that the next move is plain, say so with idea_ripe and name the first step: they make the task with one tap, or say not yet. You never make it for them.
+- search and gather find ideas too (type idea); read(["i_..."]) opens one as idea_read does.
 - Never start an idea yourself, and never tidy, move or remove what is on one: that is the owner's hand.
 guide("ideas") has examples.
 
@@ -669,8 +672,9 @@ Each tracker has a small icon shown beside its label in the list and on feed pos
 An idea is a canvas. The owner seeds it with their own words and pictures, placed freely. Agents grow it a little each day; the owner keeps and prunes; the next growth follows what was kept. Over days and weeks an idea becomes a small map of a thought.
 
 Reading one
-- idea_list: every idea, its state (growing or resting), how many pieces, when it last grew.
-- idea_read(id): pieces (id, by, kind, text or image, kept, and from: what each branched from), joins (which pieces are connected, with their labels), steering (kept and pruned), and may_add_today (how many more pieces the idea, and you, may take today).
+- idea_list: every idea, its state (growing or resting), how many pieces, when it last grew; for a resting one, since when and whether a find may wake it (may_wake); ready: true when it is waiting on the owner as ready to act on.
+- idea_read(id): pieces (id, by, kind, text or image, kept, and from: what each branched from), joins (which pieces are connected, with their labels), steering (kept and pruned), and may_add_today (how many more pieces the idea, and you, may take today). Also near (other ideas paired with it, and why), resting (since when, by whom, may_wake), ready (a first step the owner has been shown and not answered) and task (the task they made of it).
+- search(query, types: ["idea"]) finds an idea by its name or by any words on its canvas; gather lists the ideas that bear on a task under ideas.
 - Pieces by "the owner" are the idea itself. Read those first and most carefully.
 
 Growing one: idea_grow({ idea, from, kind, text, ... })
@@ -692,13 +696,26 @@ Following the steering
 - kept: the owner wants more like this. Branch from kept pieces, and in their direction.
 - pruned: not this way. Do not rephrase a pruned piece and add it again, and do not branch from what led to it.
 - idea.more (in changes(), under for_you): the owner pressed and held a piece. Grow from that piece in this session if you can.
-- Nothing kept for a long while, and nothing new from the owner: the idea is resting, whatever its state says. Leave it.
+
+Resting and waking
+- An idea rests when the owner says so, and by itself when they have not touched it for a fortnight (adding, moving, keeping, pruning or simply opening it all count as touching). Nothing is added to a resting idea: idea_grow refuses.
+- The exception is a find. When an idea has rested at least a week (may_wake) and you come across something real that bears on it, in the routine or in the middle of other work, add that one thing: idea_grow with kind found and its source. The idea wakes, and the owner sees that your find woke it. Add nothing else until they have looked. "The city has just opened applications for the grant this idea was waiting on" is a find; "here is another thought" is not.
+- If the owner does not come back to it, it rests again. Do not wake the same idea twice with the same news.
+
+Ideas that are near each other: idea_relate({ a, b, label })
+- For two ideas that would help each other: one answers the other's question, both hit the same constraint, one is the cheap version of the other. label says what they share in a few words ("both need a free weekend"). The owner sees each from the other's canvas.
+- Not for ideas that merely share a subject. Two pairings a day at most; one the owner set aside is never suggested again.
+
+Ready to act on: idea_ripe({ idea, step })
+- When the owner has kept enough on an idea that the next move is plain, name it: step is the first thing to do, written as a task in one line ("Measure the garage wall for a fold-flat trailer"). The owner is shown it on the canvas with one button to make it a task and one to say not yet.
+- Their answer reaches you in changes(): idea.task (they made the task; its id is there) or idea.not_yet (leave it for a fortnight; idea_ripe refuses until then).
+- Needs at least one kept piece. One suggestion stands at a time. Never make the task yourself.
 
 What not to do
-- Do not start ideas, rename them, or rest and wake them: those are the owner's.
+- Do not start ideas, rename them, or put them to rest: those are the owner's.
 - Do not answer one piece with three variations of the same thought. One, then wait.
 - Do not post about an idea in the feed or raise it in the rail. The canvas is where it lives; the owner sees a small mark on an idea that has grown.
-- Do not carry an idea off into context, a page or a task unless the owner asks. When an idea is ripe they will say so.`,
+- Do not carry an idea off into context, a page or a task unless the owner asks. When you think one is ripe, say so with idea_ripe and let them decide.`,
 
   context: `CONTEXT IN DETAIL
 

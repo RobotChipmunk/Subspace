@@ -8,6 +8,12 @@ import { ApiError } from "./util";
  * straight from the server whenever a rail module appears or changes. The app registers each
  * device it runs on (`POST /api/v1/devices`).
  *
+ * A module's buttons go with its notification, so the owner can answer from the lock screen
+ * without opening the app. iOS only shows buttons for a "category" the app registered beforehand,
+ * so the category's name spells out the buttons (`railCategory`), and the app registers every
+ * set of buttons it has been told of (`GET rail` lists the recent ones). The first notification
+ * ever to carry a new set of buttons may therefore arrive without them; it still opens the rail.
+ *
  * Needs four settings, from an APNs key made at developer.apple.com (Keys, "Apple Push
  * Notifications service"): APNS_KEY (the .p8 file's contents), APNS_KEY_ID, APNS_TEAM_ID, and
  * optionally APNS_TOPIC (the app's bundle id). Without them nothing is sent and nothing fails.
@@ -50,7 +56,22 @@ async function bearer() {
   return value;
 }
 
-type Alert = { id: string; title: string; subtitle?: string | null; label?: string | null; badge: number };
+type Button = { label: string; url?: string; send?: string };
+type Alert = { id: string; title: string; subtitle?: string | null; label?: string | null; badge: number; actions?: Button[] };
+
+/** A button that sends its word to the module's agent, against one that opens an address. */
+const sends = (a: Button) => (a.send !== undefined && a.send !== null) || !a.url;
+
+/**
+ * The name of the notification category for a set of buttons, which the app builds the same way
+ * (`Notifier.category` in the iOS app): "rail:" then, for each button, "s:" (sends) or "u:"
+ * (opens an address) and its label, joined by "|". Null when there are no buttons.
+ */
+export function railCategory(actions: Button[] | null | undefined): string | null {
+  const list = (actions ?? []).slice(0, 4);
+  if (!list.length) return null;
+  return "rail:" + list.map((a) => (sends(a) ? "s:" : "u:") + a.label.replace(/\|/g, "/")).join("|");
+}
 
 /** One notification per registered device. Devices Apple says are gone are forgotten. */
 async function send(a: Alert) {
@@ -65,8 +86,11 @@ async function send(a: Alert) {
       sound: "default",
       badge: a.badge,
       "thread-id": "rail",
+      ...(railCategory(a.actions) ? { category: railCategory(a.actions) } : {}),
     },
     rail: a.id,
+    // what each button is, for the app to act on when one is tapped from the notification
+    ...(a.actions?.length ? { rail_actions: a.actions.slice(0, 4).map((x) => ({ label: x.label, ...(sends(x) ? {} : { url: x.url }) })) } : {}),
   });
   for (const env of ENVS) {
     const mine = devices.filter((d) => d.env === env);

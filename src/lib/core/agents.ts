@@ -40,7 +40,9 @@ export async function updateAgent(actor: Agent, id: string, patch: { name?: stri
   ]);
   if (patch.archived) {
     // its routines are left for the owner to give to someone else, and any round it had not finished is closed
-    await q("UPDATE routines SET agent_id = NULL, next_at = NULL WHERE agent_id = $1", [id]);
+    // (a routine it shared with others goes on with them: the next one takes its place)
+    await q("UPDATE routines SET also = array_remove(also, $1) WHERE $1 = ANY(also)", [id]);
+    await q("UPDATE routines SET agent_id = also[1], also = also[2:], next_at = CASE WHEN also[1] IS NULL THEN NULL ELSE next_at END WHERE agent_id = $1", [id]);
     await q("UPDATE jobs SET status = 'cancelled', done_at = now() WHERE kind = 'routine' AND status = 'open' AND assigned_to = $1", [id]);
     await q("UPDATE trackers SET agents = array_remove(agents, $1)", [id]);
     await revokeAllFor(id);

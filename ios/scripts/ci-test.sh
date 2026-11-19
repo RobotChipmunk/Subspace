@@ -23,7 +23,7 @@ rm -rf "$OUT/$NAME.xcresult"
 # the job until its timeout.
 # The whole suite takes about 28 minutes on a slow runner (25 tests, some run twice), so the
 # limit leaves room above that; the job's own timeout in ios.yml is longer still.
-LIMIT="${TEST_LIMIT_SECONDS:-2400}"
+LIMIT="${TEST_LIMIT_SECONDS:-2700}"
 # To chase one failure without paying for the whole suite, commit ios/only-testing with one test a
 # line ("SubspaceUITests/IdeasTests/testOpenAnIdeaAndKeepAPiece"). Remove the file before merging.
 ONLY=()

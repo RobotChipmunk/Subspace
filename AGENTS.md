@@ -198,5 +198,13 @@ being true. Read this list before starting work.
 - iOS CI: to chase one failing test, commit `ios/only-testing` with one test a line; the job then
   runs only those (a few minutes instead of forty) and says what was on screen at each failure.
   Remove the file before the work is finished.
+- `DELETE todos/<id>?forever=1` (and `deleteTodo(..., true)`) removes only a task that is already
+  in the bin, and says nothing when it is not. A check that makes a task must delete it twice,
+  plainly and then for good; one that did not left a task behind at every screen size and broke
+  an unrelated todo step three sizes later.
+- The stand-in embedder for tests gave a word two places out of 4096, so a nonsense word still
+  "matched" a text of one or two words about one run in ten (sharing one place was half the
+  likeness). It now gives each word sixteen. If "a search that found nothing is not recognisable"
+  fails again, look at the stand-in before the search.
 - When a command chain ends in `git commit && git push`, make the build's own exit status gate it
   (`xcodebuild ... | grep` returns grep's status, so a failed build was committed and pushed once).

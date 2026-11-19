@@ -4,7 +4,7 @@ import { archiveNode, children as contextChildren, createNode, getNode, revision
 import { briefing, changes, explore, gather, read, search } from "../core/discover";
 import { uploadTicket } from "../auth";
 import { categorize, createEntry, getEntry, plainText } from "../core/journal";
-import { connect as ideaConnect, grow as ideaGrow, ideaForAgent, ideasForAgent, GROW_KINDS } from "../core/ideas";
+import { connect as ideaConnect, grow as ideaGrow, ideaForAgent, ideasForAgent, relate as ideaRelate, sayRipe as ideaRipe, GROW_KINDS } from "../core/ideas";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
@@ -75,11 +75,11 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "search",
-    description: "Search across posts, todos, context, saved links and followed topics. It always matches the words you give (and their plain English forms: run, runs, running): every word must appear, so a long query finds less, and only when nothing has every word does it fall back to any of them. Where the owner has turned on search by meaning, it also finds things that say the same in other words (\"vacation\" finds a note about a holiday); those results carry match: \"meaning\". The result's mode says which is in force: \"words only\" or \"words and meaning\". Either way one search is never proof that something is absent: search several times with different words (the name, a synonym, the broader term), a few words at a time, and follow next_offset when there is more. Returns ids with one-line snippets, best match first, 12 at a time. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
+    description: "Search across posts, todos, context, saved links, followed topics and ideas. It always matches the words you give (and their plain English forms: run, runs, running): every word must appear, so a long query finds less, and only when nothing has every word does it fall back to any of them. Where the owner has turned on search by meaning, it also finds things that say the same in other words (\"vacation\" finds a note about a holiday); those results carry match: \"meaning\". The result's mode says which is in force: \"words only\" or \"words and meaning\". Either way one search is never proof that something is absent: search several times with different words (the name, a synonym, the broader term), a few words at a time, and follow next_offset when there is more. Returns ids with one-line snippets, best match first, 12 at a time. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
     inputSchema: obj(
       {
         query: str('Words to find. Supports "quoted phrases", OR, and -exclusions.'),
-        types: { type: "array", items: { type: "string", enum: ["post", "todo", "context", "link", "tracker"] }, description: "Limit to these kinds." },
+        types: { type: "array", items: { type: "string", enum: ["post", "todo", "context", "link", "tracker", "idea"] }, description: "Limit to these kinds." },
         since: str("Only things changed on or after this ISO date."),
         limit: { type: "integer", description: "Default 12, max 50." },
         offset: { type: "integer", description: "next_offset from the previous page." },
@@ -499,21 +499,21 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "idea_list",
-    description: "The owner's ideas: canvases where an idea is left to grow. Each has a state (growing or resting), how many pieces are on it and when it last grew. Start here before growing one.",
+    description: "The owner's ideas: canvases where an idea is left to grow. Each has a state (growing or resting), how many pieces are on it and when it last grew; a resting one says whether a find may wake it. Start here before growing one.",
     inputSchema: obj({}),
     readOnly: true,
     run: () => ideasForAgent(),
   },
   {
     name: "idea_read",
-    description: "One idea's canvas: every piece on it (the owner's text and pictures, and what agents have branched from them), how the pieces are joined, and the owner's steering: what they kept (more like this) and what they pruned (not this way). Also how much may still be added today.",
+    description: "One idea's canvas: every piece on it (the owner's text and pictures, and what agents have branched from them), how the pieces are joined, and the owner's steering: what they kept (more like this) and what they pruned (not this way). Also how much may still be added today, which other ideas it is near, whether it is resting (and whether a find may wake it), and whether it is waiting on the owner as ready to act on.",
     inputSchema: obj({ id: str("The idea's id, from idea_list.") }, ["id"]),
     readOnly: true,
     run: (a, { id }) => ideaForAgent(a, id),
   },
   {
     name: "idea_grow",
-    description: `Add one piece to an idea, branching from a piece that is there. The idea is the owner's thinking space, so a piece is one thought in a line or two, never a report. Kinds: riff (a turn on the idea), found (something real you looked up, with source), counter (the honest objection), question (one that would move it on), image (a real picture you found). The server places the piece near what it branches from and holds a daily budget (a few pieces per idea), so add the one that matters most. Read the idea first (idea_read) and follow its steering.`,
+    description: `Add one piece to an idea, branching from a piece that is there. The idea is the owner's thinking space, so a piece is one thought in a line or two, never a report. Kinds: riff (a turn on the idea), found (something real you looked up, with source), counter (the honest objection), question (one that would move it on), image (a real picture you found). The server places the piece near what it branches from and holds a daily budget (a few pieces per idea), so add the one that matters most. Read the idea first (idea_read) and follow its steering. A resting idea takes nothing, except one find (kind found, with its source) that bears on it, which wakes it.`,
     inputSchema: obj(
       {
         idea: str("The idea's id."),
@@ -533,6 +533,18 @@ export const TOOLS: Tool[] = [
     description: "Join two pieces on an idea's canvas that belong together and are not yet joined, with two or three words on why. A few a day at most; a join should show the owner something they had not put together.",
     inputSchema: obj({ idea: str("The idea's id."), a: str("One piece's id."), b: str("The other's."), label: str('Why they belong together, in two or three words: "same constraint", "cheaper version".') }, ["idea", "a", "b", "label"]),
     run: (a, { idea, a: one, b: two, label }) => ideaConnect(a, idea, one, two, label),
+  },
+  {
+    name: "idea_relate",
+    description: "Say that two of the owner's ideas have something in common, in a few words. The owner then sees each idea from the other's canvas, as a way across. For two ideas that would truly help each other (the same constraint, one answering the other's question), not for ideas that merely share a subject. Two a day at most; one the owner set aside is never suggested again.",
+    inputSchema: obj({ a: str("One idea's id."), b: str("The other's."), label: str('What they have in common, in a few words, at most 60 characters: "both need a weekend with no plans".') }, ["a", "b", "label"]),
+    run: (a, { a: one, b: two, label }) => ideaRelate(a, one, two, label),
+  },
+  {
+    name: "idea_ripe",
+    description: "Say that an idea looks ready to act on, and name the first step. Only when the owner has kept enough on it that the next move is clear. You decide nothing: the owner is shown the step on the canvas and makes a task of it with one tap, or says not yet (their answer reaches you in changes() as idea.task or idea.not_yet). Never make the task yourself.",
+    inputSchema: obj({ idea: str("The idea's id."), step: str('The first thing to do, written as a task: one line, at most 120 characters. "Measure the garage wall for a fold-flat trailer".') }, ["idea", "step"]),
+    run: (a, { idea, step }) => ideaRipe(a, idea, step),
   },
   {
     name: "routine_done",
@@ -585,6 +597,8 @@ const AREA: Record<string, Section> = {
   idea_read: "ideas",
   idea_grow: "ideas",
   idea_connect: "ideas",
+  idea_relate: "ideas",
+  idea_ripe: "ideas",
 };
 
 /**

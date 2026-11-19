@@ -1,13 +1,14 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { ArrowUpRight, ChevronLeft, ImagePlus, Moon, Plus, Scissors, Sparkles, Sprout, Star } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ImagePlus, Moon, Plus, Scissors, Sparkles, Sprout, Star, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Avatar } from "@/components/bits";
 import { ago, api, fetcher, hash, soft, spring, useMe } from "@/lib/client";
-import type { Idea, IdeaCard, IdeaItem, IdeaLink } from "@/lib/core/ideas";
+import type { Idea, IdeaCanvas, IdeaCard, IdeaItem, IdeaLink } from "@/lib/core/ideas";
 import { PALETTES } from "@/lib/palettes";
 
 /**
@@ -23,6 +24,10 @@ import { PALETTES } from "@/lib/palettes";
  *   flick it away            prune it (not this way); it can be brought back for a moment
  * A selected piece also offers the same things as three quiet buttons, for anyone who would
  * rather tap, or cannot make the gesture.
+ *
+ * An idea has a life of its own, and says so quietly under its name: that it looks ready to act
+ * on (one tap makes it a task), and which other ideas it has something in common with (one tap
+ * goes there). Left alone for a fortnight it rests by itself; something an agent finds can wake it.
  */
 export default function IdeasPage() {
   return (
@@ -36,12 +41,13 @@ function Inner() {
   const router = useRouter();
   const id = useSearchParams().get("idea");
   const open = (next: string | null) => router.push(next ? `/ideas?idea=${next}` : "/ideas", { scroll: false });
-  return id ? <Canvas key={id} id={id} onBack={() => open(null)} /> : <Shelf onOpen={open} />;
+  return id ? <Canvas key={id} id={id} onBack={() => open(null)} onOpen={open} /> : <Shelf onOpen={open} />;
 }
 
 // ---------- The ideas ----------
 
 function Shelf({ onOpen }: { onOpen: (id: string) => void }) {
+  const { agent } = useMe();
   const { data, mutate } = useSWR<{ ideas: IdeaCard[] }>("ideas", fetcher, { refreshInterval: 30_000 });
   const [busy, setBusy] = useState(false);
   async function start() {
@@ -74,7 +80,8 @@ function Shelf({ onOpen }: { onOpen: (id: string) => void }) {
                 {idea.unseen > 0 && <span aria-label={`${idea.unseen} new`} className="h-2 w-2 flex-none rounded-full bg-accent" />}
               </div>
               <div className="truncate text-[12.5px] text-ink3">
-                {idea.state === "resting" ? "Resting" : idea.last_grown_at ? `Grew ${ago(idea.last_grown_at)}${ago(idea.last_grown_at) === "now" ? "" : " ago"}` : "Not grown yet"} · {idea.items} {idea.items === 1 ? "piece" : "pieces"}
+                {idea.woken_by ? `Woken by ${agent(idea.woken_by)?.name ?? "an agent"}` : idea.state === "resting" ? "Resting" : idea.last_grown_at ? `Grew ${ago(idea.last_grown_at)}${ago(idea.last_grown_at) === "now" ? "" : " ago"}` : "Not grown yet"} · {idea.items} {idea.items === 1 ? "piece" : "pieces"}
+                {idea.ripe && <span data-ripe className="text-accent"> · Ready</span>}
               </div>
             </div>
           </motion.button>
@@ -118,10 +125,11 @@ function without<T>(m: Record<string, T>, key: string): Record<string, T> {
   return next;
 }
 
-function Canvas({ id, onBack }: { id: string; onBack: () => void }) {
+function Canvas({ id, onBack, onOpen }: { id: string; onBack: () => void; onOpen: (id: string) => void }) {
   const { agent } = useMe();
-  const { data, mutate } = useSWR<{ idea: Idea; items: IdeaItem[]; links: IdeaLink[] }>(`ideas/${id}`, fetcher, { refreshInterval: 15_000 });
+  const { data, mutate } = useSWR<IdeaCanvas>(`ideas/${id}`, fetcher, { refreshInterval: 15_000 });
   const surface = useRef<HTMLDivElement>(null);
+  const life = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const fitted = useRef(false);
   /** Where pieces are being dragged to, before the server knows. */
@@ -158,8 +166,10 @@ function Canvas({ id, onBack }: { id: string; onBack: () => void }) {
     const ys = data.items.map((i) => i.y);
     const w = Math.max(...xs) - Math.min(...xs) + 520;
     const h = Math.max(...ys) - Math.min(...ys) + 420;
-    const k = clamp(Math.min(el.clientWidth / w, el.clientHeight / h), 0.35, 1);
-    setView({ k, x: (-(Math.max(...xs) + Math.min(...xs)) / 2) * k, y: (-(Math.max(...ys) + Math.min(...ys)) / 2) * k });
+    // on a narrow screen what the idea says under its name takes the top: the pieces are framed beneath it
+    const under = life.current && life.current.offsetWidth > el.clientWidth * 0.45 ? life.current.offsetTop + life.current.offsetHeight + 8 : 0;
+    const k = clamp(Math.min(el.clientWidth / w, (el.clientHeight - under) / h), 0.35, 1);
+    setView({ k, x: (-(Math.max(...xs) + Math.min(...xs)) / 2) * k, y: (-(Math.max(...ys) + Math.min(...ys)) / 2) * k + under / 2 });
   }, [data]);
 
   const toWorld = useCallback(
@@ -414,6 +424,25 @@ function Canvas({ id, onBack }: { id: string; onBack: () => void }) {
   const growing = idea?.state !== "resting";
   const chosen = selected ? items.find((i) => i.id === selected) : null;
 
+  // ----- the idea's own life: ready to act on, and the ideas it is near -----
+  const [making, setMaking] = useState(false);
+  const makeTask = async () => {
+    setMaking(true);
+    await api(`ideas/${id}/task`, { method: "POST" }).catch(() => {});
+    await mutate();
+    setMaking(false);
+  };
+  const notYet = async () => {
+    void mutate((d) => d && { ...d, ripe: null }, false);
+    await api(`ideas/${id}/not-yet`, { method: "POST" }).catch(() => {});
+    await mutate();
+  };
+  const setAside = async (nearId: string) => {
+    void mutate((d) => d && { ...d, near: d.near.filter((n) => n.id !== nearId) }, false);
+    await api(`idea-nears/${nearId}`, { method: "DELETE" }).catch(() => {});
+    await mutate();
+  };
+
   return (
     <div
       ref={surface}
@@ -527,6 +556,48 @@ function Canvas({ id, onBack }: { id: string; onBack: () => void }) {
           <ConfirmDelete label="Remove idea" confirm="Remove" size={16} onConfirm={async () => (await api(`ideas/${id}`, { method: "DELETE" }), onBack())} />
         </div>
       </div>
+
+      {/* under the name, the idea's own life: ready to act on, the task made of it, and the ideas it is near */}
+      {data && (data.ripe || data.task || (data.near?.length ?? 0) > 0) && (
+        <div ref={life} data-idea-life className="absolute left-3 top-[60px] z-10 flex max-w-[min(330px,calc(100%-24px))] flex-col items-start gap-1.5 md:left-5 md:top-[68px]" onPointerDown={(e) => e.stopPropagation()}>
+          <AnimatePresence initial={false}>
+            {data.ripe && (
+              <motion.div key="ripe" data-ripe layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }} transition={soft} className="glass rounded-[20px] px-3.5 py-2.5">
+                <div className="text-[12px] text-ink3">{data.ripe.by ? `${agent(data.ripe.by)?.name ?? "An agent"} thinks this is ready` : "You have kept enough here to act on"}</div>
+                {data.ripe.step && <p className="idea-hand mt-0.5 select-text text-[15.5px] font-medium leading-snug [overflow-wrap:anywhere]">{data.ripe.step}</p>}
+                <div className="mt-2 flex items-center gap-1.5">
+                  <button onClick={makeTask} disabled={making} className="h-8 rounded-full bg-accent-soft px-3 text-[13px] font-medium text-accent disabled:opacity-60">
+                    Make a task
+                  </button>
+                  <button onClick={notYet} className="h-8 rounded-full px-3 text-[13px] text-ink2 transition-colors hover:bg-fill hover:text-ink">
+                    Not yet
+                  </button>
+                </div>
+              </motion.div>
+            )}
+            {data.task && (
+              <motion.div key="task" layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={soft}>
+                <Link href={`/todos?open=${data.task.id}`} data-idea-task className="glass flex h-9 max-w-full items-center gap-1.5 rounded-full pl-2.5 pr-3.5 text-[13px] text-ink2 transition-colors hover:text-ink">
+                  <span className={`grid h-5 w-5 flex-none place-items-center rounded-full ${data.task.done ? "bg-accent text-white" : "border border-[var(--fill-strong)]"}`}>{data.task.done && <Check size={12} strokeWidth={3} />}</span>
+                  <span className={`truncate ${data.task.done ? "line-through decoration-[var(--line)]" : ""}`}>{data.task.title}</span>
+                </Link>
+              </motion.div>
+            )}
+            {(data.near ?? []).map((n) => (
+              <motion.div key={n.id} data-near={n.idea.id} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }} transition={soft} className="glass flex h-9 max-w-full items-center rounded-full pl-3.5 pr-1 text-[13px]">
+                <button onClick={() => onOpen(n.idea.id)} title={`${agent(n.author)?.name ?? "An agent"}: ${n.label}`} className="flex min-w-0 items-baseline gap-1.5 text-left text-ink2 transition-colors hover:text-ink">
+                  <span className="flex-none text-ink3">Near</span>
+                  <span className="truncate font-medium">{n.idea.title || "Untitled idea"}</span>
+                  <span className="idea-hand hidden truncate text-[12px] italic text-ink3 sm:inline">{n.label}</span>
+                </button>
+                <button onClick={() => setAside(n.id)} aria-label={`Not related to ${n.idea.title || "that idea"}`} title="Not related" className="ml-1 grid h-7 w-7 flex-none place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink">
+                  <X size={13} />
+                </button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
 
       {/* an empty canvas says how to begin, once, in a line */}
       {data && !items.length && !draft && (

@@ -322,6 +322,11 @@ beyond the session and which direct messages have been read.
   both. Without the key nothing is pushed, and the app falls back to notifying about modules it
   finds itself: while open, and when iOS wakes it in the background, which can be hours apart.
   A module that waits for `show_from` is not pushed when its time comes; the app notices it.
+  A module's buttons go with its notification (press and hold it): one that sends to the agent
+  works from the lock screen once the device is unlocked, one that opens an address opens the
+  app. iOS shows buttons only for sets the app has registered, so the app registers every set it
+  has met and those the server lists (`button_sets` on `GET /api/v1/rail`); the very first
+  notification to carry a new pair of labels may arrive without its buttons.
 
 ### Testing it end to end
 

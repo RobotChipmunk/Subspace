@@ -7,11 +7,16 @@ private struct AgentsRoutine: Decodable, Identifiable {
     var about: String?
     var every: String?
     var agent_id: String?
+    /// True when several agents may do it at once; the others, beside `agent_id`, are in `also`.
+    var shared: Bool?
+    var also: [String]?
     var next_at: String?
     var last_done_at: String?
     var last_note: String?
 
     var id: String { key }
+    /// Every agent that does it.
+    var doers: [String] { agent_id.map { [$0] + (also ?? []) } ?? [] }
 }
 
 private struct AgentsRoutinesReply: Decodable {
@@ -19,8 +24,9 @@ private struct AgentsRoutinesReply: Decodable {
 }
 
 /// The duties that come round on a schedule, and whether this agent does each. A routine has one
-/// agent: turning it on here takes it from whoever had it. When one is due the agent is pinged
-/// with a job, and what it reported last time shows beneath.
+/// agent: turning it on here takes it from whoever had it. The exception is a shared routine (idea
+/// growth), which several agents may do at once: turning it on here adds this agent to the others.
+/// When one is due the agent is pinged with a job, and what it reported last time shows beneath.
 struct AgentsRoutines: View {
     var agent: Agent
 
@@ -53,7 +59,7 @@ struct AgentsRoutines: View {
     }
 
     private func row(_ r: AgentsRoutine) -> some View {
-        let mine = r.agent_id == agent.id
+        let mine = r.doers.contains(agent.id)
         let isOn = Binding<Bool>(get: { mine }, set: { now in give(r.key, now) })
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
@@ -85,13 +91,16 @@ struct AgentsRoutines: View {
     /// When it next comes due, or who does it, in a few words.
     private func line(_ r: AgentsRoutine, mine: Bool) -> String {
         let every = r.every == "daily" ? "Daily" : "Weekly"
-        guard let doer = r.agent_id else { return "\(every). Nobody does this yet." }
-        if !mine { return "\(every). Done by \(app.agent(doer)?.name ?? "another agent")." }
-        guard let next = r.next_at, let date = parseISO(next) else { return every }
-        if date.timeIntervalSinceNow <= 60 { return "\(every) · due now" }
+        guard r.agent_id != nil else { return "\(every). Nobody does this yet." }
+        let others = r.doers.filter { $0 != agent.id }.compactMap { app.agent($0)?.name }
+        let names = others.isEmpty ? "another agent" : others.joined(separator: " and ")
+        if !mine { return r.shared == true ? "\(every). Done by \(names); more than one agent can." : "\(every). Done by \(names)." }
+        let with = others.isEmpty ? "" : " · with \(names)"
+        guard let next = r.next_at, let date = parseISO(next) else { return every + with }
+        if date.timeIntervalSinceNow <= 60 { return "\(every) · due now" + with }
         let f = DateFormatter()
         f.setLocalizedDateFormatFromTemplate("EEE d MMM")
-        return "\(every) · next \(f.string(from: date))"
+        return "\(every) · next \(f.string(from: date))" + with
     }
 
     private func parseISO(_ text: String) -> Date? {
@@ -109,7 +118,7 @@ struct AgentsRoutines: View {
     private func give(_ key: String, _ on: Bool) {
         Task {
             do {
-                try await app.api.send("PATCH", "routines/\(key)", body: ["agent": on ? agent.id : NSNull()])
+                try await app.api.send("PATCH", "routines/\(key)", body: ["agent": agent.id, "on": on])
                 problem = ""
             } catch {
                 problem = error.localizedDescription

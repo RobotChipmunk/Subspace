@@ -13,7 +13,7 @@ struct IdeasScreen: View {
     var body: some View {
         ZStack {
             if let id = openID {
-                IdeaCanvas(id: id) {
+                IdeaCanvas(id: id, onOpen: { other in withAnimation(.ssSoft) { openID = other } }) {
                     withAnimation(.ssSoft) { openID = nil }
                     Task { await load() }
                 }
@@ -24,6 +24,12 @@ struct IdeasScreen: View {
             }
         }
         .task { await load() }
+        // an address that names an idea ("/ideas?idea=<id>", as a task made of one does) opens its canvas
+        .onChange(of: app.pendingIdeaID, initial: true) { _, id in
+            guard let id else { return }
+            app.pendingIdeaID = nil
+            withAnimation(.ssSoft) { openID = id }
+        }
     }
 
     private var shelf: some View {
@@ -68,7 +74,7 @@ struct IdeasScreen: View {
 
     private func card(_ idea: IdeaCard) -> some View {
         let count = idea.items ?? 0
-        let grew = idea.state == "resting" ? "Resting" : idea.last_grown_at.map { "Grew " + agentsAgoPhrase($0) } ?? "Not grown yet"
+        let grew = idea.woken_by.map { "Woken by " + (app.agent($0)?.name ?? "an agent") } ?? (idea.state == "resting" ? "Resting" : idea.last_grown_at.map { "Grew " + agentsAgoPhrase($0) } ?? "Not grown yet")
         return Button {
             withAnimation(.ssSoft) { openID = idea.id }
         } label: {
@@ -86,9 +92,9 @@ struct IdeasScreen: View {
                             Circle().fill(Theme.accent).frame(width: 8, height: 8).accessibilityLabel("\(idea.unseen ?? 0) new")
                         }
                     }
-                    Text("\(grew) · \(count) \(count == 1 ? "piece" : "pieces")")
+                    (Text("\(grew) · \(count) \(count == 1 ? "piece" : "pieces")").foregroundStyle(Theme.ink3)
+                        + Text(idea.ripe == true ? " · Ready" : "").foregroundStyle(Theme.accent))
                         .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.ink3)
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 16)

@@ -208,6 +208,11 @@ Patterns:
   task from the list, dismissing it, or keeping it for later. It also goes when it runs out and
   while its task is done or deleted. Nothing can be pinned, and a new kind of module does not get
   its own way of staying. What must outlast the rail lives in a task or on a page.
+- **A module's notification** (iPhone and iPad) carries the module's own buttons, with their own
+  labels, so it can be answered from the lock screen: press and hold the notification. A button
+  that sends to the agent asks for the device to be unlocked and leaves the app closed; one that
+  opens an address opens the app there. Either clears the module, as in the rail. Tapping the
+  notification itself opens the rail. There is nothing to set up and nothing to see in the app.
 - **Later** (rail): not now, but not lost. "Later" on an opened module asks one thing in place,
   "Keep as a task for", with Today, Tomorrow and This week sharing one line (and "Cancel"). The
   choice puts the module on that day as a task (a module that already points at a task moves that
@@ -272,6 +277,23 @@ Patterns:
     words, prune. It is the only toolbar, and it is there only while a piece is chosen.
   - What is new since the owner last looked carries a small accent dot that breathes (still,
     under reduced motion). An empty canvas says how to begin in two lines of `ink3`.
+  - *An idea's own life* is said under its name, at the left, as a short column of glass pieces
+    that are there only while they are true, and never as a panel or a menu:
+    - *Ready to act on.* A 20px glass note: a meta line saying who thinks so ("Scout thinks this
+      is ready", or "You have kept enough here to act on" when nobody said it), the first step in
+      the rounded face at 15.5px, and two pills, "Make a task" (accent on `accent-soft`) and a
+      quiet "Not yet". One tap on the first makes the task; the note goes.
+    - *The task made of it.* A 36px glass pill with a small circle (filled accent with a tick
+      once done, the title struck through) and the task's title; it opens the task.
+    - *Near.* One 36px glass pill for each idea an agent paired with this one: "Near", the other
+      idea's name in medium weight, the few words on what they share in small italics (left out on
+      a phone), and a small × ("Not related") that takes it away for good. Tapping the name opens
+      that idea's canvas in this one's place.
+    On a phone the column takes the top of the screen, so the first framing puts the pieces
+    beneath it. On the shelf a ready idea's meta line ends "· Ready" in accent, and one an agent's
+    find woke says "Woken by Scout" in place of "Grew …" until it has been looked at.
+  - *Resting* is never announced. An idea left untouched for a fortnight simply shows "Resting",
+    as one the owner put to rest does. Adding to it brings it back, as the Growing switch does.
 - **The mark** (`Mark.tsx`; `Design/SubspaceMark.swift` in the app; `scripts/mark.swift` for the
   icons): Subspace's logo is particles in a latent space. A sparse sphere of small neutral
   particles is the space; through it, tilted, runs a sheet of larger coloured ones, the subspace,
@@ -304,6 +326,13 @@ Patterns:
   would be" to see the whole note, then Approve (accent-soft) and Decline (fill). Answering in
   either place does the same thing and clears both. Nothing shows when nothing is waiting: there
   is no empty state and no count.
+- **Answers sent to an agent** (`Sent` in `agents/page.tsx`; `AgentsRows.swift` in the app): what
+  the owner has answered an agent from the rail is kept as a record on the Agents screen. Beside
+  the agent's name, while any answer has not been read, a quiet `fill` chip says "1 waiting". In
+  the agent's open panel, after its connected apps, a `fill` list headed "Your answers" gives
+  each one in two lines: the button in quotes and the module it was on, then when, and "waiting
+  for Scout" or "Scout has picked it up" in `ink3`. Nothing in it can be tapped. An answer goes
+  from the list when the agent removes its module, or after two weeks.
 - **Routines** (`Routines` in `agents/page.tsx`; `AgentsRoutines.swift` in the app): in an agent's
   open panel, after Access, a `fill` list headed "Routines", one row per duty that comes round on
   a schedule. A row is the routine's name, one line on what it is, and a line in `ink3` on where

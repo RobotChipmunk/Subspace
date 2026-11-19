@@ -10,6 +10,7 @@ import { ago, api, fetcher, soft, spring, useDirectUnread, useMe } from "@/lib/c
 import type { AccessRules, Section } from "@/lib/core/access";
 import type { Grant } from "@/lib/core/oauth";
 import type { Post } from "@/lib/core/posts";
+import type { SentAnswer } from "@/lib/core/rail";
 import type { Routine } from "@/lib/core/routines";
 import type { Agent } from "@/lib/core/util";
 
@@ -163,6 +164,10 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
   const [realtime, setRealtime] = useState(false);
   const [chat, setChat] = useState(false);
   const unread = useDirectUnread().unread(a.id);
+  // answers the owner sent this agent from a rail module; the ones it has not read yet are "waiting"
+  const { data: answers } = useSWR<{ sent: SentAnswer[] }>("rail/sent", fetcher, { refreshInterval: 30_000 });
+  const sent = (answers?.sent ?? []).filter((x) => x.agent_id === a.id);
+  const waiting = sent.filter((x) => !x.picked_up).length;
   const live = !!a.runtime?.enabled;
   const human = a.kind === "human";
   const illustrator = a.roles.includes("illustrator");
@@ -185,6 +190,11 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
             {illustrator && (
               <span className="flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-medium text-accent">
                 <Wand2 size={11} /> Illustrator
+              </span>
+            )}
+            {waiting > 0 && (
+              <span data-waiting className="rounded-full bg-fill px-2 py-0.5 text-[11.5px] font-medium text-ink2">
+                {waiting} waiting
               </span>
             )}
             {a.access && (
@@ -238,6 +248,7 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
               </p>
               <CopyField label="Connector address" value={`${origin}/api/mcp/${a.handle}`} />
               <Connections id={a.id} empty="No app has signed in yet." />
+              {sent.length > 0 && <Sent name={a.name} sent={sent} />}
               <Access agent={a} onChanged={onChanged} />
               <Routines agent={a} />
 
@@ -362,20 +373,48 @@ function Access({ agent: a, onChanged }: { agent: Agent; onChanged: () => void }
   );
 }
 
+/**
+ * What the owner has answered this agent from the rail, newest first: the button they tapped, on
+ * which module, and whether the agent has picked it up. It is a record, not a control: nothing
+ * here can be tapped.
+ */
+function Sent({ name, sent }: { name: string; sent: SentAnswer[] }) {
+  return (
+    <div data-sent>
+      <div className="mb-1 text-[12px] font-medium uppercase tracking-[0.05em] text-ink3">Your answers</div>
+      <ul className="divide-y divide-[var(--line)] rounded-[14px] bg-fill">
+        {sent.slice(0, 6).map((x) => (
+          <li key={x.id} className="px-3 py-2">
+            <div className="text-[13.5px] [overflow-wrap:anywhere]">
+              <span className="font-medium">“{x.label}”</span> <span className="text-ink2">on {x.title}</span>
+            </div>
+            <div className="text-[12.5px] text-ink3">
+              {ago(x.at)}
+              {ago(x.at) === "now" ? "" : " ago"} · {x.picked_up ? `${name} has picked it up` : `waiting for ${name}`}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** When a routine next comes due, or how its last round went, in a few words. */
-function routineLine(r: Routine, mine: boolean, doer?: Agent) {
+function routineLine(r: Routine, mine: boolean, others: string[]) {
   const every = r.every === "weekly" ? "Weekly" : "Daily";
   if (!r.agent_id) return `${every}. Nobody does this yet.`;
-  if (!mine) return `${every}. Done by ${doer?.name ?? "another agent"}.`;
+  const names = others.length ? others.join(" and ") : "another agent";
+  if (!mine) return r.shared ? `${every}. Done by ${names}; more than one agent can.` : `${every}. Done by ${names}.`;
   const next = r.next_at ? new Date(r.next_at) : null;
   const when = next ? (next.getTime() <= Date.now() + 60_000 ? "due now" : `next ${next.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}`) : "";
-  return [every, when].filter(Boolean).join(" · ");
+  return [every, when, others.length ? `with ${names}` : ""].filter(Boolean).join(" · ");
 }
 
 /**
  * The duties that come round on a schedule, and whether this agent does each. A routine has one
- * agent: turning it on here takes it from whoever had it. When one is due the agent is pinged
- * with a job, and what it reported last time shows beneath.
+ * agent: turning it on here takes it from whoever had it. The exception is a shared routine (idea
+ * growth), which several agents may do at once: turning it on here adds this agent to the others.
+ * When one is due the agent is pinged with a job, and what it reported last time shows beneath.
  */
 function Routines({ agent: a }: { agent: Agent }) {
   const { agent } = useMe();
@@ -387,7 +426,7 @@ function Routines({ agent: a }: { agent: Agent }) {
   async function give(key: string, on: boolean) {
     setError("");
     try {
-      await api(`routines/${key}`, { method: "PATCH", body: { agent: on ? a.id : null } });
+      await api(`routines/${key}`, { method: "PATCH", body: { agent: a.id, on } });
       await mutate();
     } catch (e) {
       setError((e as Error).message);
@@ -398,13 +437,15 @@ function Routines({ agent: a }: { agent: Agent }) {
       <div className="mb-1 text-[12px] font-medium uppercase tracking-[0.05em] text-ink3">Routines</div>
       <ul className="divide-y divide-[var(--line)] rounded-[14px] bg-fill">
         {list.map((r) => {
-          const mine = r.agent_id === a.id;
+          const doers = r.agent_id ? [r.agent_id, ...(r.also ?? [])] : [];
+          const mine = doers.includes(a.id);
+          const others = doers.filter((d) => d !== a.id).map((d) => agent(d)?.name).filter((n): n is string => !!n);
           return (
             <li key={r.key} data-routine={r.key} className="flex items-center gap-3 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="text-[13.5px] font-medium">{r.title}</div>
                 <p className="text-[13px] leading-snug text-ink2">{r.about}</p>
-                <p className="mt-0.5 text-[12.5px] text-ink3">{routineLine(r, mine, agent(r.agent_id))}</p>
+                <p className="mt-0.5 text-[12.5px] text-ink3">{routineLine(r, mine, others)}</p>
                 {mine && r.last_note && r.last_done_at && (
                   <p className="mt-0.5 text-[12.5px] leading-snug text-ink3 [overflow-wrap:anywhere]">
                     Last time, {ago(r.last_done_at)}{ago(r.last_done_at) === "now" ? "" : " ago"}: {r.last_note}

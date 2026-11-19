@@ -10,8 +10,14 @@ import SwiftUI
 ///   press and hold           more of this, please
 ///   flick it away            prune it (not this way); it can be brought back for a moment
 /// A chosen piece also offers the same things as quiet buttons, for anyone who would rather tap.
+///
+/// An idea has a life of its own, and says so quietly under its name: that it looks ready to act
+/// on (one tap makes it a task), and which other ideas it has something in common with (one tap
+/// goes there). Left alone for a fortnight it rests by itself; something an agent finds can wake it.
 struct IdeaCanvas: View {
     let id: String
+    /// Opens another idea's canvas in this one's place.
+    var onOpen: (String) -> Void = { _ in }
     var onBack: () -> Void
 
     @Environment(AppModel.self) private var app
@@ -19,6 +25,10 @@ struct IdeaCanvas: View {
     @State private var idea: Idea? = nil
     @State private var items: [IdeaItem] = []
     @State private var links: [IdeaLink] = []
+    @State private var near: [IdeaNear] = []
+    @State private var ripe: IdeaRipe? = nil
+    @State private var task: IdeaTask? = nil
+    @State private var making = false
     @State private var loaded = false
     @State private var fitted = false
 
@@ -149,9 +159,12 @@ struct IdeaCanvas: View {
         let xs = items.map(\.x), ys = items.map(\.y)
         let w = (xs.max() ?? 0) - (xs.min() ?? 0) + 420
         let h = (ys.max() ?? 0) - (ys.min() ?? 0) + 420
-        let k = min(max(min(size.width / w, size.height / h), 0.35), 1)
+        // on a phone what the idea says under its name takes the top of the screen: the pieces are framed beneath it
+        let said: CGFloat = (ripe == nil ? 0 : 112) + (task == nil ? 0 : 42) + CGFloat(near.count) * 42
+        let under: CGFloat = sizeClass == .regular || said == 0 ? 0 : said + 60
+        let k = min(max(min(size.width / w, (size.height - under) / h), 0.35), 1)
         scale = k
-        offset = CGSize(width: -((xs.max() ?? 0) + (xs.min() ?? 0)) / 2 * k, height: -((ys.max() ?? 0) + (ys.min() ?? 0)) / 2 * k)
+        offset = CGSize(width: -((xs.max() ?? 0) + (xs.min() ?? 0)) / 2 * k, height: -((ys.max() ?? 0) + (ys.min() ?? 0)) / 2 * k + under / 2)
     }
 
     // MARK: Joins
@@ -463,7 +476,137 @@ struct IdeaCanvas: View {
             .padding(.leading, sizeClass == .regular ? 88 : 12)
             .padding(.trailing, 12)
             .padding(.top, sizeClass == .regular ? 14 : 10)
+            life
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, sizeClass == .regular ? 88 : 12)
+                .padding(.trailing, 12)
+                .padding(.top, 2)
             Spacer(minLength: 0)
+        }
+    }
+
+    /// Under the name, the idea's own life: ready to act on, the task made of it, and the ideas it is near.
+    @ViewBuilder private var life: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let ripe {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ripe.by.map { "\(app.agent($0)?.name ?? "An agent") thinks this is ready" } ?? "You have kept enough here to act on")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.ink3)
+                    if let step = ripe.step, !step.isEmpty {
+                        Text(step)
+                            .font(.system(size: 15.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(Theme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 6) {
+                        Button("Make a task") { makeTask() }
+                            .buttonStyle(PillStyle(soft: true))
+                            .disabled(making)
+                            .accessibilityIdentifier("ideas.ripe.task")
+                        Button("Not yet") { notYet() }
+                            .buttonStyle(PillStyle(quiet: true))
+                            .accessibilityIdentifier("ideas.ripe.notyet")
+                    }
+                    .padding(.top, 6)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: 330, alignment: .leading)
+                .glass(radius: 20)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("ideas.ripe")
+                .transition(.opacity)
+            }
+            if let task {
+                Button {
+                    app.open("/todos?open=\(task.id)")
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: task.done == true ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 15))
+                            .foregroundStyle(task.done == true ? Theme.accent : Theme.ink3)
+                        Text(task.title ?? "Task")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.ink2)
+                            .strikethrough(task.done == true, color: Theme.line)
+                            .lineLimit(1)
+                    }
+                    .padding(.leading, 10)
+                    .padding(.trailing, 14)
+                    .frame(height: 36)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle(scale: 0.97))
+                .glass(radius: 18)
+                .accessibilityLabel("Task: \(task.title ?? "")")
+                .accessibilityIdentifier("ideas.task")
+                .transition(.opacity)
+            }
+            ForEach(near) { n in
+                HStack(spacing: 2) {
+                    Button {
+                        onOpen(n.idea.id)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("Near").font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                            Text((n.idea.title ?? "").isEmpty ? "Untitled idea" : n.idea.title ?? "")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.ink2)
+                                .lineLimit(1)
+                            if sizeClass == .regular, let label = n.label, !label.isEmpty {
+                                Text(label).font(.system(size: 12, design: .rounded)).italic().foregroundStyle(Theme.ink3).lineLimit(1)
+                            }
+                        }
+                        .padding(.leading, 14)
+                        .frame(height: 36)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle(scale: 0.97))
+                    .accessibilityLabel("Near \(n.idea.title ?? "another idea"): \(n.label ?? "")")
+                    .accessibilityIdentifier("ideas.near.\(n.idea.id)")
+                    Button {
+                        setAside(n)
+                    } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.ink3).frame(width: 32, height: 36).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle(scale: 0.9))
+                    .accessibilityLabel("Not related to \(n.idea.title ?? "that idea")")
+                    .accessibilityIdentifier("ideas.near.aside.\(n.idea.id)")
+                }
+                .glass(radius: 18)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private func makeTask() {
+        making = true
+        Task {
+            if let reply = try? await app.api.send("POST", "ideas/\(id)/task", body: [:], as: IdeaTaskReply.self), let made = reply.todo {
+                withAnimation(.ssSoft) {
+                    task = made
+                    ripe = nil
+                }
+            }
+            making = false
+            await load()
+        }
+    }
+
+    private func notYet() {
+        withAnimation(.ssSoft) { ripe = nil }
+        Task {
+            try? await app.api.send("POST", "ideas/\(id)/not-yet")
+            await load()
+        }
+    }
+
+    private func setAside(_ n: IdeaNear) {
+        withAnimation(.ssSoft) { near.removeAll { $0.id == n.id } }
+        Task {
+            try? await app.api.send("DELETE", "idea-nears/\(n.id)")
+            await load()
         }
     }
 
@@ -657,6 +800,9 @@ struct IdeaCanvas: View {
             idea = reply.idea
             items = (reply.items ?? []).filter { $0.id != gone }
             links = reply.links ?? []
+            near = reply.near ?? []
+            ripe = reply.ripe
+            task = reply.task
         }
         if focus != .title { title = reply.idea.title ?? "" }
         loaded = true

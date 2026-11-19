@@ -551,6 +551,38 @@ const MIGRATIONS: string[] = [
      node_id text NOT NULL,
      moved_at timestamptz NOT NULL DEFAULT now()
    )`,
+  // Ideas, the second half (core/ideas.ts). owner_at: when the owner last did anything on an idea;
+  // one left alone long enough rests by itself (rested_by 'quiet', against 'owner' when they chose
+  // it). woke_at and woke_item: an agent's find that woke a resting idea. ripe: an agent's word
+  // that it is ready to act on ({ step, by, at }); task_id: the task the owner made of it.
+  // idea_nears: two ideas an agent thinks have something in common.
+  `ALTER TABLE ideas ADD COLUMN IF NOT EXISTS owner_at timestamptz NOT NULL DEFAULT now();
+   ALTER TABLE ideas ADD COLUMN IF NOT EXISTS rested_at timestamptz;
+   ALTER TABLE ideas ADD COLUMN IF NOT EXISTS rested_by text;
+   ALTER TABLE ideas ADD COLUMN IF NOT EXISTS woke_at timestamptz;
+   ALTER TABLE ideas ADD COLUMN IF NOT EXISTS woke_item text;
+   ALTER TABLE ideas ADD COLUMN IF NOT EXISTS ripe jsonb;
+   ALTER TABLE ideas ADD COLUMN IF NOT EXISTS not_yet_at timestamptz;
+   ALTER TABLE ideas ADD COLUMN IF NOT EXISTS task_id text;
+   CREATE TABLE IF NOT EXISTS idea_nears (
+     id text PRIMARY KEY,
+     a text NOT NULL,
+     b text NOT NULL,
+     label text NOT NULL DEFAULT '',
+     author text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     set_aside_at timestamptz,
+     UNIQUE (a, b)
+   )`,
+  // A routine that several agents may share (idea growth): the others, beside agent_id.
+  `ALTER TABLE routines ADD COLUMN IF NOT EXISTS also text[] NOT NULL DEFAULT '{}'`,
+  // Ideas that were there before they could be searched for.
+  `INSERT INTO search_docs (entity_type, entity_id, title, body, ts)
+   SELECT 'idea', i.id, CASE WHEN i.title = '' THEN 'Untitled idea' ELSE i.title END,
+          COALESCE((SELECT string_agg(p.text, E'\\n' ORDER BY p.created_at) FROM idea_items p WHERE p.idea_id = i.id AND p.pruned_at IS NULL AND p.text <> ''), ''),
+          i.updated_at
+   FROM ideas i WHERE i.deleted_at IS NULL
+   ON CONFLICT (entity_type, entity_id) DO NOTHING`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

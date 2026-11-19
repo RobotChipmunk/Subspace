@@ -12,6 +12,8 @@ struct AgentsScreen: View {
     @Environment(AppModel.self) private var app
     @State private var openID: String? = nil
     @State private var chat: AgentsChatTarget? = nil
+    /// Answers the owner sent to agents from the rail, newest first.
+    @State private var sent: [AgentsSentAnswer] = []
 
     init() {}
 
@@ -31,7 +33,13 @@ struct AgentsScreen: View {
             .column(680)
         }
         .scrollDismissesKeyboard(.interactively)
-        .refreshable { await app.refreshMe() }
+        .refreshable {
+            await app.refreshMe()
+            await loadSent()
+        }
+        .task { await loadSent() }
+        // an answer has just been sent from the rail, or one was removed with its module
+        .onChange(of: app.rail) { _, _ in Task { await loadSent() } }
         .sheet(item: $chat) { target in
             AgentsConversation(agentID: target.id)
                 .environment(app)
@@ -43,12 +51,19 @@ struct AgentsScreen: View {
         withAnimation(.ssSoft) { openID = openID == id ? nil : id }
     }
 
+    private func loadSent() async {
+        if let reply: AgentsSentReply = try? await app.api.get("rail/sent") {
+            sent = reply.sent ?? []
+        }
+    }
+
     private var agentRows: some View {
         let list = app.agents.filter { !$0.isHuman }
         return VStack(spacing: 10) {
             ForEach(list, id: \.id) { a in
                 AgentsAgentRow(
                     agent: a,
+                    sent: sent.filter { $0.agent_id == a.id },
                     open: openID == a.id,
                     onToggle: { toggle(a.id) },
                     onChat: { chat = AgentsChatTarget(id: a.id) }

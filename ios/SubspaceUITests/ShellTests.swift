@@ -83,6 +83,18 @@ final class ShellTests: SubspaceTestCase {
             waitToVanish(suggest, "the module, once its action was sent")
         }
 
+        // An answer sent to an agent shows beside that agent as waiting, until it has read it.
+        if !docked, app.buttons["rail.close"].waitForExistence(timeout: 3) {
+            app.buttons["rail.close"].tap()
+        }
+        go("agents")
+        expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.waiting.' AND label CONTAINS 'waiting'")).firstMatch, "the answer, waiting beside the agent it was sent to")
+        shot("03-agents-waiting")
+        go("feed")
+        if !docked {
+            expect(app.buttons["nav.now"], "the Now button, to open the rail again").tap()
+        }
+
         // "Later": not now, but not lost. The problem becomes a task for tomorrow and leaves the rail.
         let auth = app.buttons["rail.module.calendar-auth"]
         if auth.waitForExistence(timeout: 5) {

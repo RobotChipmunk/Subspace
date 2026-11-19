@@ -1,5 +1,7 @@
 /**
  * Routines: duties that come round on a schedule, each done by one agent the owner chooses.
+ * One kind may be shared: idea growth can be given to several agents, who each add their own
+ * part within the day's budget.
  *
  * Nothing here runs an agent by itself. When a routine is due, a job is created for its agent,
  * which wakes it the way a mention does (the built-in runtime starts, or its wake hook is
@@ -14,7 +16,7 @@ import { sightOf } from "./access";
 import { agentById, bad, logEvent, newId, notFound, ownerAgent, type Agent } from "./util";
 
 type Every = "daily" | "weekly";
-type BuiltIn = { key: string; title: string; about: string; every: Every; brief: string };
+type BuiltIn = { key: string; title: string; about: string; every: Every; brief: string; /** several agents may do it at once */ shared?: boolean };
 
 export const ROUTINES: BuiltIn[] = [
   {
@@ -56,10 +58,11 @@ ROUTINES.push({
   title: "Idea growth",
   about: "Each day: add a little to the ideas that are growing, following what the owner kept and pruned.",
   every: "daily",
+  shared: true,
   brief: `Grow the owner's ideas, a little.
 
 1. idea_list shows the ideas. Take the ones that are growing, least recently grown first, at most three in a run.
-2. idea_read(id) for each. Read what the owner put down in their own words and pictures. Then read the steering: kept is what they want more of, pruned is where not to go. Grow towards the first and away from the second. If may_add_today is used up, move on.
+2. idea_read(id) for each, just before you add to it: other agents may be growing the same idea today, and what they have already put down is not yours to say again. Read what the owner put down in their own words and pictures. Then read the steering: kept is what they want more of, pruned is where not to go. Grow towards the first and away from the second. If may_add_today is used up, move on.
 3. Add one to three pieces with idea_grow, each branching from the piece it answers (from). Choose the kind that the idea needs next, not the same kind each time:
    - riff: a turn on the idea, a what-if, a way it could go.
    - found: something real you looked up that bears on it, with its source.
@@ -68,8 +71,10 @@ ROUTINES.push({
    - image: a real picture you found that shows what words cannot (https address). Never a made-up one.
 4. A piece is a line or two (280 characters at most). It is a thought on a canvas, not a report: no preamble, no summary, no "here are some ideas". One thing per piece.
 5. Where two pieces that are already there belong together and nobody has joined them, idea_connect them, with two or three words on why.
-6. Leave an idea alone when nothing on it has been kept and the owner has added nothing for two weeks: it is resting whether or not it says so.
-7. Finish with routine_done and one line on what you added.`,
+6. A resting idea is left alone: the owner put it to rest, or left it untouched for a fortnight. The one exception is a find. Where idea_list says may_wake and you know of something real that bears on that idea (search for its subject if a moment's thought suggests there is news), add that one thing with idea_grow, kind found, with its source. That wakes the idea and the owner is shown why. One find, and nothing else.
+7. Where two ideas would help each other (the same constraint, one answering the other's question), say so with idea_relate and a few words on what they share. Not for ideas that merely have a subject in common.
+8. Where the owner has kept enough on an idea that the next move is plain, say so with idea_ripe and name the first step as you would write a task. They decide; never make the task yourself.
+9. Finish with routine_done and one line on what you added.`,
 });
 
 export type Routine = {
@@ -79,6 +84,9 @@ export type Routine = {
   every: Every;
   /** The agent that does it, or null while nobody does. */
   agent_id: string | null;
+  /** True when several agents may do it at once; the others, beside agent_id, are in also. */
+  shared: boolean;
+  also: string[];
   /** When it next comes due; null while nobody is assigned. */
   next_at: string | null;
   /** When it was last handed to its agent, and when that agent last said it was done, with what it said. */
@@ -95,29 +103,50 @@ async function ensure() {
 
 export async function listRoutines(): Promise<Routine[]> {
   await ensure();
-  const rows = await q<{ key: string; agent_id: string | null; next_at: string | null; last_at: string | null; last_done_at: string | null; last_note: string }>("SELECT key, agent_id, next_at, last_at, last_done_at, last_note FROM routines");
+  const rows = await q<{ key: string; agent_id: string | null; also: string[] | null; next_at: string | null; last_at: string | null; last_done_at: string | null; last_note: string }>("SELECT key, agent_id, also, next_at, last_at, last_done_at, last_note FROM routines");
   return ROUTINES.map((r) => {
     const row = rows.find((x) => x.key === r.key);
-    return { key: r.key, title: r.title, about: r.about, every: r.every, agent_id: row?.agent_id ?? null, next_at: row?.next_at ?? null, last_at: row?.last_at ?? null, last_done_at: row?.last_done_at ?? null, last_note: row?.last_note ?? "" };
+    return { key: r.key, title: r.title, about: r.about, every: r.every, agent_id: row?.agent_id ?? null, shared: !!r.shared, also: row?.agent_id ? (row?.also ?? []) : [], next_at: row?.next_at ?? null, last_at: row?.last_at ?? null, last_done_at: row?.last_done_at ?? null, last_note: row?.last_note ?? "" };
   });
 }
 
+/** Every agent that does a routine: the one it was first given to, then any that share it. */
+export const doersOf = (r: Pick<Routine, "agent_id" | "also">) => (r.agent_id ? [r.agent_id, ...r.also.filter((a) => a !== r.agent_id)] : []);
+
 /**
- * The owner gives a routine to an agent, or takes it away (agent null). A routine given to an
- * agent for the first time comes due at once, so it is seen to work; one moved to another agent
- * keeps its day.
+ * The owner gives a routine to an agent, or takes it away. A routine given to an agent for the
+ * first time comes due at once, so it is seen to work; one moved to another agent keeps its day.
+ *
+ * With `on` (what the switch beside an agent sends): true gives it to this agent, taking it from
+ * whoever had it unless the routine is shared, in which case this agent joins them; false takes
+ * it from this agent only. Without `on`, the routine goes to the agent named, and null takes it
+ * from everyone.
  */
-export async function assignRoutine(actor: Agent, key: string, agentRef: string | null): Promise<Routine> {
+export async function assignRoutine(actor: Agent, key: string, agentRef: string | null, on?: boolean): Promise<Routine> {
   if (actor.kind !== "human") throw bad("Only the owner assigns routines.");
-  if (!ROUTINES.some((r) => r.key === key)) throw notFound(`No routine "${key}".`);
+  const builtIn = ROUTINES.find((r) => r.key === key);
+  if (!builtIn) throw notFound(`No routine "${key}".`);
   await ensure();
   if (agentRef === null || agentRef === "") {
-    await q("UPDATE routines SET agent_id = NULL, next_at = NULL WHERE key = $1", [key]);
+    await q("UPDATE routines SET agent_id = NULL, also = '{}', next_at = NULL WHERE key = $1", [key]);
   } else {
     const a = await agentById(agentRef);
     if (!a || a.kind !== "agent" || a.archived) throw notFound("No such agent.");
-    if (sightOf(a).readOnly) throw bad(`${a.name} is read-only, so it cannot do a routine. Turn Read only off first, or choose another agent.`);
-    await q("UPDATE routines SET agent_id = $2, next_at = COALESCE(next_at, now()) WHERE key = $1", [key, a.id]);
+    const now = (await q1<{ agent_id: string | null; also: string[] | null }>("SELECT agent_id, also FROM routines WHERE key = $1", [key]))!;
+    const doers = now.agent_id ? [now.agent_id, ...(now.also ?? [])] : [];
+    if (on === false) {
+      const left = doers.filter((d) => d !== a.id);
+      await q("UPDATE routines SET agent_id = $2, also = $3, next_at = CASE WHEN $2::text IS NULL THEN NULL ELSE next_at END WHERE key = $1", [key, left[0] ?? null, left.slice(1)]);
+    } else {
+      if (sightOf(a).readOnly) throw bad(`${a.name} is read-only, so it cannot do a routine. Turn Read only off first, or choose another agent.`);
+      if (builtIn.shared && on === true && doers.length && !doers.includes(a.id)) {
+        await q("UPDATE routines SET also = array_append(also, $2) WHERE key = $1", [key, a.id]);
+        // it joins a round that may already have gone out today: it is handed its own now, so it is seen to work
+        await handOver(builtIn, a);
+      } else if (!doers.includes(a.id)) {
+        await q("UPDATE routines SET agent_id = $2, also = '{}', next_at = COALESCE(next_at, now()) WHERE key = $1", [key, a.id]);
+      }
+    }
   }
   await logEvent({ actor: actor.id, type: "routine.assigned", entity_type: "agent", entity_id: agentRef || actor.id, summary: `${ROUTINES.find((r) => r.key === key)!.title}: ${agentRef ? "assigned" : "unassigned"}`, data: { routine: key } });
   return (await listRoutines()).find((r) => r.key === key)!;
@@ -137,26 +166,35 @@ export async function tick(): Promise<{ due: string[] }> {
   if (!(await q1("SELECT 1 FROM routines WHERE agent_id IS NOT NULL AND next_at <= now() LIMIT 1").catch(() => null))) return { due: [] };
   const due: string[] = [];
   for (const r of ROUTINES) {
-    const claimed = await q1<{ agent_id: string }>(
+    const claimed = await q1<{ agent_id: string; also: string[] | null }>(
       `UPDATE routines SET last_at = now(), next_at = now() + make_interval(days => $2)
-       WHERE key = $1 AND agent_id IS NOT NULL AND next_at <= now() RETURNING agent_id`,
+       WHERE key = $1 AND agent_id IS NOT NULL AND next_at <= now() RETURNING agent_id, also`,
       [r.key, DAYS[r.every]],
     );
     if (!claimed) continue;
-    const agent = await agentById(claimed.agent_id);
-    if (!agent || agent.archived || agent.kind !== "agent") {
-      await q("UPDATE routines SET agent_id = NULL, next_at = NULL WHERE key = $1", [r.key]);
-      continue;
+    // every agent that does it; one that has gone (archived, or removed) drops out and the next takes its place
+    const doers: Agent[] = [];
+    for (const id of [claimed.agent_id, ...(r.shared ? (claimed.also ?? []) : [])]) {
+      const agent = await agentById(id);
+      if (agent && !agent.archived && agent.kind === "agent" && !doers.some((d) => d.id === agent.id)) doers.push(agent);
     }
-    if (await q1("SELECT 1 FROM jobs WHERE kind = 'routine' AND target_id = $1 AND status = 'open'", [r.key])) continue;
-    const owner = await ownerAgent();
-    const id = newId("j");
-    await q("INSERT INTO jobs (id, kind, target_type, target_id, prompt, requested_by, assigned_to) VALUES ($1,'routine','routine',$2,$3,$4,$5)", [id, r.key, r.title, owner.id, agent.id]);
-    // the job's news names its agent, which is what wakes it
-    await logEvent({ actor: owner.id, type: "job.created", entity_type: "job", entity_id: id, summary: `Routine due: ${r.title}`, data: { kind: "routine", routine: r.key, assigned_to: agent.id, target_id: r.key } });
-    due.push(r.key);
+    if (doers.length !== 1 + (claimed.also ?? []).length || doers[0]?.id !== claimed.agent_id) {
+      await q("UPDATE routines SET agent_id = $2, also = $3, next_at = CASE WHEN $2::text IS NULL THEN NULL ELSE next_at END WHERE key = $1", [r.key, doers[0]?.id ?? null, doers.slice(1).map((d) => d.id)]);
+    }
+    for (const agent of doers) if (await handOver(r, agent)) due.push(r.key);
   }
-  return { due };
+  return { due: [...new Set(due)] };
+}
+
+/** One agent is handed a routine, as a job. Not while its last round is still open: it then simply waits for its next day. */
+async function handOver(r: BuiltIn, agent: Agent): Promise<boolean> {
+  if (await q1("SELECT 1 FROM jobs WHERE kind = 'routine' AND target_id = $1 AND assigned_to = $2 AND status = 'open'", [r.key, agent.id])) return false;
+  const owner = await ownerAgent();
+  const id = newId("j");
+  await q("INSERT INTO jobs (id, kind, target_type, target_id, prompt, requested_by, assigned_to) VALUES ($1,'routine','routine',$2,$3,$4,$5)", [id, r.key, r.title, owner.id, agent.id]);
+  // the job's news names its agent, which is what wakes it
+  await logEvent({ actor: owner.id, type: "job.created", entity_type: "job", entity_id: id, summary: `Routine due: ${r.title}`, data: { kind: "routine", routine: r.key, assigned_to: agent.id, target_id: r.key } });
+  return true;
 }
 
 /** Runs tick() after the response has gone, when called inside a request. For places that are visited often anyway. */
