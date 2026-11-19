@@ -188,3 +188,15 @@ being true. Read this list before starting work.
   `ios/scripts/ci-test.sh` now writes each failed expectation as an annotation on the run, so it
   can be read on the run's public page. Main's own iPhone job failed this way before (Nov 2026),
   so do not assume a red iPhone job is your change until the annotation names the test.
+- SwiftUI: a `Button` whose label is a symbol inside a `.frame` answers taps only on the symbol
+  itself unless the label has a `.contentShape`. The idea canvas's round controls looked 40 points
+  wide and were tappable on a few; the UI test's tap landed on the canvas behind (it failed on
+  iPad and happened to pass on iPhone). Give every such label `.contentShape(Circle())` or
+  `Rectangle()`, as the app bar's buttons have.
+- iOS UI tests: "Done" also names a key on the keyboard, and the system web viewer's own button is
+  "Close" on newer simulators. Recognise the viewer by its bar (`TopBrowserBar`), not by "Done".
+- iOS CI: to chase one failing test, commit `ios/only-testing` with one test a line; the job then
+  runs only those (a few minutes instead of forty) and says what was on screen at each failure.
+  Remove the file before the work is finished.
+- When a command chain ends in `git commit && git push`, make the build's own exit status gate it
+  (`xcodebuild ... | grep` returns grep's status, so a failed build was committed and pushed once).
