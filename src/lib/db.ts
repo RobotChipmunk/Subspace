@@ -453,6 +453,14 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS icon text;
    ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS cleared_by text;
    ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS kept_todo_id text`,
+  // The owner's iPhones and iPads, for push notifications about the rail (core/push.ts). env is
+  // "sandbox" for builds run from Xcode and "production" for TestFlight and the App Store.
+  `CREATE TABLE IF NOT EXISTS push_devices (
+     token text PRIMARY KEY,
+     env text NOT NULL DEFAULT 'production',
+     created_at timestamptz NOT NULL DEFAULT now(),
+     last_seen timestamptz NOT NULL DEFAULT now()
+   )`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

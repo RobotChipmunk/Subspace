@@ -21,6 +21,8 @@ class SubspaceTestCase: XCTestCase {
     func launch(reset: Bool = true) {
         app.launchEnvironment["SUBSPACE_SERVER"] = Self.server
         app.launchEnvironment["SUBSPACE_RESET"] = reset ? "1" : "0"
+        // The notification permission alert would sit over every tap.
+        app.launchEnvironment["SUBSPACE_NOTIFICATIONS"] = "0"
         app.launch()
     }
 

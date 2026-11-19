@@ -88,6 +88,7 @@ final class AppModel {
         api.token = Keychain.read("token")
         signedIn = api.token != nil && api.baseURL != nil
         api.onUnauthorized = { [weak self] in self?.signOut() }
+        Notifier.shared.model = self
         if signedIn { start() }
     }
 
@@ -116,11 +117,13 @@ final class AppModel {
         UserDefaults.standard.set(server, forKey: "server")
         withAnimation(.ssSoft) { signedIn = true }
         start()
+        Task { await Notifier.shared.sendToken() }
     }
 
     func signOut() {
         poll?.cancel()
         poll = nil
+        Notifier.shared.forgetDevice(server: api.baseURL, session: api.token)
         api.token = nil
         Keychain.write("token", nil)
         me = nil
@@ -129,6 +132,7 @@ final class AppModel {
         trackers = []
         direct = [:]
         rail = []
+        Notifier.shared.reset()
         presentedPage = nil
         railSheet = false
         tab = .feed
@@ -174,6 +178,7 @@ final class AppModel {
         guard signedIn, let r: R = try? await api.get("rail") else { return }
         if r.modules != rail { withAnimation(.ssSoft) { rail = r.modules } }
         if rail.isEmpty { railSheet = false }
+        await Notifier.shared.railChanged(r.modules)
     }
 
     func dismissRail(_ id: String) async {

@@ -19,6 +19,7 @@
 import { validateBlock, type AnyBlock } from "../blocks";
 import { q, q1 } from "../db";
 import { addDays, bad, logEvent, newId, notFound, timezone, type Agent } from "./util";
+import { pushRail } from "./push";
 
 /** Blocks that read well in a narrow column. A module holds one. */
 export const RAIL_BLOCKS = ["facts", "timeline", "callout", "stats", "cards", "map", "text"] as const;
@@ -215,6 +216,9 @@ export async function setModule(
        dismissed_at = CASE WHEN $14 THEN rail_modules.dismissed_at ELSE NULL END, cleared_by = CASE WHEN $14 THEN rail_modules.cleared_by ELSE NULL END`,
     [id, key, actor.id, title, subtitle, label, input.image ?? null, JSON.stringify(blocks), JSON.stringify(actions), pageId, Math.max(0, Math.min(Number(input.priority) || 0, 10)), from, until, !!same, level, todoId, icon],
   );
+  // A new or changed module that shows now reaches the owner's phone; one that waits for show_from
+  // is left to the app, which notices it the next time it looks at the rail.
+  if (!same && new Date(from) <= new Date()) pushRail({ id, title, subtitle, label, badge: (await activeModules()).length });
   if (!same) await logEvent({ actor: actor.id, type: mine ? "rail.updated" : "rail.added", entity_type: "rail", entity_id: id, summary: `${level === "info" ? "" : level.toUpperCase() + ": "}${title}${label ? ` (${label})` : ""}`, data: { key, level, ...(todoId ? { todo: todoId } : {}) } });
   return (await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1", [id]))!;
 }
