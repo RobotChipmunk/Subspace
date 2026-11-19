@@ -405,8 +405,9 @@ struct IdeaCanvas: View {
     private var controls: some View {
         VStack {
             HStack(spacing: 6) {
+                // The whole round of each control answers a tap, not only the symbol drawn in it.
                 Button(action: onBack) {
-                    Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink2).frame(width: 40, height: 40)
+                    Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink2).frame(width: 40, height: 40).contentShape(Circle())
                 }
                 .buttonStyle(PressStyle(scale: 0.92))
                 .glass(radius: 20)
@@ -428,7 +429,7 @@ struct IdeaCanvas: View {
                     .accessibilityIdentifier("ideas.title")
                 Spacer(minLength: 0)
                 PhotosPicker(selection: $photo, matching: .images) {
-                    Image(systemName: "photo.badge.plus").font(.system(size: 15)).foregroundStyle(Theme.ink2).frame(width: 40, height: 40)
+                    Image(systemName: "photo.badge.plus").font(.system(size: 15)).foregroundStyle(Theme.ink2).frame(width: 40, height: 40).contentShape(Circle())
                 }
                 .glass(radius: 20)
                 .accessibilityLabel("Add a picture")
@@ -443,6 +444,7 @@ struct IdeaCanvas: View {
                     .foregroundStyle(growing ? Theme.accent : Theme.ink3)
                     .padding(.horizontal, 14)
                     .frame(height: 40)
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(PressStyle(scale: 0.96))
                 .glass(radius: 20)
@@ -509,6 +511,7 @@ struct IdeaCanvas: View {
                 .foregroundStyle(on ? Theme.accent : Theme.ink2)
                 .frame(width: 44, height: 44)
                 .background(on ? Theme.accentSoft : Color.clear, in: Circle())
+                .contentShape(Circle())
         }
         .buttonStyle(PressStyle(scale: 0.9))
         .accessibilityLabel(label)
