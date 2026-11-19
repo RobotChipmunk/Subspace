@@ -768,7 +768,7 @@ export async function gather(actor: Agent, aboutIn: unknown) {
         [words.map((w) => `${w}:*`).join(" | ")],
       )
     : [];
-  const near: Hit[] = await nearest(about, { where: visible + self, limit: 40 });
+  const near: Hit[] = await nearest(about, { where: visible + self, limit: 40, wide: true });
   const ranked = fuse([worded, near], (h) => h.entity_type + ":" + h.entity_id);
   const idsOf = (type: string) => ranked.filter((h) => h.entity_type === type).map((h) => h.entity_id);
   const inOrder = <T extends { id: string }>(ids: string[], rows: T[]) => ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is T => !!r);

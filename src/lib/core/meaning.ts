@@ -139,7 +139,7 @@ export type Near = { entity_type: string; entity_id: string; title: string; star
  * over the search_docs row "d" (kinds, dates, what an agent may see), with its own parameters
  * numbered from $2. Empty when search by meaning is off, or when it fails: word search carries on.
  */
-export async function nearest(text: string, opts: { where?: string; params?: unknown[]; limit?: number } = {}): Promise<Near[]> {
+export async function nearest(text: string, opts: { where?: string; params?: unknown[]; limit?: number; /** keep everything over the bar, not only what is close to the best match (for gathering widely) */ wide?: boolean } = {}): Promise<Near[]> {
   if (!meaningOn() || !text.trim()) return [];
   try {
     const [vector] = await embed([text.slice(0, TEXT_CHARS)]);
@@ -153,7 +153,7 @@ export async function nearest(text: string, opts: { where?: string; params?: unk
     );
     // only what comes close to the best: a weak match beside a strong one is noise
     const best = rows[0]?.score ?? 0;
-    return rows.filter((r) => r.score >= best - NEAR_BEST);
+    return opts.wide ? rows : rows.filter((r) => r.score >= best - NEAR_BEST);
   } catch (e) {
     console.error("meaning: search by meaning failed, falling back to words", (e as Error).message);
     await noteError(e);
