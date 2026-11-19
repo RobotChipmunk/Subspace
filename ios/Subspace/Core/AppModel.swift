@@ -51,6 +51,8 @@ final class AppModel {
     var trackers: [Tracker] = []
     var direct: [String: String] = [:]
     var rail: [RailModule] = []
+    /// Modules kept on screen for a moment after an action of theirs was sent.
+    @ObservationIgnored private var railHeld: Set<String> = []
 
     // Navigation
     var tab: AppTab = .feed
@@ -176,7 +178,12 @@ final class AppModel {
     func refreshRail() async {
         struct R: Codable { var modules: [RailModule] }
         guard signedIn, let r: R = try? await api.get("rail") else { return }
-        if r.modules != rail { withAnimation(.ssSoft) { rail = r.modules } }
+        // a module whose action was just sent stays where it is until the owner has been shown so
+        var next = r.modules
+        for (index, module) in rail.enumerated() where railHeld.contains(module.id) && !next.contains(where: { $0.id == module.id }) {
+            next.insert(module, at: min(index, next.count))
+        }
+        if next != rail { withAnimation(.ssSoft) { rail = next } }
         if rail.isEmpty { railSheet = false }
         await Notifier.shared.railChanged(r.modules)
     }
@@ -192,6 +199,25 @@ final class AppModel {
     func railActed(_ module: RailModule, label: String) async {
         withAnimation(.ssSoft) { rail.removeAll { $0.id == module.id } }
         try? await api.send("POST", "rail/\(module.id)/action", body: ["label": label])
+        await refreshRail()
+    }
+
+    /// One of a module's buttons sends an action to the agent that raised it. Answers with who it
+    /// went to as soon as the server has it (the agent may pick it up now or later), or nil when
+    /// it could not be sent. The module stays in the rail until `railSentShown`.
+    func railSend(_ module: RailModule, label: String) async -> String? {
+        railHeld.insert(module.id)
+        guard let reply = try? await api.send("POST", "rail/\(module.id)/action", body: ["label": label], as: RailActedReply.self) else {
+            railHeld.remove(module.id)
+            return nil
+        }
+        return reply.sent?.to?.name ?? "the agent"
+    }
+
+    /// The owner has been shown that it was sent: the module can go.
+    func railSentShown(_ id: String) async {
+        railHeld.remove(id)
+        withAnimation(.ssSoft) { rail.removeAll { $0.id == id } }
         await refreshRail()
     }
 

@@ -464,6 +464,9 @@ const MIGRATIONS: string[] = [
   // What the owner lets an agent see and do: read-only, which parts of the app, which top-level
   // sections of context (core/access.ts). Null is everything, as before.
   `ALTER TABLE agents ADD COLUMN IF NOT EXISTS access jsonb`,
+  // A module's button may be an action sent back to the agent that raised it ("Approve"). What
+  // the owner sent, and when, is kept on the module: { label, send, at, seq }.
+  `ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS sent jsonb`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

@@ -165,6 +165,8 @@ struct TodoRail: Codable, Hashable {
     var page_id: String?
     /// True when the owner made this task of the module with "Later".
     var kept: Bool?
+    /// What the owner sent the module's agent from one of its buttons, if they did.
+    var sent: RailSent?
 }
 
 /// A node of the context tree: a note, a page an agent made, a saved link or a journal entry.
@@ -205,9 +207,36 @@ struct ContextNode: Codable, Identifiable, Hashable {
     var images: [String]?
 }
 
+/// A module's button: a link (`url`), or an action sent back to the agent that raised the module (`send`).
 struct RailAction: Codable, Hashable {
     var label: String
-    var url: String
+    var url: String?
+    /// The word the agent gave this button; when set, tapping sends it to that agent.
+    var send: String? = nil
+
+    /// Where a link button goes; empty for one that sends.
+    var link: String { url ?? "" }
+    var sends: Bool { send != nil || url == nil }
+}
+
+/// What the owner sent a module's agent from one of its buttons.
+struct RailSent: Codable, Hashable {
+    var label: String?
+    var send: String?
+    var at: String?
+    /// True once the agent has read far enough to have seen it.
+    var picked_up: Bool?
+}
+
+/// The reply to tapping a module's button.
+struct RailActedReply: Decodable {
+    struct Sent: Decodable {
+        struct To: Decodable { var name: String? }
+        var label: String?
+        var to: To?
+    }
+    var cleared: Bool?
+    var sent: Sent?
 }
 
 struct RailTodoRef: Codable, Hashable {

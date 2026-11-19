@@ -9,6 +9,8 @@ struct TodosDetail: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     @State private var todo: Todo? = nil
+    /// The label of a rail action being sent to its agent from this task.
+    @State private var railSending: String? = nil
     @State private var title: String = ""
     @State private var titleLoaded: Bool = false
     @State private var notes: String? = nil
@@ -414,9 +416,11 @@ struct TodosDetail: View {
     /// A kept task also says whose module it was.
     @ViewBuilder private func fromRail(_ rail: TodoRail) -> some View {
         let page: [RailAction] = rail.page_id.map { [RailAction(label: "Open page", url: "/page/\($0)")] } ?? []
-        let buttons = (rail.actions ?? []) + page
+        // once an action has been sent to the agent, the buttons that send give way to a line saying so
+        let sent = rail.sent
+        let buttons = (rail.actions ?? []).filter { !($0.sends && (sent != nil || railSending != nil)) } + page
         let by = rail.kept == true ? app.agent(rail.author) : nil
-        if by != nil || !buttons.isEmpty {
+        if by != nil || !buttons.isEmpty || sent != nil || railSending != nil {
             FlowRow(spacing: 6) {
                 if let by {
                     HStack(spacing: 6) {
@@ -433,15 +437,33 @@ struct TodosDetail: View {
                 ForEach(Array(buttons.enumerated()), id: \.offset) { item in
                     let a = item.element
                     Button {
-                        app.open(a.url)
+                        if a.sends { sendToAgent(rail, a.label) } else { app.open(a.link) }
                     } label: {
                         HStack(spacing: 4) {
                             Text(a.label)
-                            if a.url.hasPrefix("http") { Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.ink3) }
+                            if a.link.hasPrefix("http") { Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.ink3) }
                         }
                     }
                     .buttonStyle(PillStyle())
                     .accessibilityIdentifier("todos.detail.rail.action.\(item.offset)")
+                }
+                if let sent {
+                    let name = app.agent(rail.author)?.name ?? "the agent"
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
+                        Text("“\(sent.label ?? "")” sent to \(name)")
+                        Text(sent.picked_up == true ? "· picked up" : "· waiting for it").fontWeight(.regular).foregroundStyle(Theme.ink3)
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .frame(minHeight: 32)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("todos.detail.rail.sent")
+                } else if let label = railSending {
+                    Text("Sending “\(label)”")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.ink3)
+                        .frame(minHeight: 32)
                 }
             }
             .padding(.top, 2)
@@ -544,6 +566,22 @@ struct TodosDetail: View {
                 await load()
             }
             try? await Task.sleep(for: .seconds(8))
+        }
+    }
+
+    /// A module's button that sends an action to its agent, used from the task the module became.
+    private func sendToAgent(_ rail: TodoRail, _ label: String) {
+        guard let moduleID = rail.id, railSending == nil else { return }
+        railSending = label
+        Task {
+            do {
+                try await app.api.send("POST", "rail/\(moduleID)/action", body: ["label": label])
+                problem = nil
+            } catch {
+                problem = "“\(label)” was not sent. Try again."
+            }
+            await load()
+            railSending = nil
         }
     }
 

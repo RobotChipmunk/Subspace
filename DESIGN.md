@@ -235,6 +235,17 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **An action sent to an agent** (`Module` in `Rail.tsx`, `FromRail` in `todos/page.tsx`;
+  `RailView.swift` in the app): a module's button may send the owner's answer back to the agent
+  that raised it instead of opening a link. It looks like any other button and carries whatever
+  label the agent gave it ("Approve", "Not this", "Shorter"). On a tap the buttons give way, in
+  the same place, to one line in `accent`: "Sending" for the moment the server takes, then a tick
+  and "Sent to <agent>", which arrives with `spring` and is held 1.6 seconds before the module
+  leaves as any other does. That line is the whole acknowledgement: it says the answer has been
+  taken, not that the agent has acted, since the agent may not be running. If it could not be
+  sent, the buttons come back with one `danger` line, "was not sent. Try again." On the task a
+  module became, the buttons that send give way for good to "“Approve” sent to <agent>", followed
+  in `ink3` by "waiting for it" or "picked up". Never a spinner, and never a second confirmation.
 - **Agent access** (`Access` in `agents/page.tsx`; `AgentsAccess.swift` in the app): in an agent's
   open panel, after its connected apps, a `fill` box headed "Access". First a sentence and a
   switch, "Read only". Then two rows of chips under quiet labels, "The app" (Feed, Todos, Journal,

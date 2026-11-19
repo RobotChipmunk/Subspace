@@ -414,7 +414,15 @@ export const TOOLS: Tool[] = [
           type: "array",
           description:
             'Up to 2 buttons, most important first. The first is the one thing to do about this module and is shown before it is opened, so its label must be a plain verb that says what happens: "Get directions", "Reconnect", "Track parcel", "Call", "Pay". url may be https://, tel:, mailto: or sms:. Tapping any button clears the module from the rail. Leave actions out when there is nothing to tap: a module about a task gets "Open task", one with a page gets "Open page", and a module with nothing to do gets "Got it".',
-          items: { type: "object", properties: { label: str("At most 24 characters; a verb and a word."), url: str("Where it goes.") }, required: ["label", "url"] },
+          items: {
+            type: "object",
+            properties: {
+              label: str("At most 24 characters; a verb and a word."),
+              url: str("A link the button opens. Give this or send, not both."),
+              send: str('Instead of a link: the tap is sent back to you. A short word or phrase you will recognise ("approve", "decline", "shorter", "ask-next-week"), at most 60 characters. The owner sees at once that it was sent; you are woken, and it arrives under for_you in changes() as rail.cleared with sent set to this value. Use it for anything you can then do yourself: approve a change, pick one of two options, say no.'),
+            },
+            required: ["label"],
+          },
           maxItems: 2,
         },
         page: str("Optional id of a page with the full detail; adds an Open page button. Use it when there is more to read than a module may hold."),

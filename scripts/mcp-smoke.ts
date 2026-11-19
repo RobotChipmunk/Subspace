@@ -175,6 +175,25 @@ async function main() {
   }
   await call(s, "todo_update", { id: followUp.id, done: true });
   await call(s, "rail_remove", { key: pointer.key });
+  {
+    // A button may send an action back to the module's author instead of opening a link. The owner's
+    // tap clears the module, answers at once with who it went to, and reaches the author in changes().
+    const both = await call(s, "rail_set", { key: railKey + "-s", title: "Smoke test: follow it?", show_until: until, actions: [{ label: "Follow it", url: "https://example.com/", send: "approve" }] });
+    if (!both.ERROR || !/both url and send/.test(both.ERROR)) throw new Error("rail_set accepted a button with a link and a send: " + JSON.stringify(both));
+    const neither = await call(s, "rail_set", { key: railKey + "-s", title: "Smoke test: follow it?", show_until: until, actions: [{ label: "Follow it" }] });
+    if (!neither.ERROR || !/needs url/.test(neither.ERROR)) throw new Error("rail_set accepted a button that does nothing: " + JSON.stringify(neither));
+    const ask = await call(s, "rail_set", { key: railKey + "-s", icon: "question", title: "Smoke test: follow it?", show_until: until, actions: [{ label: "Follow it", send: "approve" }, { label: "Not this", send: "decline" }] });
+    await call(s, "changes");
+    const tap = await moduleActed(owner, ask.id, "Follow it");
+    if (!tap.cleared || tap.sent?.to?.handle !== s.handle || tap.sent.label !== "Follow it") throw new Error("a button that sends did not answer with who it went to: " + JSON.stringify(tap));
+    const got = (await call(s, "changes")).for_you.find((i: any) => i.id === ask.id && i.type === "rail.cleared");
+    if (got?.sent !== "approve" || got.action !== "Follow it" || got.by_owner !== "action") throw new Error("the author was not sent the action: " + JSON.stringify(got));
+    const again = await moduleActed(owner, ask.id, "Not this");
+    if (again.cleared || again.sent?.label !== "Follow it") throw new Error("a second answer was taken after the first: " + JSON.stringify(again));
+    const listed = (await call(s, "explore", { path: "/rail" })).items.find((i: any) => i.id === ask.id);
+    if (listed?.sent !== "approve" || listed.cleared_by_owner !== "action") throw new Error("explore(/rail) does not show what was sent: " + JSON.stringify(listed));
+    await call(s, "rail_remove", { key: railKey + "-s" });
+  }
   // The owner acts on a module and it is gone: a tap on a button, then "Later", then closing it. Each time its author hears how.
   const parcel = { key: railKey + "-p", icon: "package", label: "Arrives today", title: "Smoke test parcel " + tag, subtitle: "Two boxes, signature needed.", blocks: [fact], actions: [{ label: "Track parcel", url: "https://example.com/track" }], show_until: until };
   const shown = await call(s, "rail_set", parcel);

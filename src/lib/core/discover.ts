@@ -535,6 +535,8 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
     // how they cleared it: "action" (with the button they chose), "todo_open", "later" (todo is the task it became) or "dismiss"
     if (myModule && e.data?.by) item.by_owner = e.data.by;
     if (myModule && e.data?.action) item.action = e.data.action;
+    // a button of yours that sends an action back: this is the action, in the word you gave it
+    if (myModule && e.data?.sent) item.sent = e.data.sent;
     const direct = e.mentions.includes(agent.handle) || e.type === "job.created" || myModule || (typeof e.data?.tracker === "string" && mine.has(e.data.tracker));
     (direct ? for_you : other).push(item);
   }

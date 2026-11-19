@@ -106,7 +106,7 @@ async function run(profile) {
     const { Client } = require("pg");
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     await db.connect();
-    await db.query("UPDATE rail_modules SET dismissed_at = NULL, cleared_by = NULL");
+    await db.query("UPDATE rail_modules SET dismissed_at = NULL, cleared_by = NULL, sent = NULL");
     await db.end();
     await page.reload();
     await settle(1500);
@@ -152,7 +152,7 @@ async function run(profile) {
     // each says what kind of thing it is by the picture at its front
     const tones = await page.locator("[data-rail-module]").evaluateAll((mods) => Object.fromEntries(mods.map((m) => [m.dataset.railModule, m.dataset.tone])));
     if (tones["calendar-auth"] !== "error" || tones["agility-topup"] !== "act" || tones["portland-hotel"] !== "know") fail(`rail: modules are not told apart at a glance (${JSON.stringify(tones)})`);
-    if (await page.locator("[data-rail-module] .rail-tile svg").count() !== 4) fail("rail: a module is missing its icon");
+    if (await page.locator("[data-rail-module] .rail-tile svg").count() !== 5) fail("rail: a module is missing its icon");
     await shot("rail-closed");
     await press(hotel.getByRole("button", { expanded: false }));
     await settle(700);
@@ -162,7 +162,7 @@ async function run(profile) {
     await reachable(hotel.getByRole("link", { name: "Open page" }), "rail module page link");
     await reachable(hotel.getByRole("button", { name: "Later" }), "rail module: Later");
     const count = await page.locator("[data-rail-module]").count();
-    if (count !== 4) fail(`rail: ${count} modules shown, expected 4`);
+    if (count !== 5) fail(`rail: ${count} modules shown, expected 5`);
     // an error from an agent is listed first and marked
     const firstMod = page.locator("[data-rail-module]").first();
     if ((await firstMod.getAttribute("data-level")) !== "error") fail("rail: the error module is not shown first");
@@ -181,11 +181,25 @@ async function run(profile) {
     await reachable(roof.getByRole("button", { name: "Got it" }), "rail: Got it on a module with nothing to do");
     await press(wide ? roof.getByRole("button", { name: "Got it" }) : page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
     await settle(900);
-    if ((await page.locator("[data-rail-module]").count()) !== 3) fail(`rail: ${wide ? "Got it" : "dismissing a module"} did not remove it`);
+    if ((await page.locator("[data-rail-module]").count()) !== 4) fail(`rail: ${wide ? "Got it" : "dismissing a module"} did not remove it`);
 
     // "Later": not now, but not lost. The module becomes a task on the day chosen and leaves the rail.
     const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
     const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
+    // A button can send an action to the agent that raised the module. The owner is told at once that
+    // it was sent, whether or not the agent is running; then the module leaves like any other.
+    const suggest = page.locator('[data-rail-module="follow-shaders"]');
+    await reachable(suggest.getByRole("button", { name: "Follow it" }), "rail: a button that sends an action to its agent");
+    if (await suggest.getByRole("button", { name: "Not this" }).count()) fail("rail: a closed module shows its second answer");
+    await press(suggest.getByRole("button", { name: "Follow it" }));
+    await suggest
+      .locator('[data-rail-sent="done"]', { hasText: "Sent to Scout" })
+      .waitFor({ timeout: 6000 })
+      .catch(() => fail('rail: tapping a button that sends did not say "Sent to Scout"'));
+    await shot("rail-sent");
+    await suggest.waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("rail: a module whose action was sent is still in the rail"));
+    await settle(500);
+    if ((await get("/api/v1/rail")).modules.some((m) => m.key === "follow-shaders")) fail("rail: sending an action did not clear the module");
     const auth = page.locator('[data-rail-module="calendar-auth"]');
     await press(auth.getByRole("button", { expanded: false }));
     await settle(700);

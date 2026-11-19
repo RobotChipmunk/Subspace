@@ -225,6 +225,16 @@ async function main() {
     blocks: [{ type: "timeline", items: [{ when: "9:00 am", title: "Arrives" }, { when: "10:00 am", title: "Written quote by email" }] }],
     show_until: inAWeek,
   });
+  // a suggestion the agent can carry out itself: each button sends the owner's answer back to it
+  await setModule(scout, {
+    key: "follow-shaders",
+    icon: "question",
+    label: "New topic",
+    title: "Follow creative coding?",
+    subtitle: "Three.js and shader work keeps coming up in your journal; nothing tracks it yet.",
+    actions: [{ label: "Follow it", send: "approve" }, { label: "Not this", send: "decline" }],
+    show_until: inAWeek,
+  });
   // A follow-up: two lines that point at the task. The task carries it once the module has gone.
   await setModule(scout, {
     key: "agility-topup",

@@ -12,6 +12,7 @@ import { Editor } from "@/components/Editor";
 import { Floating } from "@/components/Floating";
 import { TagPills } from "@/components/TagPills";
 import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
+import type { RailAction } from "@/lib/core/rail";
 import type { BinnedTodo, Folder, Repeat, TagCount, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
@@ -62,10 +63,28 @@ function placeLabel(r: Pick<Row, "scope" | "date">, today?: string): string {
  */
 function FromRail({ rail }: { rail: NonNullable<Todo["rail"]> }) {
   const { agent } = useMe();
+  const { mutate } = useSWRConfig();
   const by = agent(rail.author);
-  const buttons = [...rail.actions, ...(rail.page_id ? [{ label: "Open page", url: `/page/${rail.page_id}` }] : [])];
-  if (!buttons.length && !(rail.kept && by)) return null;
+  // A button that sends an action to the module's agent can still be used from here. Once sent,
+  // the buttons that send give way to a line saying so, and whether the agent has picked it up.
+  const [sending, setSending] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const sent = rail.sent;
+  const buttons: RailAction[] = [...rail.actions.filter((a) => !(a.send && (sent || sending))), ...(rail.page_id ? [{ label: "Open page", url: `/page/${rail.page_id}` }] : [])];
+  if (!buttons.length && !(rail.kept && by) && !sent && !sending) return null;
   const cls = "flex h-8 items-center gap-1 whitespace-nowrap rounded-full bg-fill px-3 text-[13px] font-medium text-ink transition-colors hover:bg-fill2";
+  const send = async (label: string) => {
+    setSending(label);
+    setFailed(false);
+    try {
+      await api(`rail/${rail.id}/action`, { method: "POST", body: { label } });
+      await mutate((k) => typeof k === "string" && (k === "rail" || k.startsWith("todos")));
+    } catch {
+      setFailed(true);
+    } finally {
+      setSending(null);
+    }
+  };
   return (
     <div data-from-rail className="ml-[40px] mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-ink2">
       {rail.kept && by && (
@@ -74,7 +93,11 @@ function FromRail({ rail }: { rail: NonNullable<Todo["rail"]> }) {
         </span>
       )}
       {buttons.map((a, i) =>
-        a.url.startsWith("/") ? (
+        a.send || !a.url ? (
+          <button key={i} onClick={() => send(a.label)} className={cls}>
+            {a.label}
+          </button>
+        ) : a.url.startsWith("/") ? (
           <Link key={i} href={a.url} className={cls}>
             {a.label}
           </Link>
@@ -85,6 +108,19 @@ function FromRail({ rail }: { rail: NonNullable<Todo["rail"]> }) {
           </a>
         ),
       )}
+      {(sent || sending) && (
+        <span role="status" data-rail-sent className={`flex h-8 items-center gap-1.5 font-medium ${sent ? "text-accent" : "text-ink3"}`}>
+          {sent ? (
+            <>
+              <Check size={14} /> “{sent.label}” sent to {by?.name ?? "the agent"}
+              <span className="font-normal text-ink3">{sent.picked_up ? "· picked up" : "· waiting for it"}</span>
+            </>
+          ) : (
+            `Sending “${sending}”`
+          )}
+        </span>
+      )}
+      {failed && <span role="alert" className="text-danger">Not sent. Try again.</span>}
     </div>
   );
 }
