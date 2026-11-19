@@ -4,6 +4,7 @@ import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
 import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
 import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
+import { embedPending, meaningOn } from "../src/lib/core/meaning";
 import { archiveNode, createNode, getNode } from "../src/lib/core/context";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
@@ -295,6 +296,35 @@ async function main() {
     const freed = (await agentByToken(await issueToken(made.id)))!;
     if (!(await call(freed, "explore", { path: "/feed" })).children) throw new Error("an agent whose limits were lifted still cannot see the feed");
     await updateAgent(owner, made.id, { archived: true });
+  }
+
+  {
+    // Reading well: a list that is not the whole says so, the week's feed comes in one call, gather() brings what bears on a piece of work, and a note whose body moved is asked about its summary.
+    const week = await call(s, "explore", { path: "/feed/week" });
+    if (!week.items?.length || week.count !== week.items.length || !week.items[0].day || !week.items[0].line) throw new Error("explore(/feed/week) is not the week, a line a post: " + JSON.stringify(week).slice(0, 300));
+    const firstPage = await call(s, "explore", { path: "/log" });
+    if (firstPage.next_cursor && !/^\d+ of \d+/.test(firstPage.showing ?? "")) throw new Error("a first page does not say how much of the whole it is: " + JSON.stringify({ showing: firstPage.showing, count: firstPage.count }));
+    const place = await call(claude, "context_write", { parent: "home", title: "Cornwall " + tag, summary: "Holiday idea.", body: "Summer holiday by the sea." });
+    const grown = await call(claude, "context_write", { id: place.id, body: "Summer holiday by the sea.\n\n" + "- A cottage near St Ives, a week in August, walking the coast path each morning. ".repeat(6) });
+    if (!/summary did not/.test(grown.check_summary ?? "")) throw new Error("a note whose body grew a great deal was not asked about its summary: " + JSON.stringify(grown));
+    await call(claude, "context_write", { id: place.id, body: "Summer holiday by the sea.", summary: "Holiday idea." });
+    const forTask = await call(s, "gather", { about: t.id });
+    if (forTask.about?.task !== t.id || !forTask.next) throw new Error("gather(task id) did not take the task as its subject: " + JSON.stringify(forTask).slice(0, 300));
+    const forWork = await call(s, "gather", { about: "the summer holiday in Cornwall" });
+    if (!forWork.context?.some((x: any) => x.id === place.id) || !forWork.current?.length) throw new Error("gather(sentence) did not bring the note that bears on it, or what is current: " + JSON.stringify(forWork).slice(0, 500));
+    if (!(await call(s, "usage", { days: 7 })).context_to_tidy) throw new Error("usage() does not list notes to tidy");
+    // By meaning, when that is on (in this check a stand-in embedder is used, which knows that a vacation is a holiday).
+    const asked = await call(s, "search", { query: "vacation", types: ["context"] });
+    if (meaningOn()) {
+      if ((await embedPending(40, 60)) < 1) throw new Error("nothing was given an embedding");
+      const meant = await call(s, "search", { query: "vacation", types: ["context"] });
+      const hit = meant.results.find((x: any) => x.id === place.id);
+      if (meant.mode !== "words and meaning" || hit?.match !== "meaning") throw new Error("search by meaning did not find the holiday note for \"vacation\": " + JSON.stringify(meant).slice(0, 500));
+      const worded = (await call(s, "search", { query: "Cornwall " + tag })).results.find((x: any) => x.id === place.id);
+      if (!worded || worded.match) throw new Error("a match by its words was marked as a match by meaning: " + JSON.stringify(worded));
+      if (!(await call(s, "gather", { about: "booking a vacation" })).context?.some((x: any) => x.id === place.id)) throw new Error("gather did not use meaning");
+    } else if (asked.mode !== "words only" || asked.results.some((x: any) => x.id === place.id)) throw new Error("with meaning off, search should be by words only: " + JSON.stringify(asked).slice(0, 300));
+    await call(claude, "context_archive", { id: place.id });
   }
 
   {

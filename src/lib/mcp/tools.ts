@@ -1,7 +1,7 @@
 import { sightOf, type Section } from "../core/access";
 import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
-import { briefing, changes, explore, read, search } from "../core/discover";
+import { briefing, changes, explore, gather, read, search } from "../core/discover";
 import { uploadTicket } from "../auth";
 import { categorize, createEntry, getEntry, plainText } from "../core/journal";
 import { saveLink } from "../core/links";
@@ -74,7 +74,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "search",
-    description: "Word search across posts, todos, context, saved links and followed topics. It matches the words you give (and their plain English forms: run, runs, running), not their meaning: every word must appear, so \"car\" does not find \"vehicle\" and a long query finds less. Only when nothing has every word does it fall back to any of them. So one search is never proof that something is absent: search several times with different words (the name, a synonym, the broader term), one or two words at a time, and follow next_offset when there is more. Returns ids with one-line snippets, best match first, 12 at a time. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
+    description: "Search across posts, todos, context, saved links and followed topics. It always matches the words you give (and their plain English forms: run, runs, running): every word must appear, so a long query finds less, and only when nothing has every word does it fall back to any of them. Where the owner has turned on search by meaning, it also finds things that say the same in other words (\"vacation\" finds a note about a holiday); those results carry match: \"meaning\". The result's mode says which is in force: \"words only\" or \"words and meaning\". Either way one search is never proof that something is absent: search several times with different words (the name, a synonym, the broader term), a few words at a time, and follow next_offset when there is more. Returns ids with one-line snippets, best match first, 12 at a time. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
     inputSchema: obj(
       {
         query: str('Words to find. Supports "quoted phrases", OR, and -exclusions.'),
@@ -87,6 +87,13 @@ export const TOOLS: Tool[] = [
     ),
     readOnly: true,
     run: (a, args) => search({ ...(args as any), actor: a }),
+  },
+  {
+    name: "gather",
+    description: "Everything that bears on one piece of work, in one call: what is current for the owner, and the context notes, pages, journal entries, tasks, recent posts, saved links and followed topics related to it, each as a title and a line. Give a task's id or a sentence saying what the work is. Use it at the start of a task instead of walking the map and searching several times; then read([ids]) only what you need. It ranks by relevance and shows a few of each kind, so it is a starting point, not proof that nothing else exists.",
+    inputSchema: obj({ about: str('A task id ("t_…"), or a sentence: "planning the Portland trip in November".') }, ["about"]),
+    readOnly: true,
+    run: (a, { about }) => gather(a, about),
   },
   {
     name: "read",
@@ -258,11 +265,22 @@ export const TOOLS: Tool[] = [
     run: async (a, args) => {
       // a house rule changes only with the owner's approval: the call becomes a proposal put to them
       if (a.kind === "agent" && (await aimsAtSystem(args))) return propose(a, args as any);
+      const was = args.id ? await getNode(args.id).catch(() => null) : null;
       const parent = args.parent === undefined ? undefined : ["", "/", "/context", "/context/"].includes(args.parent) ? null : args.parent;
       const n = args.id
         ? await updateNode(a, args.id, { ...args, parent } as any)
         : await createNode(a, { parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append, until: args.until });
-      return { id: n.id, path: "/context/" + n.path, version: n.version, ...(n.until ? { until: n.until } : {}) };
+      // Other agents judge a note by its summary. When the body moves a long way and the summary stays, say so.
+      const moved = was ? Math.abs(n.body.length - was.body.length) > Math.max(300, was.body.length * 0.3) || (args.body !== undefined && n.body !== was.body) : false;
+      const check =
+        n.kind === "note" && args.summary === undefined && n.body.trim()
+          ? !n.summary
+            ? "This note has no summary. Give it one sentence (summary) that lets another agent decide whether to open it."
+            : moved
+              ? `The body changed a good deal and the summary did not: "${n.summary}". If that no longer says what the note holds, update it (summary).`
+              : null
+          : null;
+      return { id: n.id, path: "/context/" + n.path, version: n.version, ...(n.until ? { until: n.until } : {}), ...(check ? { check_summary: check } : {}) };
     },
   },
   {

@@ -111,6 +111,8 @@ export async function assignRoutine(actor: Agent, key: string, agentRef: string 
 export async function tick(): Promise<{ due: string[] }> {
   // the same heartbeat tells the writers of notes that have passed their day (core/current.ts)
   await import("./current").then((c) => c.tellLapsed()).catch((e) => console.error("current: tellLapsed failed", (e as Error).message));
+  // and gives what was written lately its place in search by meaning (core/meaning.ts)
+  await import("./meaning").then((m) => m.embedPending()).catch((e) => console.error("meaning: embedPending failed", (e as Error).message));
   if (!(await q1("SELECT 1 FROM routines WHERE agent_id IS NOT NULL AND next_at <= now() LIMIT 1").catch(() => null))) return { due: [] };
   const due: string[] = [];
   for (const r of ROUTINES) {
@@ -178,7 +180,7 @@ export async function routineDone(agent: Agent, jobId: string, note: unknown) {
 export async function usage(days: unknown) {
   const n = Math.min(Math.max(Math.round(Number(days) || 7), 1), 60);
   const since = `now() - make_interval(days => ${n})`;
-  const [agents, tools, failures, empty, rail, tasks, runs] = await Promise.all([
+  const [agents, tools, failures, empty, rail, tasks, notes, runs] = await Promise.all([
     q<{ agent: string; calls: number; failed: number; reads: number; writes: number; chars_read: number }>(
       `SELECT a.handle AS agent, count(*)::int AS calls, (count(*) FILTER (WHERE NOT c.ok))::int AS failed, (count(*) FILTER (WHERE c.kind = 'read'))::int AS reads,
               (count(*) FILTER (WHERE c.kind = 'write'))::int AS writes, COALESCE(sum(c.result_chars), 0)::bigint AS chars_read
@@ -201,6 +203,10 @@ export async function usage(days: unknown) {
               (count(*) FILTER (WHERE t.deleted_at >= ${since}))::int AS deleted
        FROM todos t JOIN agents a ON a.id = t.created_by`,
     ),
+    q<{ path: string; title: string; chars: number; no_summary: boolean }>(
+      `SELECT path, title, length(body)::int AS chars, (summary = '') AS no_summary FROM context_nodes
+       WHERE NOT archived AND kind = 'note' AND ((summary = '' AND length(body) > 200) OR length(body) > 4500) ORDER BY length(body) DESC LIMIT 20`,
+    ),
     q<{ agent: string; runs: number; errors: number; limits: number }>(
       `SELECT a.handle AS agent, count(*)::int AS runs, (count(*) FILTER (WHERE r.status = 'error'))::int AS errors, (count(*) FILTER (WHERE r.status = 'limit'))::int AS limits
        FROM agent_runs r JOIN agents a ON a.id = r.agent_id WHERE r.started_at >= ${since} GROUP BY 1 ORDER BY runs DESC`,
@@ -215,6 +221,8 @@ export async function usage(days: unknown) {
     rail: rail.map((r) => ({ ...r, agent: "@" + r.agent })),
     tasks,
     built_in_runs: runs.map((r) => ({ ...r, agent: "@" + r.agent })),
+    // notes other agents cannot judge from far away (no summary) or should not have to read whole (long)
+    context_to_tidy: notes.map((n) => ({ path: "/context/" + n.path, title: n.title, ...(n.no_summary ? { problem: "no summary" } : { problem: `long (${n.chars} characters): split it into child notes` }) })),
     reading: "calls are tool calls. chars_read is how much text each agent was given. In rail, acted is a tap on one of the module's buttons, sent a button that sent its answer to the agent, and dismissed is closed without acting: many dismissals for one agent is noise.",
   };
 }

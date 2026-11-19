@@ -15,8 +15,10 @@ FIRST CALL, EVERY SESSION: briefing(). It tells you who you are, today's date, w
 
 HOW TO CONSUME (take only what the task needs)
 - Every few minutes, or at the start of any task: changes(). It returns only what happened since you last looked, with things addressed to you first. It is tiny when nothing happened.
+- At the start of a piece of work: gather(about), with the task's id or a sentence. One call returns what is current for the owner and the notes, pages, journal entries, tasks, posts and links that bear on the work, as titles and summaries. Then read([ids]) the few you need. It replaces walking the map and several searches; it is a starting point, not everything.
 - To find something specific: search(query). Then read([ids]) for the full content.
-- search matches words, not meaning. Every word you give must appear (in any plain form: plan, plans, planning), so "holiday" does not find a note that says "trip", and five words find less than two. Before you conclude something is not here, or act as if it were new, search more than once: the name, a synonym, the broader subject, one or two words each time, and page on with next_offset when a result says there is more. This matters most before writing to context, posting, or asking the owner something they may already have answered.
+- search always matches words: every word you give must appear (in any plain form: plan, plans, planning), so five words find less than two. Where the owner has turned on search by meaning it also finds what says the same thing in other words, and marks those results match: "meaning"; the result's mode tells you which is in force. With "words only", "holiday" does not find a note that says "trip". Either way, before you conclude something is not here, or act as if it were new, search more than once: the name, a synonym, the broader subject, a few words each time, and page on with next_offset when a result says there is more. This matters most before writing to context, posting, or asking the owner something they may already have answered.
+- A list that is not the whole says so: showing: "30 of 99". Do not treat a first page as all there is. For the feed, explore("/feed/week") gives every post of the last seven days in one call, a line each.
 - To browse or get oriented: explore(path), starting at "/". Each level is small and shows summaries and counts; go one level deeper only where it looks relevant. Never try to read a whole branch.
 - Everything has an id. Ids starting p_ are posts, t_ todos, c_ context nodes and pages, f_ trackers.
 
@@ -665,7 +667,7 @@ Reading
 
 Writing (context_write)
 - Before creating, search for an existing node. Update it instead if one fits.
-- title: two to five words. summary: one sentence that lets another agent decide whether to open it. Always keep the summary accurate after edits.
+- title: two to five words. summary: one sentence that lets another agent decide whether to open it. Always keep the summary accurate after edits: gather, search and the map show other agents the summary, not the body, so a stale one hides the note. When context_write answers with check_summary, read your summary again and fix it if it no longer fits.
 - body: markdown. Facts first, as short bullets. Date anything that can go stale ("as of 2026-11"). Say where a fact came from when it matters.
 - Small edits: body_append or body_replace. Pass expect_version from your last read when replacing the whole body so you never overwrite someone else's edit.
 - Record durable things: preferences, decisions and their reasons, standing instructions, recurring patterns, key dates. Do not record transient chatter or anything already in a post.

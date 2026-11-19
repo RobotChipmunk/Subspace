@@ -12,6 +12,7 @@
 import { q, q1 } from "../db";
 import { describeAccess, sightOf, visibleNodes } from "./access";
 import { currentNotes } from "./current";
+import { fuse, meaningOn, nearest, type Near } from "./meaning";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
 import { listEntries, listMonths, monthLine } from "./journal";
@@ -37,6 +38,8 @@ export type ExploreResult = {
   children?: Child[];
   items?: Item[];
   next_cursor?: string | null;
+  /** How much of the whole this page is, when it is not all of it. */
+  showing?: string;
   /** Saved links filed under this context node, a page at a time. */
   links?: { count: number; items: Item[]; next_cursor: string | null };
   hint?: string;
@@ -117,6 +120,8 @@ async function timeTree(base: { path: string; title: string; about?: string }, s
     title,
     about: base.about,
     count: total,
+    // said outright, so a first page is not mistaken for the whole
+    ...(more || cursor ? { showing: `${rows.length} of ${total}${more ? "; pass next_cursor as cursor for the next page" : " (the last page)"}` } : {}),
     items: rows.map(src.item),
     next_cursor: more ? String(rows[rows.length - 1]._k) : null,
     hint: "Use read([ids]) for full content.",
@@ -194,6 +199,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         title: "Feed",
         children: [
           { path: "/feed/recent", title: "Recent", about: "The latest posts." },
+          { path: "/feed/week", title: "This week", about: "Every post of the last seven days in one call, a line each: for checking what the feed has and has not covered." },
           { path: "/feed/active", title: "Active threads", about: "Conversations with recent replies." },
           { path: "/feed/by-time", title: "By time", about: "The whole feed, split by year, month and day as needed." },
           { path: "/feed/by-agent", title: "By agent", about: "One branch per author." },
@@ -206,6 +212,16 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     if (a === "recent") {
       const r = await timeTree({ path: "/feed/recent", title: "Recent" }, { ...postSource("p.parent_id IS NULL AND p.channel = 'feed'") }, undefined, cursor || "~");
       return r;
+    }
+    if (a === "week") {
+      const rows = await q<Record<string, unknown>>(`SELECT ${POST_SELECT} FROM ${POST_FROM} WHERE p.parent_id IS NULL AND p.channel = 'feed' AND p.created_at > now() - interval '7 days' ORDER BY p.id DESC LIMIT 400`);
+      return {
+        path: "/feed/week",
+        title: "The feed, last seven days",
+        count: rows.length,
+        items: rows.map((r) => ({ id: r.id, day: new Date(r.created_at as string).toISOString().slice(0, 10), by: "@" + r.by, line: oneLine(String(r.body), 110), ...(r.tracker ? { topic: r.tracker } : {}) })),
+        hint: "This is the whole week, newest first, one line a post. read([id]) for a post and its thread.",
+      };
     }
     if (a === "active") {
       const rows = await q<Record<string, unknown>>(
@@ -634,8 +650,17 @@ export async function search(opts: { query: string; types?: string[]; since?: st
 
   // when the address itself is saved, that is the answer: no text search needed
   let rows = exact ? [] : await run("websearch_to_tsquery('english', $1)", query);
+  // By meaning as well, when that is on: what says the same thing in other words. First page only.
+  let near: Near[] = [];
+  if (meaningOn() && !exact && offset === 0) {
+    const params: unknown[] = [];
+    let where = visible ?? "TRUE";
+    if (types.length) where += ` AND d.entity_type = ANY($${params.push(types) + 1})`;
+    if (opts.since) where += ` AND d.ts >= $${params.push(opts.since) + 1}::timestamptz`;
+    near = await nearest(query, { where, params, limit });
+  }
   let loose = false;
-  if (!rows.length && offset === 0 && !exact) {
+  if (!rows.length && !near.length && offset === 0 && !exact) {
     // Nothing matched every word: fall back to any word, matching prefixes.
     const words = query.toLowerCase().match(/[a-z0-9]{2,}/g) ?? [];
     if (words.length) {
@@ -645,6 +670,14 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   }
   const more = rows.length > limit;
   if (more) rows.pop();
+  // one order from the two: what both rank well comes first, and a match by meaning alone says so
+  const byWords = new Set(rows.map((r) => r.entity_type + ":" + r.entity_id));
+  const meant = new Set<string>();
+  if (near.length) {
+    const asRow = (n: Near) => ({ entity_type: n.entity_type, entity_id: n.entity_id, title: n.title, snippet: n.start, ts: n.ts });
+    rows = fuse([rows, near.map(asRow)], (r) => r.entity_type + ":" + r.entity_id).slice(0, limit);
+    for (const r of rows) if (!byWords.has(r.entity_type + ":" + r.entity_id)) meant.add(r.entity_type + ":" + r.entity_id);
+  }
 
   if (exact) rows = rows.filter((r) => r.entity_id !== exact.id);
   const ctxIds = rows.filter((r) => r.entity_type === "context" || r.entity_type === "link").map((r) => r.entity_id);
@@ -655,6 +688,8 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   const share = await sharingFor([...guestOf.values()]);
   return {
     query,
+    // what this search did, so the agent knows what an empty answer means
+    mode: meaningOn() ? "words and meaning" : "words only",
     ...(exact ? { note: "This address is already saved (first result)." } : loose ? { note: "No exact match; showing partial matches." } : {}),
     results: [
       ...(exact ? [{ id: exact.id, type: "link", title: exact.title, path: "/context/" + exact.path, url: exact.url, ...(exact.site ? { site: exact.site } : {}), ...(exact.summary ? { why: exact.summary } : {}), snippet: oneLine(exact.blurb || exact.summary || "", 220), at: exact.updated_at }] : []),
@@ -665,11 +700,86 @@ export async function search(opts: { query: string; types?: string[]; since?: st
         ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
         ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
         ...(r.entity_type === "todo" ? share.tag(guestOf.get(r.entity_id)) : {}),
+        ...(meant.has(r.entity_type + ":" + r.entity_id) ? { match: "meaning" } : {}),
         snippet: oneLine(r.snippet, 220),
         at: r.ts,
       })),
     ],
     next_offset: more ? offset + limit : null,
+    ...(more ? { more: `More match these words. Call again with offset: ${offset + limit}.` } : {}),
+  };
+}
+
+// ---------- Gather ----------
+
+const STOP = new Set("the a an and or but for with without from into onto about over under this that these those there here what when where which who whom whose why how are was were been being have has had does did will would shall should can could may might must not you your yours our ours their theirs his her its they them she him one two also than then them some any all each every more most other such only own same very just before after during while because until since".split(" "));
+
+/**
+ * Everything worth knowing for one piece of work, in one call: what is current, and the notes,
+ * pages, journal entries, tasks, posts, links and followed topics that bear on it, by title and
+ * summary only. `about` is a task's id or a sentence. It saves the map-walking and the several
+ * searches an agent would otherwise make before starting; read() then fetches what is needed.
+ */
+export async function gather(actor: Agent, aboutIn: unknown) {
+  const sight = sightOf(actor);
+  let about = typeof aboutIn === "string" ? aboutIn.trim() : "";
+  if (!about) throw bad("gather needs about: a task's id (t_…) or a sentence saying what the work is.");
+  let task: { id: string; title: string } | null = null;
+  if (/^t_[a-z0-9]+$/.test(about)) {
+    if (!sight.section("todos")) throw notFound("Nothing by that id.");
+    const t = await getTodo(about);
+    task = { id: t.id, title: t.title };
+    about = [t.title, (t.tags ?? []).join(" "), oneLine(t.notes, 500)].filter(Boolean).join(". ");
+  }
+  const yes = (b: boolean) => (b ? "TRUE" : "FALSE");
+  const visible = sight.full
+    ? "TRUE"
+    : `(CASE d.entity_type WHEN 'post' THEN ${yes(sight.section("feed"))} WHEN 'todo' THEN ${yes(sight.section("todos"))} WHEN 'tracker' THEN ${yes(sight.section("following"))}
+         ELSE EXISTS (SELECT 1 FROM context_nodes n WHERE n.id = d.entity_id AND ${sight.nodeSql("n")}) END)`;
+  const self = task ? ` AND NOT (d.entity_type = 'todo' AND d.entity_id = '${task.id}')` : "";
+  const words = [...new Set(about.toLowerCase().match(/[a-z0-9][a-z0-9'-]{2,}/g) ?? [])].map((w) => w.replace(/[^a-z0-9]/g, "")).filter((w) => w.length > 2 && !STOP.has(w)).slice(0, 16);
+  type Hit = { entity_type: string; entity_id: string };
+  const worded = words.length
+    ? await q<Hit>(
+        `SELECT d.entity_type, d.entity_id FROM search_docs d WHERE d.tsv @@ to_tsquery('english', $1) AND ${visible}${self}
+         ORDER BY ts_rank_cd(d.tsv, to_tsquery('english', $1)) DESC, d.ts DESC LIMIT 60`,
+        [words.map((w) => `${w}:*`).join(" | ")],
+      )
+    : [];
+  const near: Hit[] = await nearest(about, { where: visible + self, limit: 40 });
+  const ranked = fuse([worded, near], (h) => h.entity_type + ":" + h.entity_id);
+  const idsOf = (type: string) => ranked.filter((h) => h.entity_type === type).map((h) => h.entity_id);
+  const inOrder = <T extends { id: string }>(ids: string[], rows: T[]) => ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is T => !!r);
+
+  const ctxIds = [...idsOf("context"), ...idsOf("link")];
+  const nodes = ctxIds.length
+    ? await q<{ id: string; path: string; title: string; summary: string; kind: string; url: string | null; entry_date: string | null; until: string | null }>(
+        "SELECT id, path, title, summary, kind, url, entry_date, until FROM context_nodes WHERE id = ANY($1) AND NOT archived",
+        [ctxIds],
+      )
+    : [];
+  const ordered = inOrder(ctxIds, nodes);
+  const todoIds = idsOf("todo");
+  const todos = todoIds.length ? await q<{ id: string; title: string; done: boolean; scope: string; date: string | null; tags: string[] }>("SELECT id, title, done, scope, date, tags FROM todos WHERE id = ANY($1) AND deleted_at IS NULL", [todoIds]) : [];
+  const postIds = idsOf("post");
+  const posts = postIds.length ? await q<{ id: string; body: string; created_at: string }>("SELECT id, body, created_at FROM posts WHERE id = ANY($1) AND created_at > now() - interval '90 days'", [postIds]) : [];
+  const topicIds = idsOf("tracker");
+  const topics = topicIds.length ? await q<{ id: string; slug: string; title: string; latest: string }>("SELECT id, slug, title, latest FROM trackers WHERE id = ANY($1) AND NOT archived", [topicIds]) : [];
+  const now = (await currentNotes().catch(() => [])).filter((c) => !c.lapsed && sight.node(c));
+  const line = (n: (typeof nodes)[number]) => ({ id: n.id, path: "/context/" + n.path, title: n.title, ...(n.summary ? { about: n.summary } : {}), ...(n.until ? { until: n.until } : {}) });
+  const some = <T,>(key: string, list: T[]) => (list.length ? { [key]: list } : {});
+  return {
+    about: task ? { task: task.id, title: task.title } : oneLine(about, 200),
+    mode: meaningOn() ? "by words and meaning" : "by words only",
+    ...some("current", now.slice(0, 8).map((c) => ({ path: "/context/" + c.path, title: c.title, about: c.summary || undefined, ...(c.until ? { until: c.until } : {}) }))),
+    ...some("context", ordered.filter((n) => n.kind === "note" && !n.path.startsWith("current/")).slice(0, 7).map(line)),
+    ...some("pages", ordered.filter((n) => n.kind === "page").slice(0, 4).map(line)),
+    ...some("journal", ordered.filter((n) => n.kind === "journal").slice(0, 4).map((n) => ({ id: n.id, day: n.entry_date, title: n.title, ...(n.summary ? { gist: n.summary } : {}) }))),
+    ...some("links", ordered.filter((n) => n.kind === "link").slice(0, 4).map((n) => ({ id: n.id, title: n.title, url: n.url, ...(n.summary ? { why: n.summary } : {}) }))),
+    ...some("tasks", inOrder(todoIds, todos).slice(0, 7).map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}) }))),
+    ...some("posts", inOrder(postIds, posts).slice(0, 6).map((p) => ({ id: p.id, day: new Date(p.created_at).toISOString().slice(0, 10), line: oneLine(p.body, 120) }))),
+    ...some("topics", inOrder(topicIds, topics).slice(0, 3).map((t) => ({ id: t.id, path: "/following/" + t.slug, title: t.title, ...(t.latest ? { latest: oneLine(t.latest, 100) } : {}) }))),
+    next: "These are titles and summaries, best match first in each group. read([ids]) the few you need. If something you expected is missing, search() for it by name.",
   };
 }
 

@@ -502,6 +502,10 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS until date;
    ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS lapse_told boolean NOT NULL DEFAULT false;
    CREATE INDEX IF NOT EXISTS context_until ON context_nodes (until) WHERE until IS NOT NULL AND NOT lapse_told AND NOT archived`,
+  // Search by meaning (core/meaning.ts): each searchable thing's embedding, and the checksum of
+  // the text it was made from, so a changed thing is embedded again.
+  `ALTER TABLE search_docs ADD COLUMN IF NOT EXISTS embedding real[];
+   ALTER TABLE search_docs ADD COLUMN IF NOT EXISTS embedded_md5 text`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

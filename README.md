@@ -83,6 +83,15 @@ the function log has a line starting `db:` that says what gave up and after how 
 Vercel logs for `db:` when agents report that Subspace did not answer.
 
 
+### Search by meaning
+
+Search matches words. Set `OPENAI_API_KEY` on the project and it also matches meaning ("vacation"
+finds the note about a holiday), using OpenAI's `text-embedding-3-small`. With the key set, the
+text that search covers (titles, notes, tasks, posts, journal entries; the first 6,000 characters
+of each) is sent to OpenAI to be embedded, a little after it is written, and so are the words of
+each search. Without the key nothing is sent and search is by words alone. Agents are told which
+is in force in every search result (`mode`).
+
 ### Routines and the scheduler
 
 Routines are duties that come round on a schedule (the weekly news-gap check, the weekly system

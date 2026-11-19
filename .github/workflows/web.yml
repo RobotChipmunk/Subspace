@@ -48,6 +48,9 @@ jobs:
       - name: Seed
         run: npm run seed
       - name: Agent tools (mcp-smoke)
+        env:
+          # search by meaning is exercised with a stand-in embedder, so no outside service is called
+          SUBSPACE_EMBED_FAKE: "1"
         run: |
           set -o pipefail
           npm run test:mcp 2>&1 | tee smoke.log | tail -60 || {
