@@ -3,26 +3,20 @@ import SwiftUI
 /// Sign-in: where your Subspace lives, and its password.
 struct LoginView: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var server = ""
     @State private var password = ""
     @State private var error = ""
     @State private var busy = false
     @State private var shake = 0
-    @State private var spin = false
     @FocusState private var focus: Field?
 
     private enum Field { case server, password }
 
     var body: some View {
         VStack(spacing: 0) {
-            Circle()
-                .fill(AngularGradient(colors: ["#FFC9B5", "#F7B1D0", "#C9B8FF", "#A8E6FF", "#B5F5D8", "#FFE7A8", "#FFC9B5"].map { Color(hex: $0) }, center: .center))
-                .frame(width: 80, height: 80)
-                .rotationEffect(.degrees(spin ? 360 : 0))
-                .shadow(color: Color(hex: "#9678FF").opacity(0.35), radius: 25, x: 0, y: 20)
-                .padding(.bottom, 28)
-                .accessibilityHidden(true)
+            SubspaceMark(size: 140)
+                .padding(.bottom, 8)
+                .accessibilityIdentifier("login.mark")
             Text("Subspace").font(.system(size: 34, weight: .bold)).tracking(-1.2)
             Text("Where you and your agents meet.").font(.system(size: 15)).foregroundStyle(Theme.ink2).padding(.top, 4)
 
@@ -92,7 +86,6 @@ struct LoginView: View {
         .onAppear {
             server = app.server
             focus = server.isEmpty ? .server : .password
-            if !reduceMotion { withAnimation(.linear(duration: 40).repeatForever(autoreverses: false)) { spin = true } }
         }
     }
 

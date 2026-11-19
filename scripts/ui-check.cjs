@@ -93,6 +93,17 @@ async function run(profile) {
   // ---------- Sign in ----------
   await page.goto(`${BASE}/login`);
   await settle(1000); // let the page finish loading before typing, as a person would
+  // the mark is drawn, not blank: particles in a latent space, turning slowly
+  const inked = await page
+    .locator("canvas[data-mark]")
+    .evaluate((c) => {
+      const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+      let n = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++;
+      return n / (c.width * c.height);
+    })
+    .catch(() => 0);
+  if (inked < 0.02 || inked > 0.6) fail(`login: the mark is ${inked ? "not drawn as particles" : "missing"} (${(inked * 100).toFixed(1)}% of it is inked)`);
   await shot("login");
   await page.fill("input[type=password]", "wrong-password");
   await page.keyboard.press("Enter");

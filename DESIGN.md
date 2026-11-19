@@ -235,6 +235,18 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **The mark** (`Mark.tsx`; `Design/SubspaceMark.swift` in the app; `scripts/mark.swift` for the
+  icons): Subspace's logo is particles in a latent space. A sparse sphere of small neutral
+  particles is the space; through it, tilted, runs a sheet of larger coloured ones, the subspace,
+  coloured round the six brand hues. Nearer particles are larger and more solid, so it has depth,
+  and it turns once a minute (still, under reduced motion). It answers to the mode: on light,
+  deep colours with `ink` for the neutral particles; on dark, the pastel hues with a soft glow and
+  white for the neutral ones. It is drawn, never a picture, at 140px on the sign-in screens. The
+  browser icon (`public/icon.svg`) is the same mark, still and with fewer, larger particles, and
+  switches with the mode by itself; the iOS app icon has light, dark and tinted versions. The
+  geometry lives in three places that must be changed together. Two other directions drawn with
+  it, "cloud" and "clusters", are kept as `variant` on the web component and are pictured in
+  `design/mark-directions.png` (left to right: the sheet, the cloud, the clusters).
 - **Current** (`CurrentShelf` and the end-day row in `context/page.tsx`; `ContextCurrent.swift` in
   the app): what is true for now, between the rail and long-term context. At the top of Context,
   under a small capitals heading "Current", the notes under the Current section sit two across
