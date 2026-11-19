@@ -1576,6 +1576,22 @@ async function run(profile) {
     await press(access.getByRole("switch", { name: "Read only" }));
     await settle(900);
     if ((await probeId()).access) fail("agents access: with everything on again the agent should have no limits");
+    // an answer sent to an agent from the rail (the rail step sent "Follow it" to Scout) shows beside
+    // that agent as waiting, and in its panel as a record
+    const scout = page.locator("main .glass", { hasText: "@scout" }).first();
+    if (!/1 waiting/.test((await scout.locator("[data-waiting]").innerText().catch(() => "")) || "")) fail("agents: an answer sent to Scout from the rail is not shown as waiting");
+    else {
+      await press(scout.getByRole("button", { name: "Connect", exact: true }));
+      await settle(700);
+      await reachable(page.locator("[data-sent]").getByText("“Follow it”"), "agents: the answer sent, in the agent's panel");
+      if (!/waiting for Scout/.test(await page.locator("[data-sent]").innerText())) fail("agents: an answer the agent has not read does not say it is waiting");
+      await shot("agents-sent");
+      await press(scout.getByRole("button", { name: "Done", exact: true }));
+      await settle(500);
+      // back to the new agent's panel, where the rest of this step works
+      await press(page.locator("main .glass", { hasText: /@probe/ }).first().getByRole("button", { name: "Connect", exact: true }));
+      await settle(700);
+    }
     // routines: a duty that comes round is given to an agent with a switch, and says when it is next due
     const routines = page.locator("[data-routines]");
     await routines.scrollIntoViewIfNeeded();

@@ -358,6 +358,24 @@ async function moduleSent(actor: Agent, m: RailModule, action: RailAction) {
   return { cleared: true, sent: { label: action.label, to } };
 }
 
+/** An answer the owner sent to an agent from one of its modules, as the Agents screen lists it. */
+export type SentAnswer = { id: string; agent_id: string; title: string; label: string; at: string; picked_up: boolean };
+
+/**
+ * The answers the owner has sent to agents in the last two weeks, newest first: which module,
+ * which button, when, and whether the agent has read far enough to have seen it. An agent that
+ * has acted usually removes its module, and the answer goes with it.
+ */
+export async function sentAnswers(): Promise<SentAnswer[]> {
+  return q<SentAnswer>(
+    `SELECT m.id, m.author AS agent_id, m.title, m.sent->>'label' AS label, m.sent->>'at' AS at,
+            COALESCE(a.cursor_seq >= (m.sent->>'seq')::bigint, false) AS picked_up
+     FROM rail_modules m JOIN agents a ON a.id = m.author
+     WHERE m.sent IS NOT NULL AND (m.sent->>'at')::timestamptz > now() - interval '14 days'
+     ORDER BY (m.sent->>'at')::timestamptz DESC LIMIT 60`,
+  );
+}
+
 /** What a module says beyond its title, as the notes of the task it becomes: its sentence, then its block. */
 function keptNotes(m: RailModule): string {
   const parts = [m.subtitle?.trim() ?? ""];

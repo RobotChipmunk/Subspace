@@ -10,6 +10,7 @@ import { ago, api, fetcher, soft, spring, useDirectUnread, useMe } from "@/lib/c
 import type { AccessRules, Section } from "@/lib/core/access";
 import type { Grant } from "@/lib/core/oauth";
 import type { Post } from "@/lib/core/posts";
+import type { SentAnswer } from "@/lib/core/rail";
 import type { Routine } from "@/lib/core/routines";
 import type { Agent } from "@/lib/core/util";
 
@@ -163,6 +164,10 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
   const [realtime, setRealtime] = useState(false);
   const [chat, setChat] = useState(false);
   const unread = useDirectUnread().unread(a.id);
+  // answers the owner sent this agent from a rail module; the ones it has not read yet are "waiting"
+  const { data: answers } = useSWR<{ sent: SentAnswer[] }>("rail/sent", fetcher, { refreshInterval: 30_000 });
+  const sent = (answers?.sent ?? []).filter((x) => x.agent_id === a.id);
+  const waiting = sent.filter((x) => !x.picked_up).length;
   const live = !!a.runtime?.enabled;
   const human = a.kind === "human";
   const illustrator = a.roles.includes("illustrator");
@@ -185,6 +190,11 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
             {illustrator && (
               <span className="flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-medium text-accent">
                 <Wand2 size={11} /> Illustrator
+              </span>
+            )}
+            {waiting > 0 && (
+              <span data-waiting className="rounded-full bg-fill px-2 py-0.5 text-[11.5px] font-medium text-ink2">
+                {waiting} waiting
               </span>
             )}
             {a.access && (
@@ -238,6 +248,7 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
               </p>
               <CopyField label="Connector address" value={`${origin}/api/mcp/${a.handle}`} />
               <Connections id={a.id} empty="No app has signed in yet." />
+              {sent.length > 0 && <Sent name={a.name} sent={sent} />}
               <Access agent={a} onChanged={onChanged} />
               <Routines agent={a} />
 
@@ -358,6 +369,32 @@ function Access({ agent: a, onChanged }: { agent: Agent; onChanged: () => void }
         </p>
         {error && <p className="text-[12.5px] text-danger">{error}</p>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the owner has answered this agent from the rail, newest first: the button they tapped, on
+ * which module, and whether the agent has picked it up. It is a record, not a control: nothing
+ * here can be tapped.
+ */
+function Sent({ name, sent }: { name: string; sent: SentAnswer[] }) {
+  return (
+    <div data-sent>
+      <div className="mb-1 text-[12px] font-medium uppercase tracking-[0.05em] text-ink3">Your answers</div>
+      <ul className="divide-y divide-[var(--line)] rounded-[14px] bg-fill">
+        {sent.slice(0, 6).map((x) => (
+          <li key={x.id} className="px-3 py-2">
+            <div className="text-[13.5px] [overflow-wrap:anywhere]">
+              <span className="font-medium">“{x.label}”</span> <span className="text-ink2">on {x.title}</span>
+            </div>
+            <div className="text-[12.5px] text-ink3">
+              {ago(x.at)}
+              {ago(x.at) === "now" ? "" : " ago"} · {x.picked_up ? `${name} has picked it up` : `waiting for ${name}`}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

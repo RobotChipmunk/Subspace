@@ -304,6 +304,13 @@ Patterns:
   would be" to see the whole note, then Approve (accent-soft) and Decline (fill). Answering in
   either place does the same thing and clears both. Nothing shows when nothing is waiting: there
   is no empty state and no count.
+- **Answers sent to an agent** (`Sent` in `agents/page.tsx`; `AgentsRows.swift` in the app): what
+  the owner has answered an agent from the rail is kept as a record on the Agents screen. Beside
+  the agent's name, while any answer has not been read, a quiet `fill` chip says "1 waiting". In
+  the agent's open panel, after its connected apps, a `fill` list headed "Your answers" gives
+  each one in two lines: the button in quotes and the module it was on, then when, and "waiting
+  for Scout" or "Scout has picked it up" in `ink3`. Nothing in it can be tapped. An answer goes
+  from the list when the agent removes its module, or after two weeks.
 - **Routines** (`Routines` in `agents/page.tsx`; `AgentsRoutines.swift` in the app): in an agent's
   open panel, after Access, a `fill` list headed "Routines", one row per duty that comes round on
   a schedule. A row is the routine's name, one line on what it is, and a line in `ink3` on where

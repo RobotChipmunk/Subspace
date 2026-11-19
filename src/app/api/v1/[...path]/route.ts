@@ -11,7 +11,7 @@ import { addItem, createIdea, deleteIdea, getIdea, joinItems, listIdeas, moreOf,
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { registerDevice, removeDevice } from "@/lib/core/push";
-import { activeModules, moduleActed, moduleLater, removeModule } from "@/lib/core/rail";
+import { activeModules, moduleActed, moduleLater, removeModule, sentAnswers } from "@/lib/core/rail";
 import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
@@ -112,6 +112,8 @@ const routes: [string, RegExp, Handler][] = [
   // the app asks for the rail every half minute while it is open, which makes this a good place to
   // notice a routine that has come due, whether or not the scheduler has called
   ["GET", /^rail$/, async () => (tickSoon(), { modules: await activeModules() })],
+  // the answers the owner has sent to agents from a module's button, and whether each agent has picked its up
+  ["GET", /^rail\/sent$/, ({ actor }) => ownerOnly(actor, async () => ({ sent: await sentAnswers() }))],
   ["DELETE", /^rail\/([^/]+)$/, ({ actor }, id) => removeModule(actor, id)],
   // the owner tapped one of a module's buttons ({ label } says which): it has done its job and leaves the rail
   ["POST", /^rail\/([^/]+)\/action$/, ({ actor, body }, id) => moduleActed(actor, id, body?.label)],

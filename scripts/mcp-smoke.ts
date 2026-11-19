@@ -1,6 +1,6 @@
 /** End-to-end check of the MCP surface against the database in DATABASE_URL. */
 import { createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
-import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
+import { moduleActed, moduleLater, removeModule, sentAnswers } from "../src/lib/core/rail";
 import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
 import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
@@ -191,9 +191,12 @@ async function main() {
     const ask = await call(s, "rail_set", { key: railKey + "-s", icon: "question", title: "Smoke test: follow it?", show_until: until, actions: [{ label: "Follow it", send: "approve" }, { label: "Not this", send: "decline" }] });
     await call(s, "changes");
     const tap = await moduleActed(owner, ask.id, "Follow it");
+    const waitingFor = (await sentAnswers()).find((x) => x.id === ask.id);
+    if (!waitingFor || waitingFor.agent_id !== s.id || waitingFor.label !== "Follow it" || waitingFor.picked_up) throw new Error("an answer just sent should be listed as waiting for its agent: " + JSON.stringify(waitingFor));
     if (!tap.cleared || tap.sent?.to?.handle !== s.handle || tap.sent.label !== "Follow it") throw new Error("a button that sends did not answer with who it went to: " + JSON.stringify(tap));
     const got = (await call(s, "changes")).for_you.find((i: any) => i.id === ask.id && i.type === "rail.cleared");
     if (got?.sent !== "approve" || got.action !== "Follow it" || got.by_owner !== "action") throw new Error("the author was not sent the action: " + JSON.stringify(got));
+    if (!(await sentAnswers()).find((x) => x.id === ask.id)?.picked_up) throw new Error("an answer the agent has read is not marked as picked up");
     const again = await moduleActed(owner, ask.id, "Not this");
     if (again.cleared || again.sent?.label !== "Follow it") throw new Error("a second answer was taken after the first: " + JSON.stringify(again));
     const listed = (await call(s, "explore", { path: "/rail" })).items.find((i: any) => i.id === ask.id);
