@@ -11,7 +11,7 @@
  */
 import { q, q1 } from "../db";
 import { describeAccess, sightOf, visibleNodes } from "./access";
-import { currentNotes } from "./current";
+import { currentNotes, ensureCurrent } from "./current";
 import { fuse, meaningOn, nearest, type Near } from "./meaning";
 import { ideaForAgent, ideasForAgent } from "./ideas";
 import { openJobs } from "./art";
@@ -21,7 +21,7 @@ import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule, railGone } from "./rail";
 import { listRoutines, ROUTINES } from "./routines";
-import { houseRules, SYSTEM } from "./rules";
+import { ensureSystem, houseRules, SYSTEM } from "./rules";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
@@ -920,6 +920,10 @@ export async function briefing(agent: Agent) {
   const agents = await listAgents();
   await q("UPDATE agents SET last_seen_at = now() WHERE id = $1", [agent.id]);
   const sight = sightOf(agent);
+  // The two sections every agent is told about exist from the first briefing on, on any Subspace:
+  // System for the house rules, Current for what is true for now. (One lookup each once they do.)
+  await ensureSystem().catch((e) => console.error("briefing: System section", (e as Error).message));
+  await ensureCurrent().catch((e) => console.error("briefing: Current section", (e as Error).message));
   const access = sight.full ? null : describeAccess(agent, await contextChildren(null));
   const mine = (await listRoutines()).filter((r) => r.agent_id === agent.id);
   // said here as well as on connecting: an app may hold instructions from the day it connected, but it reads this every session

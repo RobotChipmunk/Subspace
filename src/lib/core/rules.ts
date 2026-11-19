@@ -31,7 +31,12 @@ const STARTER = `These are the house rules: how this household wants its agents 
 export async function ensureSystem(): Promise<ContextNode> {
   const have = await q1<{ id: string }>("SELECT id FROM context_nodes WHERE path = $1 AND NOT archived", [SYSTEM]);
   if (have) return getNode(have.id);
-  return createNode(await ownerAgent(), { title: "System", summary: "House rules: how agents work here. Every agent is given them; agents propose changes and the owner approves.", body: STARTER });
+  const owner = await ownerAgent();
+  const made = await createNode(owner, { title: "System", summary: "House rules: how agents work here. Every agent is given them; agents propose changes and the owner approves.", body: STARTER });
+  if (made.path === SYSTEM) return made;
+  // two requests made it at once and this one came second: keep the first
+  await archiveNode(owner, made.id).catch(() => {});
+  return getNode(SYSTEM);
 }
 
 const DIGEST_CHARS = 6000;

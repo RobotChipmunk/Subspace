@@ -30,15 +30,28 @@ const fake = () => process.env.SUBSPACE_EMBED_FAKE === "1" && process.env.NODE_E
 export const meaningOn = () => !!process.env.OPENAI_API_KEY || fake();
 
 const SAME: Record<string, string> = { holiday: "travel", holidays: "travel", vacation: "travel", trip: "travel", journey: "travel", car: "vehicle", automobile: "vehicle" };
+/**
+ * Each word lights two places out of several thousand, chosen by two unrelated hashes. Two
+ * different words then share both places almost never, and sharing one is worth too little to
+ * count as a match, so the stand-in never "finds" a made-up word in text that does not hold it.
+ * (With one place out of 256 it sometimes did, and a check that a nonsense search finds nothing
+ * failed about one run in eight.)
+ */
+const FAKE_DIMS = 4096;
 function fakeEmbed(text: string): number[] {
-  const v = new Array<number>(DIMS).fill(0);
+  const v = new Array<number>(FAKE_DIMS).fill(0);
   for (const raw of text.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []) {
     const w = SAME[raw] ?? raw.replace(/(ing|ed|es|s)$/, "");
-    let h = 2166136261;
-    for (let i = 0; i < w.length; i++) h = Math.imul(h ^ w.charCodeAt(i), 16777619);
-    v[Math.abs(h) % DIMS] += 1;
+    let h1 = 2166136261;
+    let h2 = 5381;
+    for (let i = 0; i < w.length; i++) {
+      h1 = Math.imul(h1 ^ w.charCodeAt(i), 16777619);
+      h2 = (Math.imul(h2, 33) + w.charCodeAt(i)) | 0;
+    }
+    v[Math.abs(h1) % FAKE_DIMS] += Math.SQRT1_2;
+    v[Math.abs(h2 ^ (h2 >>> 13)) % FAKE_DIMS] += Math.SQRT1_2;
   }
-  const len = Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1;
+  const len = Math.sqrt(v.reduce((sum, x) => sum + x * x, 0)) || 1;
   return v.map((x) => x / len);
 }
 
