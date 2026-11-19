@@ -360,7 +360,9 @@ async function main() {
     if (forTask.about?.task !== t.id || !forTask.next) throw new Error("gather(task id) did not take the task as its subject: " + JSON.stringify(forTask).slice(0, 300));
     const forWork = await call(s, "gather", { about: "the summer holiday in Cornwall" });
     if (!forWork.context?.some((x: any) => x.id === place.id) || !forWork.current?.length) throw new Error("gather(sentence) did not bring the note that bears on it, or what is current: " + JSON.stringify(forWork).slice(0, 500));
-    if (!(await call(s, "usage", { days: 7 })).context_to_tidy) throw new Error("usage() does not list notes to tidy");
+    const reading = await call(s, "usage", { days: 7 });
+    if (!reading.context_to_tidy) throw new Error("usage() does not list notes to tidy");
+    if (reading.search_by_meaning?.on !== meaningOn() || typeof reading.search_by_meaning.waiting !== "number") throw new Error("usage() does not say where search by meaning stands: " + JSON.stringify(reading.search_by_meaning));
     // By meaning, when that is on (in this check a stand-in embedder is used, which knows that a vacation is a holiday).
     const asked = await call(s, "search", { query: "vacation", types: ["context"] });
     if (meaningOn()) {

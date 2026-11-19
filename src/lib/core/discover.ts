@@ -692,7 +692,9 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   // one order from the two: what both rank well comes first, and a match by meaning alone says so
   const byWords = new Set(rows.map((r) => r.entity_type + ":" + r.entity_id));
   const meant = new Set<string>();
+  const likeness = new Map<string, number>();
   if (near.length) {
+    for (const n of near) likeness.set(n.entity_type + ":" + n.entity_id, n.score);
     const asRow = (n: Near) => ({ entity_type: n.entity_type, entity_id: n.entity_id, title: n.title, snippet: n.start, ts: n.ts });
     rows = fuse([rows, near.map(asRow)], (r) => r.entity_type + ":" + r.entity_id).slice(0, limit);
     for (const r of rows) if (!byWords.has(r.entity_type + ":" + r.entity_id)) meant.add(r.entity_type + ":" + r.entity_id);
@@ -719,7 +721,8 @@ export async function search(opts: { query: string; types?: string[]; since?: st
         ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
         ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
         ...(r.entity_type === "todo" ? share.tag(guestOf.get(r.entity_id)) : {}),
-        ...(meant.has(r.entity_type + ":" + r.entity_id) ? { match: "meaning" } : {}),
+        // found by what it says rather than its words; likeness runs from 0 (unrelated) to 1 (the same)
+        ...(meant.has(r.entity_type + ":" + r.entity_id) ? { match: "meaning", likeness: Math.round((likeness.get(r.entity_type + ":" + r.entity_id) ?? 0) * 100) / 100 } : {}),
         snippet: oneLine(r.snippet, 220),
         at: r.ts,
       })),
@@ -765,7 +768,7 @@ export async function gather(actor: Agent, aboutIn: unknown) {
         [words.map((w) => `${w}:*`).join(" | ")],
       )
     : [];
-  const near: Hit[] = await nearest(about, { where: visible + self, limit: 40 });
+  const near: Hit[] = await nearest(about, { where: visible + self, limit: 40, wide: true });
   const ranked = fuse([worded, near], (h) => h.entity_type + ":" + h.entity_id);
   const idsOf = (type: string) => ranked.filter((h) => h.entity_type === type).map((h) => h.entity_id);
   const inOrder = <T extends { id: string }>(ids: string[], rows: T[]) => ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is T => !!r);
