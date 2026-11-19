@@ -32,13 +32,13 @@ final class IdeasTests: SubspaceTestCase {
         // Back to the shelf. If the tap does not get there, say where the button was and what else
         // was at that spot, so the reason can be read from the failure.
         let back = expect(app.buttons["ideas.back"], "the way back to the shelf")
-        let where = "back at \(back.frame), hittable \(back.isHittable), in a window of \(app.windows.firstMatch.frame); the canvas is \(app.descendants(matching: .any)["ideas.canvas.surface"].frame), the name field \(app.textFields["ideas.title"].frame), the app bar's first button \(app.buttons["nav.feed"].frame)"
+        let spot = "back at \(back.frame), hittable \(back.isHittable), in a window of \(app.windows.firstMatch.frame); the canvas is \(app.descendants(matching: .any)["ideas.canvas.surface"].frame), the name field \(app.textFields["ideas.title"].frame), the app bar's first button \(app.buttons["nav.feed"].frame)"
         back.tap()
         if !app.buttons["ideas.new"].waitForExistence(timeout: 8) {
             let stillChosen = app.buttons["ideas.act.keep"].exists
             back.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             let second = app.buttons["ideas.new"].waitForExistence(timeout: 8)
-            XCTFail("Back did not return to the shelf (\(where)); the piece was \(stillChosen ? "still" : "no longer") chosen afterwards; a tap at the button's centre \(second ? "did" : "did not") work")
+            XCTFail("Back did not return to the shelf (\(spot)); the piece was \(stillChosen ? "still" : "no longer") chosen afterwards; a tap at the button's centre \(second ? "did" : "did not") work")
         }
         expect(app.buttons["ideas.new"], "the shelf again")
     }
