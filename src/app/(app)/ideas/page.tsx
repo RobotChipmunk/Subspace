@@ -468,7 +468,7 @@ function Canvas({ id, onBack }: { id: string; onBack: () => void }) {
       {/* what a chosen piece offers, for anyone who would rather tap than gesture */}
       <AnimatePresence>
         {chosen && !editing && (
-          <motion.div key="acts" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={soft} data-piece-actions className="glass absolute bottom-[calc(max(12px,env(safe-area-inset-bottom))+72px)] left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-full p-1 md:bottom-6" onPointerDown={(e) => e.stopPropagation()}>
+          <motion.div key="acts" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={soft} data-piece-actions className="glass absolute bottom-[calc(max(12px,env(safe-area-inset-bottom))_+_72px)] left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-full p-1 md:bottom-6" onPointerDown={(e) => e.stopPropagation()}>
             <Act label={chosen.kept ? "Kept. Tap to let go" : "Keep: more like this"} on={chosen.kept} onClick={() => keep(chosen)}>
               <Star size={16} fill={chosen.kept ? "currentColor" : "none"} />
             </Act>
@@ -540,7 +540,7 @@ function Canvas({ id, onBack }: { id: string; onBack: () => void }) {
       {/* a pruned piece can be brought back for a moment */}
       <AnimatePresence>
         {undo && (
-          <motion.div key="undo" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={soft} role="status" className="glass absolute bottom-[calc(max(12px,env(safe-area-inset-bottom))+72px)] left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full py-1.5 pl-4 pr-1.5 text-[13.5px] text-ink2 md:bottom-6" onPointerDown={(e) => e.stopPropagation()}>
+          <motion.div key="undo" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={soft} role="status" className="glass absolute bottom-[calc(max(12px,env(safe-area-inset-bottom))_+_72px)] left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full py-1.5 pl-4 pr-1.5 text-[13.5px] text-ink2 md:bottom-6" onPointerDown={(e) => e.stopPropagation()}>
             <span className="max-w-[46vw] truncate">Pruned {undo.text}</span>
             <button onClick={bringBack} className="h-8 rounded-full bg-accent-soft px-3 font-medium text-accent">
               Bring back
