@@ -174,3 +174,13 @@ being true. Read this list before starting work.
   compiled there (`xcodebuild build-for-testing`). For the server, push the branch: the `Web`
   workflow (`.github/workflows/web.yml`) runs `typecheck`, `mcp-smoke` and `ui-check`, each on its
   own seeded database, and names its failures as annotations on the run.
+- Without `gh` or a token, GitHub's API answers 60 requests an hour and then refuses for the rest
+  of it; polling several branches used that up in minutes. Read a run's public page instead
+  (`https://github.com/<owner>/<repo>/actions/runs/<id>`): its status and its annotations are in
+  the HTML, and the `Web` workflow writes its failures as annotations for that reason.
+- `ui-check` runs in an en-US browser in CI, so a day prints as "Nov 25", not "25 Nov". An
+  assertion on a date must accept either order.
+- Two checks have each failed once and passed unchanged on the next run (Nov 2026): `ui-check`
+  with "journal: a deleted entry is still listed" on one screen size, and `mcp-smoke` on one
+  branch. Before chasing a single failure in either, look at whether the next run repeats it; the
+  smoke step now names the error that stopped it.
