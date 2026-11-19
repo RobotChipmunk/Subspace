@@ -84,6 +84,15 @@ done
 # What the server said while the tests ran, when it complained.
 grep -iE "error|unhandled|ECONN| 5[0-9][0-9] " "$OUT/server-$NAME.log" 2>/dev/null | cut -c1-200 | awk '!seen[$0]++' | tail -20
 
+# Name what failed where it can be read without signing in to open the log: as annotations on the
+# run. A test that failed and then passed on its second go is named too, and says so.
+if [ "$STATUS" -ne 0 ] || grep -qE "error: -\[" "$OUT/test-$NAME.log"; then
+  grep -E "error: -\[" "$OUT/test-$NAME.log" | sed -E 's/^.*error: //' | awk '!seen[$0]++' | head -8 | cut -c1-700 | while IFS= read -r line; do
+    echo "::error::[$NAME] $line"
+  done
+  [ "$STATUS" -eq 0 ] && echo "::notice::[$NAME] the failures above passed when run again"
+fi
+
 ios/scripts/e2e-server.sh stop
 xcrun simctl shutdown "$SIM" 2>/dev/null || true
 exit $STATUS

@@ -184,3 +184,7 @@ being true. Read this list before starting work.
   with "journal: a deleted entry is still listed" on one screen size, and `mcp-smoke` on one
   branch. Before chasing a single failure in either, look at whether the next run repeats it; the
   smoke step now names the error that stopped it.
+- iOS CI: a failed run used to say only "exit code 65", and the log needs a signed-in session.
+  `ios/scripts/ci-test.sh` now writes each failed expectation as an annotation on the run, so it
+  can be read on the run's public page. Main's own iPhone job failed this way before (Nov 2026),
+  so do not assume a red iPhone job is your change until the annotation names the test.
