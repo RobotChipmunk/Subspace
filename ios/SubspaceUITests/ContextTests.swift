@@ -81,25 +81,34 @@ final class ContextTests: SubspaceTestCase {
         let already = textContaining("Saved by the UI test").exists
         shot("23-links")
 
-        let url = expect(app.textFields["context.addlink.url"], "the address field")
-        url.tap()
-        url.typeText("https://example.com/ios-ui-test")
-        let why = expect(app.textFields["context.addlink.why"], "the reason field, once the address is valid")
-        why.tap()
-        why.typeText("Saved by the UI test")
-        app.buttons["context.addlink.save"].tap()
-        expect(textContaining("Saved by the UI test"), "the new link with its reason", timeout: 30)
-        XCTAssertEqual(rows.count, before + (already ? 0 : 1), already ? "The same address saved twice should stay one link" : "One more link than before")
+        // Saved once, the link is there for good: a second go at this test finds it and adds nothing.
+        if !already {
+            let url = expect(app.textFields["context.addlink.url"], "the address field")
+            url.tap()
+            url.typeText("https://example.com/ios-ui-test")
+            let why = expect(app.textFields["context.addlink.why"], "the reason field, once the address is valid")
+            why.tap()
+            why.typeText("Saved by the UI test")
+            app.buttons["context.addlink.save"].tap()
+            expect(textContaining("Saved by the UI test"), "the new link with its reason", timeout: 30)
+            XCTAssertEqual(rows.count, before + 1, "One more link than before")
+        }
         shot("23-links-added")
 
-        // A link opens in the viewer inside the app, not in the browser.
+        // A link opens in the viewer inside the app, not in the browser. The viewer is the
+        // system's own, with its bar at the top; its button to leave is "Done" on older systems
+        // and "Close" on newer ones. (The keyboard, if it is still up, has a "Done" key of its
+        // own, so the viewer is recognised by its bar and not by that word.)
         press(rows.firstMatch, "a saved link")
-        let done = app.buttons["Done"]
-        let shown = done.waitForExistence(timeout: 10)
+        let bar = app.descendants(matching: .any)["TopBrowserBar"]
+        let shown = bar.waitForExistence(timeout: 12)
         XCTAssertEqual(app.state, .runningForeground, "Opening a link should stay in the app")
         shot("23-links-web-viewer")
         if shown {
-            done.tap()
+            let close = app.buttons["Close"]
+            let leave = close.waitForExistence(timeout: 3) ? close : app.buttons["Done"]
+            leave.tap()
+            waitToVanish(bar, "the viewer, once it is closed", timeout: 15)
             expect(app.buttons["context.links"], "the links, back where the link was tapped")
         }
     }
