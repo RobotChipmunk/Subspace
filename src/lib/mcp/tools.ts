@@ -8,6 +8,7 @@ import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, RAIL_ICONS, railGone, removeModule, setModule } from "../core/rail";
+import { aimsAtSystem, propose } from "../core/rules";
 import { routineDone, usage } from "../core/routines";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
@@ -251,8 +252,11 @@ export const TOOLS: Tool[] = [
       body_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement.") }, required: ["find", "replace"] },
       about: str("Saved links only: the line on what the page is."),
       expect_version: { type: "integer", description: "Version you last read. The write fails if someone else edited since." },
+      why: str("Only for a house rule (a note under /context/system): one sentence, at most 120 characters, telling the owner why the change is worth making. Such a change is not made at once: it is put to the owner, and applied if they approve."),
     }),
     run: async (a, args) => {
+      // a house rule changes only with the owner's approval: the call becomes a proposal put to them
+      if (a.kind === "agent" && (await aimsAtSystem(args))) return propose(a, args as any);
       const parent = args.parent === undefined ? undefined : ["", "/", "/context", "/context/"].includes(args.parent) ? null : args.parent;
       const n = args.id
         ? await updateNode(a, args.id, { ...args, parent } as any)
@@ -341,8 +345,9 @@ export const TOOLS: Tool[] = [
   {
     name: "context_archive",
     description: "Remove a context node (a note, page or saved link) and its children from the tree. History is kept. Use for things that are wrong or obsolete, after merging anything still useful elsewhere.",
-    inputSchema: obj({ id: str("Node id or path.") }, ["id"]),
-    run: async (a, { id }) => {
+    inputSchema: obj({ id: str("Node id or path."), why: str("Only for a house rule (a note under /context/system): one sentence telling the owner why it should go. Removing one is put to the owner first.") }, ["id"]),
+    run: async (a, { id, why }) => {
+      if (a.kind === "agent" && (await aimsAtSystem({ id }))) return propose(a, { id, archive: true, why });
       await archiveNode(a, id);
       return { ok: true };
     },

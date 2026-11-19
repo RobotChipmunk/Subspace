@@ -477,6 +477,26 @@ const MIGRATIONS: string[] = [
      last_done_at timestamptz,
      last_note text NOT NULL DEFAULT ''
    )`,
+  // An agent's change to a house rule (a note under /context/system), held until the owner
+  // approves or declines it (core/rules.ts). patch is the change exactly as it would be applied.
+  `CREATE TABLE IF NOT EXISTS rule_proposals (
+     id text PRIMARY KEY,
+     agent_id text NOT NULL,
+     kind text NOT NULL,
+     node_id text,
+     parent_id text,
+     title text NOT NULL DEFAULT '',
+     why text NOT NULL DEFAULT '',
+     patch jsonb NOT NULL DEFAULT '{}',
+     excerpt text NOT NULL DEFAULT '',
+     after text NOT NULL DEFAULT '',
+     status text NOT NULL DEFAULT 'pending',
+     error text,
+     module_id text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     decided_at timestamptz
+   );
+   CREATE INDEX IF NOT EXISTS rule_proposals_pending ON rule_proposals (created_at) WHERE status = 'pending'`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

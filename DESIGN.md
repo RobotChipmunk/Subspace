@@ -235,6 +235,16 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **House rules and proposals** (`Proposals` in `context/page.tsx`; `ContextProposals.swift` in the
+  app): System is an ordinary top-level section of Context that holds the house rules. The owner
+  edits it like any note. An agent's change to it does not happen: it waits as a proposal, asked
+  in the rail (a module with "Approve" and "Decline", which send the answer) and shown at the top
+  of Context and of System as a glass card, 22px. The card says who proposes what in secondary
+  type with the agent's avatar ("Scout proposes a change to “Quiet hours”"), then the agent's one
+  sentence of why in 15.5px medium, then the change in a `fill` box, then "Read the rule as it
+  would be" to see the whole note, then Approve (accent-soft) and Decline (fill). Answering in
+  either place does the same thing and clears both. Nothing shows when nothing is waiting: there
+  is no empty state and no count.
 - **Routines** (`Routines` in `agents/page.tsx`; `AgentsRoutines.swift` in the app): in an agent's
   open panel, after Access, a `fill` list headed "Routines", one row per duty that comes round on
   a schedule. A row is the routine's name, one line on what it is, and a line in `ink3` on where

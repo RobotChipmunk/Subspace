@@ -18,6 +18,7 @@ import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule, railGone } from "./rail";
 import { listRoutines, ROUTINES } from "./routines";
+import { houseRules, SYSTEM } from "./rules";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
@@ -788,9 +789,12 @@ export async function briefing(agent: Agent) {
   const sight = sightOf(agent);
   const access = sight.full ? null : describeAccess(agent, await contextChildren(null));
   const mine = (await listRoutines()).filter((r) => r.agent_id === agent.id);
+  // said here as well as on connecting: an app may hold instructions from the day it connected, but it reads this every session
+  const rules = sight.node({ path: SYSTEM, kind: "note" }) ? await houseRules().catch(() => "") : "";
   return {
     you: { handle: "@" + agent.handle, name: agent.name, roles: agent.roles, bio: agent.bio },
     ...(access ? { your_access: access } : {}),
+    ...(rules ? { house_rules: rules.length > 3500 ? rules.slice(0, 3500).trimEnd() + '… (cut short: read the rest under explore("/context/system"))' : rules } : {}),
     owner: "@" + agents.find((a) => a.kind === "human")?.handle,
     now: { today: cal.today, timezone: tz },
     waiting_for_you: {

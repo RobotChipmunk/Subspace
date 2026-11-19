@@ -982,6 +982,42 @@ async function run(profile) {
     await settle(1100);
     await noSidewaysScroll("context note");
   });
+  await step("house rules", async () => {
+    // System holds the house rules. What an agent has proposed waits at the top of Context and inside System.
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    await page.goto(`${BASE}/context`);
+    await settle(1200);
+    const waiting = page.locator("[data-proposals]");
+    await reachable(waiting.getByText("Scout proposes a change to “Quiet hours”"), "house rules: who proposes what");
+    await reachable(waiting.getByText("You dismissed every Saturday morning module this month."), "house rules: why");
+    await reachable(waiting.getByText("Adds: At weekends nothing is raised before 10 am."), "house rules: the change");
+    await reachable(waiting.getByRole("button", { name: "Approve" }), "house rules: Approve");
+    await reachable(waiting.getByRole("button", { name: "Decline" }), "house rules: Decline");
+    await noSidewaysScroll("house rules proposal");
+    await shot("house-rules-proposal");
+    const before = (await get("/api/v1/rules/proposals")).proposals;
+    if (before.length !== 1) fail(`house rules: ${before.length} proposals waiting, expected the seeded one`);
+    await press(page.locator("main button", { hasText: "House rules: how agents work here" }).first());
+    await settle(900);
+    await reachable(page.locator("main button", { hasText: "Quiet hours" }).first(), "house rules: a rule inside System");
+    if (!(await waiting.count())) fail("house rules: the waiting proposal is not shown inside System");
+    await shot("house-rules");
+    // approving applies the change exactly as proposed, under the agent's name, and the proposal is gone
+    await press(waiting.getByRole("button", { name: "Approve" }));
+    await waiting.waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("house rules: an approved proposal is still waiting"));
+    const rule = (await get(`/api/v1/context?node=${before[0]?.node_id}`)).node;
+    if (!/At weekends nothing is raised before 10 am\./.test(rule?.body ?? "")) fail("house rules: approving did not apply the change");
+    // put back, so every screen size meets the same proposal
+    if (process.env.DATABASE_URL && before[0]) {
+      const { Client } = require("pg");
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      await db.connect();
+      await db.query("UPDATE rule_proposals SET status = 'pending', decided_at = NULL WHERE id = $1", [before[0].id]);
+      await db.query("UPDATE context_nodes SET body = replace(body, E'\\n\\n- At weekends nothing is raised before 10 am.', '') WHERE id = $1", [before[0].node_id]);
+      await db.end();
+    }
+  });
+
   await step("context search", async () => {
     const search = page.getByLabel("Search context");
     await reachable(search, "context search field");

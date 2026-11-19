@@ -11,6 +11,7 @@ import { saveMedia } from "@/lib/core/media";
 import { registerDevice, removeDevice } from "@/lib/core/push";
 import { activeModules, moduleActed, moduleLater, removeModule } from "@/lib/core/rail";
 import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
+import { decide, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
@@ -117,6 +118,10 @@ const routes: [string, RegExp, Handler][] = [
   // Routines: duties that come round on a schedule. The owner gives each to one agent ({ agent: id }) or to nobody ({ agent: null }).
   ["GET", /^routines$/, async () => ({ routines: await listRoutines() })],
   ["PATCH", /^routines\/([^/]+)$/, ({ actor, body }, key) => ownerOnly(actor, () => assignRoutine(actor, key, body?.agent ?? null))],
+
+  // House rules: changes agents have proposed to the notes under /context/system, waiting for the owner. { approve: true | false } answers one.
+  ["GET", /^rules\/proposals$/, ({ actor }) => ownerOnly(actor, async () => ({ proposals: await pendingProposals() }))],
+  ["POST", /^rules\/proposals\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => decide(actor, id, body?.approve === true))],
 
   ["POST", /^agents$/, ({ actor, body }) => ownerOnly(actor, () => createAgent(actor, body))],
   ["PATCH", /^agents\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => updateAgent(actor, id, body))],

@@ -13,6 +13,7 @@ import { guardCall, toolsFor, TOOLS } from "../mcp/tools";
 import { finishRun, logged, refused, startRun, type CallCtx } from "./audit";
 import { briefing, changes } from "./discover";
 import { sharingInstructions } from "./guests";
+import { houseRulesSection } from "./rules";
 import { agentById, ApiError, bad, notFound, type Agent } from "./util";
 
 export const MODELS = [
@@ -191,6 +192,7 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
   let jsonRetries = 0;
 
   const sharing = await sharingInstructions();
+  const rules = await houseRulesSection();
   while (out.steps < MAX_STEPS) {
     if (Date.now() > deadline) return { ...out, status: "limit", detail: "Ran out of time; it will pick up the rest on the next wake." };
     out.steps++;
@@ -198,7 +200,7 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
     const stream = client.beta.messages.stream({
       model: cfg.model,
       max_tokens: 32_000,
-      system: [{ type: "text", text: `You are @${agent.handle} (${agent.name}).\n\n${CORE}${sharing ? `\n\n${sharing}` : ""}\n\n${RUN_RULES}`, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: `You are @${agent.handle} (${agent.name}).\n\n${CORE}${rules ? `\n\n${rules}` : ""}${sharing ? `\n\n${sharing}` : ""}\n\n${RUN_RULES}`, cache_control: { type: "ephemeral" } }],
       output_config: { effort: cfg.effort },
       tools,
       messages,

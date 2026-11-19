@@ -4,13 +4,14 @@ import { ArrowUpRight, ChevronRight, FileText, LayoutTemplate, Link2, MoreHorizo
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import useSWRInfinite from "swr/infinite";
 import { Avatar, mesh } from "@/components/bits";
 import { Editor } from "@/components/Editor";
 import { ago, api, fetcher, hash, soft, useMe, useSaver } from "@/lib/client";
 import type { ContextLite, ContextNode } from "@/lib/core/context";
 import type { LinkPage } from "@/lib/core/links";
+import type { Proposal } from "@/lib/core/rules";
 import { PALETTES } from "@/lib/palettes";
 
 type View = { node: ContextNode | null; trail: { id: string; path: string; title: string }[]; children: ContextLite[] };
@@ -102,6 +103,8 @@ function Inner() {
           <motion.div key={nodeId ?? "root"} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
             {data.node && data.node.id === nodeId && <NodeEditor node={data.node} onChanged={() => mutate()} onDeleted={() => go(data.node!.parent_id)} />}
             {!data.node && <p className="-mt-4 mb-6 px-1 text-[14px] text-ink2">What your agents know about you, your life and their work. They keep it current; you can change anything.</p>}
+            {/* house rules: what agents have proposed waits here as well as in the rail */}
+            {(!data.node || data.node.path === "system" || data.node.path.startsWith("system/")) && <Proposals onDecided={() => mutate()} />}
             {!data.node && <RecentPages onOpen={go} />}
             <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
               {data.children.filter((c) => c.kind !== "link").map((c, i) => (
@@ -123,6 +126,76 @@ function Inner() {
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * Changes agents have proposed to the house rules (the notes under System), waiting for the
+ * owner. Each says who proposes what and why, shows the change, and is answered here or from the
+ * rail; either way the same thing happens. Nothing shows when nothing is waiting.
+ */
+function Proposals({ onDecided }: { onDecided: () => void }) {
+  const { agent } = useMe();
+  const { mutate: everywhere } = useSWRConfig();
+  const { data, mutate } = useSWR<{ proposals: (Proposal & { by: string })[] }>("rules/proposals", fetcher, { refreshInterval: 20_000 });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState<{ id: string; text: string } | null>(null);
+  const list = data?.proposals ?? [];
+  if (!list.length && !problem) return null;
+  async function answer(p: Proposal, approve: boolean) {
+    setBusy(p.id);
+    setProblem(null);
+    try {
+      const r = await api<Proposal>(`rules/proposals/${p.id}`, { method: "POST", body: { approve } });
+      if (r.status === "failed") setProblem({ id: p.id, text: `“${p.title}” could not be changed: the rule has changed since this was proposed. ${agent(p.agent_id)?.name ?? "The agent"} can propose it again.` });
+    } catch (e) {
+      setProblem({ id: p.id, text: (e as Error).message });
+    } finally {
+      setBusy(null);
+      await mutate();
+      onDecided();
+      void everywhere("rail");
+    }
+  }
+  return (
+    <section data-proposals aria-label="Proposed changes to the house rules" className="mb-6 flex flex-col gap-2.5">
+      {list.map((p) => {
+        const by = agent(p.agent_id);
+        const what = p.kind === "create" ? "a new house rule" : p.kind === "archive" ? `removing “${p.title}”` : `a change to “${p.title}”`;
+        return (
+          <article key={p.id} data-proposal={p.id} className="glass rounded-[22px] p-4">
+            <div className="flex items-center gap-2 text-[13px] text-ink2">
+              {by && <Avatar agent={by} size={18} />}
+              <span className="min-w-0 flex-1 truncate">
+                {by?.name ?? "An agent"} proposes {what}
+              </span>
+              <span className="flex-none text-ink3">{ago(p.created_at)}</span>
+            </div>
+            <p className="mt-1.5 text-[15.5px] font-medium leading-snug [overflow-wrap:anywhere]">{p.why}</p>
+            <p className="mt-2 rounded-[14px] bg-fill px-3 py-2.5 text-[13.5px] leading-relaxed text-ink2 [overflow-wrap:anywhere]">{p.excerpt}</p>
+            {p.kind !== "archive" && p.after.trim() && (
+              <details className="mt-2 text-[13px] text-ink2">
+                <summary className="cursor-pointer list-none font-medium text-ink3 marker:hidden hover:text-ink2">Read the rule as it would be</summary>
+                <p className="mt-2 whitespace-pre-wrap rounded-[14px] bg-fill px-3 py-2.5 leading-relaxed [overflow-wrap:anywhere]">{p.after}</p>
+              </details>
+            )}
+            <div className="mt-3 flex items-center gap-2">
+              <button disabled={busy === p.id} onClick={() => answer(p, true)} className="flex h-9 items-center rounded-full bg-accent-soft px-4 text-[13.5px] font-medium text-accent transition-colors hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:opacity-50">
+                Approve
+              </button>
+              <button disabled={busy === p.id} onClick={() => answer(p, false)} className="flex h-9 items-center rounded-full bg-fill px-4 text-[13.5px] font-medium text-ink2 transition-colors hover:bg-fill2 disabled:opacity-50">
+                Decline
+              </button>
+            </div>
+          </article>
+        );
+      })}
+      {problem && (
+        <p role="alert" className="px-1 text-[13px] text-danger">
+          {problem.text}
+        </p>
+      )}
+    </section>
   );
 }
 

@@ -66,6 +66,12 @@ POSTING (post)
 - One picture is the rule. When you share an article, look at its images before you post. Attach several (media.more, up to ${IMAGES_MAX} in all) only when each one shows the owner something different they need to see to grasp the story without opening it, such as screenshots of different parts of a product. If the article's images only set a mood or all illustrate the same idea, attach the single best one. The owner swipes through them, so every extra picture must earn the swipe.
 - Updates about a followed topic go through the tracker (tracker: slug), which adds the topic's label.
 
+HOUSE RULES
+- This guide says how Subspace's tools work. How this household wants its agents to behave is written by the owner as house rules: ordinary notes under /context/system. They are given to you when you connect and again in every briefing (house_rules), and where they differ from this guide, they win.
+- You may read them like any context, and you may propose changes: a rule that would have saved the owner a correction, one that is out of date, one that two agents read differently. Call context_write (or context_archive) on the note under /context/system as you would on any note, and add why: one sentence for the owner. Nothing changes at once. Your change is put to the owner in the rail, with Approve and Decline, and the result tells you so ({ proposed: true }).
+- If they approve, the server applies your change exactly as you wrote it; you do nothing more. If they decline, it is dropped: do not propose it again, and never make the same change some other way.
+- Everything else in context is yours to edit freely, as before. Only /context/system waits for approval.
+
 ROUTINES
 - Some duties come round on a schedule: the weekly check for subjects the owner cares about that nothing follows, the weekly review of how the system is being used. The owner gives each routine to one agent. explore("/routines") lists them, who does each, and each one's brief.
 - When a routine of yours is due it reaches you by itself: you are woken, and changes() and jobs() carry a job of kind "routine" with its brief. Follow the brief with your ordinary tools, then call routine_done(job_id, note) once, with one line on what you found. A round you have not finished stays in your jobs until you do.
@@ -668,6 +674,7 @@ Keeping the tree healthy
 - One topic per node. When a body passes roughly 600 words or covers two things, split it into child nodes and leave a short overview in the parent.
 - Move nodes with context_write(parent: ...) when the structure stops fitting. Rename freely; ids are stable.
 - Put agent-to-agent working notes under /context/agents/<your-handle>.
+- /context/system is the one section you cannot simply edit: it holds the house rules. A write there, with why, becomes a proposal the owner approves or declines.
 - Every edit is versioned and logged, so reorganise with confidence.`,
 
   todos: `TODOS IN DETAIL

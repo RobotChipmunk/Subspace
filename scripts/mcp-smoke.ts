@@ -2,6 +2,8 @@
 import { createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
 import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
 import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
+import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
+import { archiveNode, createNode, getNode } from "../src/lib/core/context";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
 import { handleMcp } from "../src/lib/mcp/server";
@@ -292,6 +294,43 @@ async function main() {
     const freed = (await agentByToken(await issueToken(made.id)))!;
     if (!(await call(freed, "explore", { path: "/feed" })).children) throw new Error("an agent whose limits were lifted still cannot see the feed");
     await updateAgent(owner, made.id, { archived: true });
+  }
+
+  {
+    // House rules: an agent cannot change a note under /context/system by itself. Its change waits for the owner, who answers from the rail, and an approved change is applied exactly as it was written.
+    const sys = await ensureSystem();
+    const rule = await createNode(owner, { parent: sys.id, title: "Smoke rule " + tag, summary: "A rule for the smoke test.", body: "- First line." });
+    const noWhy = await call(s, "context_write", { id: rule.id, body_append: "- Second line." });
+    if (!noWhy.ERROR || !/why/.test(noWhy.ERROR)) throw new Error("a house rule could be changed without saying why: " + JSON.stringify(noWhy));
+    const change = { id: rule.id, body_append: "- Second line.", why: "The smoke test needs a second line." };
+    const asked = await call(s, "context_write", change);
+    if (!asked.proposed || !asked.id) throw new Error("a change to a house rule was not held as a proposal: " + JSON.stringify(asked));
+    if ((await getNode(rule.id)).body.includes("Second line")) throw new Error("a house rule changed before the owner approved it");
+    if ((await call(s, "context_write", change)).id !== asked.id) throw new Error("the same proposal was made twice");
+    const inside = await call(s, "context_write", { parent: "/context/system", title: "Smoke rule two " + tag, body: "- Another." });
+    if (!inside.ERROR || !/why/.test(inside.ERROR)) throw new Error("an agent could add a house rule without approval: " + JSON.stringify(inside));
+    const waitingRule = (await pendingProposals()).find((x) => x.id === asked.id);
+    if (!waitingRule || waitingRule.excerpt !== "Adds: Second line." || waitingRule.by !== s.handle) throw new Error("the proposal is not waiting as it was made: " + JSON.stringify(waitingRule));
+    // every agent is given the house rules without asking
+    const again: any = await handleMcp(s, { jsonrpc: "2.0", id: ++n, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+    if (!again.json.result.instructions.includes("HOUSE RULES") || !again.json.result.instructions.includes("Smoke rule " + tag)) throw new Error("the connection instructions do not carry the house rules");
+    if (!(await call(s, "briefing")).house_rules?.includes("First line")) throw new Error("the briefing does not carry the house rules");
+    await call(s, "changes");
+    if (waitingRule.module_id) {
+      // the owner taps Approve on the module: the server applies it, and the agent hears
+      const yes = await moduleActed(owner, waitingRule.module_id, "Approve");
+      if (!yes.cleared || yes.sent?.label !== "Approve") throw new Error("approving from the rail: " + JSON.stringify(yes));
+      if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "rail.cleared" && i.sent === "approve")) throw new Error("the agent did not hear that its proposal was approved");
+    } else await decide(owner, asked.id, true);
+    const applied = await getNode(rule.id);
+    if (!applied.body.endsWith("- Second line.") || applied.updated_by !== s.id) throw new Error("an approved proposal was not applied as written: " + JSON.stringify({ body: applied.body, by: applied.updated_by }));
+    // declined: nothing changes, and it stops waiting
+    const removal = await call(s, "context_archive", { id: rule.id, why: "The smoke test is over." });
+    if (!removal.proposed) throw new Error("removing a house rule was not held as a proposal: " + JSON.stringify(removal));
+    await decide(owner, removal.id, false);
+    await getNode(rule.id);
+    if ((await pendingProposals()).some((x) => x.id === removal.id)) throw new Error("a declined proposal is still waiting");
+    await archiveNode(owner, rule.id);
   }
 
   {

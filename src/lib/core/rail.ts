@@ -351,6 +351,10 @@ async function moduleSent(actor: Agent, m: RailModule, action: RailAction) {
     data: { key: m.key, by: "action", author: author?.handle, action: action.label, sent: action.send, ...(m.todo_id ? { todo: m.todo_id } : {}) },
   });
   await q("UPDATE rail_modules SET sent = sent || jsonb_build_object('seq', $2::bigint) WHERE id = $1", [m.id, seq]);
+  // A module that asks about a house rule is answered here, by the server: an approved change is
+  // applied exactly as proposed, whether or not its agent ever runs again.
+  const { decideByModule, isProposalModule } = await import("./rules");
+  if (isProposalModule(m.key)) await decideByModule(m.id, action.send === "approve");
   return { cleared: true, sent: { label: action.label, to } };
 }
 

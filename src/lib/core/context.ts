@@ -36,6 +36,17 @@ export type ContextNode = {
 export const LITE = "id, parent_id, path, title, summary, kind, cover, url, site, blurb, entry_date, tags, tags_by, mood, mood_by, version, updated_by, created_at, updated_at, length(body) AS body_chars";
 export type ContextLite = Omit<ContextNode, "body" | "archived"> & { body_chars: number; child_count?: number };
 
+/** The top-level section that holds the house rules (core/rules.ts). Agents change it only through a proposal the owner approves. */
+export const SYSTEM = "system";
+export const isSystemPath = (path: string) => path === SYSTEM || path.startsWith(SYSTEM + "/");
+/** `approved` marks a change the owner has approved, which is the one way an agent's change to a house rule goes through. */
+type Opts = { approved?: boolean };
+function guardSystem(actor: Agent, opts: Opts, ...paths: (string | null | undefined)[]) {
+  if (actor.kind !== "agent" || opts.approved) return;
+  if (paths.some((p) => p && isSystemPath(p)))
+    throw bad("That is a house rule, which changes only with the owner's approval. Use context_write (or context_archive) on it with why: one sentence for the owner. Your change is then put to them and applied if they approve.");
+}
+
 export async function getNode(ref: string): Promise<ContextNode> {
   const key = ref.replace(/^\/?(context\/)?/, "").replace(/\/$/, "");
   const n = await q1<ContextNode>("SELECT * FROM context_nodes WHERE (id = $1 OR path = $2) AND NOT archived", [ref, key]);
@@ -91,12 +102,16 @@ const docType = (kind: string) => (kind === "link" ? "link" : "context");
 const okCover = (c: unknown) => (typeof c === "string" && /^https:\/\//.test(c) && c.length < 2000 ? c : null);
 
 export async function createNode(actor: Agent, input: { parent?: string | null; title: string; summary?: string; body?: string; kind?: "note" | "page" | "link" | "journal"; cover?: string; link?: { url: string; key: string; site: string; blurb: string }; journal?: { date: string; tags?: string[] } },
+  opts: Opts = {},
 ) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Context node needs a title.");
   const parent = input.parent ? await getNode(input.parent) : null;
+  guardSystem(actor, opts, parent?.path);
   const id = newId("c");
   const path = await uniquePath(parent?.path ?? null, title);
+  // only the owner starts the System section itself
+  if (path === SYSTEM && actor.kind === "agent") throw bad('"System" is the name of the house rules section. Choose another title.');
   const body = input.body ?? "";
   guard(actor, body);
   const link = input.kind === "link" ? input.link : undefined;
@@ -117,8 +132,10 @@ export async function updateNode(
   actor: Agent,
   ref: string,
   patch: { title?: string; summary?: string; body?: string; body_append?: string; body_replace?: { find: string; replace: string }; parent?: string | null; expect_version?: number; cover?: string | null; kind?: "note" | "page"; about?: string; tags?: string[]; entry_date?: string; mood?: string | null },
+  opts: Opts = {},
 ) {
   const before = await getNode(ref);
+  guardSystem(actor, opts, before.path);
   if (patch.expect_version !== undefined && patch.expect_version !== before.version)
     throw new ApiError(409, `Version conflict: node is at version ${before.version}, you edited version ${patch.expect_version}. Read it again and reapply your change.`);
 
@@ -154,6 +171,7 @@ export async function updateNode(
   if (moving || title !== before.title) {
     const parent = moving ? (patch.parent ? await getNode(patch.parent) : null) : before.parent_id ? await getNode(before.parent_id) : null;
     if (parent && (parent.id === before.id || parent.path.startsWith(before.path + "/"))) throw bad("A node cannot be moved inside itself.");
+    guardSystem(actor, opts, parent?.path);
     parentId = parent?.id ?? null;
     path = await uniquePath(parent?.path ?? null, title, before.id);
   }
@@ -192,8 +210,10 @@ export async function updateNode(
   return getNode(before.id);
 }
 
-export async function archiveNode(actor: Agent, ref: string) {
+export async function archiveNode(actor: Agent, ref: string, opts: Opts = {}) {
   const n = await getNode(ref);
+  guardSystem(actor, opts, n.path);
+  if (n.path === SYSTEM) throw bad("The System section holds the house rules and cannot be removed. Remove the rules inside it instead.");
   const ids = await q<{ id: string }>("UPDATE context_nodes SET archived = true, path = path || '~' || id WHERE id = $1 OR path LIKE $2 RETURNING id", [
     n.id, n.path.replace(/[%_\\]/g, "\\$&") + "/%",
   ]);

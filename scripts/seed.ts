@@ -8,6 +8,7 @@ import { saveLink } from "../src/lib/core/links";
 import { saveMedia } from "../src/lib/core/media";
 import { createPost, createReply } from "../src/lib/core/posts";
 import { setModule } from "../src/lib/core/rail";
+import { ensureSystem, propose } from "../src/lib/core/rules";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
 import { createTracker } from "../src/lib/core/trackers";
 import { agentById, newId, ownerAgent } from "../src/lib/core/util";
@@ -244,6 +245,18 @@ async function main() {
     todo: topUp.id,
     show_until: inAWeek,
   });
+
+  // ---- House rules: how agents work here. The owner writes them; an agent's change waits for approval. ----
+  const system = await ensureSystem();
+  const quietHours = await createNode(owner, {
+    parent: system.id,
+    title: "Quiet hours",
+    summary: "Nothing that can wait is raised before 9 am or after 8 pm.",
+    body: "- Nothing that can wait is raised before 9 am or after 8 pm.\n- A deadline inside the next day is never something that can wait.",
+  });
+  await createNode(owner, { parent: system.id, title: "Sources", summary: "Prefer primary sources, and name them.", body: "- Prefer the primary source to a report about it.\n- Name where a number came from, every time." });
+  // one change is waiting (kept out of the rail here, so the seeded rail stays as the checks expect it)
+  await propose(scout, { id: quietHours.id, body_append: "- At weekends nothing is raised before 10 am.", why: "You dismissed every Saturday morning module this month." }, { rail: false });
 
   // ---- Saved links ----
   await saveLink(owner, { url: "https://example.com/slow-interfaces", title: "The case for slow interfaces", site: "Works in Progress", why: "Good argument for calm UI, use it for Subspace", about: "Essay on why interfaces that wait for you age better than ones that chase attention." });

@@ -23,6 +23,25 @@ final class ContextTests: SubspaceTestCase {
         shot("21-page-scrolled")
     }
 
+    /// House rules live under System. A change an agent proposed waits at the top of Context
+    /// with who, why and what; approving it applies it and the proposal goes.
+    func testApproveAProposedHouseRule() {
+        launchSignedIn()
+        go("context")
+        expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'context.node.' AND label == 'System'")).firstMatch, "the System section, which holds the house rules")
+        // An earlier attempt may have answered it already.
+        let approve = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'context.proposal.approve.'")).firstMatch
+        if approve.waitForExistence(timeout: 8) {
+            expect(textContaining("proposes a change to “Quiet hours”"), "who proposes what")
+            expect(textContaining("You dismissed every Saturday morning module"), "why")
+            expect(textContaining("At weekends nothing is raised before 10 am"), "the change itself")
+            shot("24-house-rule-proposal")
+            approve.tap()
+            waitToVanish(approve, "the proposal, once approved")
+        }
+        shot("24-house-rules")
+    }
+
     func testSearchFindsAcrossTheWorkspace() {
         launchSignedIn()
         go("context")

@@ -3,7 +3,8 @@ import { ApiError, type Agent } from "../core/util";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 import { sharingInstructions } from "../core/guests";
 import { GUEST_GUIDE, guestServerInfo, guestTools } from "./guest";
-import { describeAccess } from "../core/access";
+import { describeAccess, sightOf } from "../core/access";
+import { houseRulesSection, SYSTEM } from "../core/rules";
 import { children as contextChildren } from "../core/context";
 import { guardCall, toolsFor, type Tool } from "./tools";
 
@@ -43,7 +44,7 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
         serverInfo: { ...(guest ? await guestServerInfo() : { name: "subspace", title: "Subspace" }), version: GUIDE_VERSION },
         instructions: guest
           ? await GUEST_GUIDE(agent, !!access.readOnly)
-          : `You are connected as @${agent.handle} (${agent.name}).${await accessLine(agent, access)}\n\n${CORE}${await sharingSection()}`,
+          : `You are connected as @${agent.handle} (${agent.name}).${await accessLine(agent, access)}\n\n${CORE}${await rulesSection(agent)}${await sharingSection()}`,
       });
     }
     case "ping":
@@ -122,6 +123,13 @@ async function accessLine(agent: Agent, access: Access): Promise<string> {
   const mine = describeAccess(agent, await contextChildren(null));
   if (mine) return ` ${mine} Where the guide below describes posting, adding or changing something you have no tool for, or a part of the system you cannot see, it does not apply to you.`;
   return access.readOnly ? " This connection is read-only: you can look, but not post or change anything." : "";
+}
+
+/** The house rules, for an agent that may see them. */
+async function rulesSection(agent: Agent): Promise<string> {
+  if (!sightOf(agent).node({ path: SYSTEM, kind: "note" })) return "";
+  const s = await houseRulesSection();
+  return s ? `\n\n${s}` : "";
 }
 
 const sharingSection = async () => {
