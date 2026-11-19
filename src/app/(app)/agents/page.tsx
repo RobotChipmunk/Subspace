@@ -400,19 +400,21 @@ function Sent({ name, sent }: { name: string; sent: SentAnswer[] }) {
 }
 
 /** When a routine next comes due, or how its last round went, in a few words. */
-function routineLine(r: Routine, mine: boolean, doer?: Agent) {
+function routineLine(r: Routine, mine: boolean, others: string[]) {
   const every = r.every === "weekly" ? "Weekly" : "Daily";
   if (!r.agent_id) return `${every}. Nobody does this yet.`;
-  if (!mine) return `${every}. Done by ${doer?.name ?? "another agent"}.`;
+  const names = others.length ? others.join(" and ") : "another agent";
+  if (!mine) return r.shared ? `${every}. Done by ${names}; more than one agent can.` : `${every}. Done by ${names}.`;
   const next = r.next_at ? new Date(r.next_at) : null;
   const when = next ? (next.getTime() <= Date.now() + 60_000 ? "due now" : `next ${next.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}`) : "";
-  return [every, when].filter(Boolean).join(" · ");
+  return [every, when, others.length ? `with ${names}` : ""].filter(Boolean).join(" · ");
 }
 
 /**
  * The duties that come round on a schedule, and whether this agent does each. A routine has one
- * agent: turning it on here takes it from whoever had it. When one is due the agent is pinged
- * with a job, and what it reported last time shows beneath.
+ * agent: turning it on here takes it from whoever had it. The exception is a shared routine (idea
+ * growth), which several agents may do at once: turning it on here adds this agent to the others.
+ * When one is due the agent is pinged with a job, and what it reported last time shows beneath.
  */
 function Routines({ agent: a }: { agent: Agent }) {
   const { agent } = useMe();
@@ -424,7 +426,7 @@ function Routines({ agent: a }: { agent: Agent }) {
   async function give(key: string, on: boolean) {
     setError("");
     try {
-      await api(`routines/${key}`, { method: "PATCH", body: { agent: on ? a.id : null } });
+      await api(`routines/${key}`, { method: "PATCH", body: { agent: a.id, on } });
       await mutate();
     } catch (e) {
       setError((e as Error).message);
@@ -435,13 +437,15 @@ function Routines({ agent: a }: { agent: Agent }) {
       <div className="mb-1 text-[12px] font-medium uppercase tracking-[0.05em] text-ink3">Routines</div>
       <ul className="divide-y divide-[var(--line)] rounded-[14px] bg-fill">
         {list.map((r) => {
-          const mine = r.agent_id === a.id;
+          const doers = r.agent_id ? [r.agent_id, ...(r.also ?? [])] : [];
+          const mine = doers.includes(a.id);
+          const others = doers.filter((d) => d !== a.id).map((d) => agent(d)?.name).filter((n): n is string => !!n);
           return (
             <li key={r.key} data-routine={r.key} className="flex items-center gap-3 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="text-[13.5px] font-medium">{r.title}</div>
                 <p className="text-[13px] leading-snug text-ink2">{r.about}</p>
-                <p className="mt-0.5 text-[12.5px] text-ink3">{routineLine(r, mine, agent(r.agent_id))}</p>
+                <p className="mt-0.5 text-[12.5px] text-ink3">{routineLine(r, mine, others)}</p>
                 {mine && r.last_note && r.last_done_at && (
                   <p className="mt-0.5 text-[12.5px] leading-snug text-ink3 [overflow-wrap:anywhere]">
                     Last time, {ago(r.last_done_at)}{ago(r.last_done_at) === "now" ? "" : " ago"}: {r.last_note}

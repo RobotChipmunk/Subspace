@@ -5,7 +5,7 @@ import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
 import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
 import { embedPending, meaningOn } from "../src/lib/core/meaning";
-import { createIdea, deleteIdea, getIdea, moreOf, pruneItem, updateIdea, updateItem } from "../src/lib/core/ideas";
+import { addItem, createIdea, deleteIdea, getIdea, listIdeas, makeTask, moreOf, notYet, pruneItem, setAsideNear, updateIdea, updateItem } from "../src/lib/core/ideas";
 import { archiveNode, createNode, getNode } from "../src/lib/core/context";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
@@ -361,7 +361,70 @@ async function main() {
     await updateIdea(owner, idea.id, { state: "resting" });
     const resting = await call(claude, "idea_grow", { idea: idea.id, from: root.id, kind: "riff", text: "While it rests." });
     if (!resting.ERROR || !/resting/.test(resting.ERROR)) throw new Error("a resting idea was grown: " + JSON.stringify(resting));
+
+    // Resting and waking. A find wakes an idea that has rested a week, and nothing else does; one the owner leaves alone for a fortnight rests by itself.
+    const find = { idea: idea.id, from: root.id, kind: "found", text: "A maker has just started selling one at half the size.", source: { name: "Example", url: "https://example.com/half-size" } };
+    const tooSoon = await call(claude, "idea_grow", find);
+    if (!tooSoon.ERROR || !/less than 7 days/.test(tooSoon.ERROR)) throw new Error("a find woke an idea the owner had only just put to rest: " + JSON.stringify(tooSoon));
+    await q("UPDATE ideas SET rested_at = now() - interval '8 days' WHERE id = $1", [idea.id]);
+    const listed = (await call(claude, "idea_list")).ideas.find((x: any) => x.id === idea.id);
+    if (listed?.state !== "resting" || listed.may_wake !== true || !listed.resting_since) throw new Error("idea_list does not say a rested idea may be woken: " + JSON.stringify(listed));
+    const woke = await call(claude, "idea_grow", find);
+    if (!woke.woke || !woke.id) throw new Error("a find did not wake a resting idea: " + JSON.stringify(woke));
+    const card = (await listIdeas()).find((x) => x.id === idea.id)!;
+    if (card.state !== "growing" || card.woken_by !== claude.id) throw new Error("the owner is not shown what woke the idea: " + JSON.stringify(card));
+    await q("UPDATE ideas SET owner_at = now() - interval '15 days', woke_at = now() - interval '15 days' WHERE id = $1", [idea.id]);
+    const quiet = (await call(s, "idea_list")).ideas.find((x: any) => x.id === idea.id);
+    if (quiet?.state !== "resting") throw new Error("an idea left alone for a fortnight did not rest: " + JSON.stringify(quiet));
+    if ((await call(s, "idea_read", { id: idea.id })).resting?.by !== "itself, after a fortnight untouched") throw new Error("idea_read does not say the idea rested by itself");
+    await addItem(owner, idea.id, { text: "Back to this " + tag, x: 300, y: 300 });
+    if ((await getIdea(idea.id)).idea.state !== "growing") throw new Error("the owner adding to an idea that fell asleep did not wake it");
+
+    // Found by search, and opened by read, like anything else.
+    const hits = await call(s, "search", { query: "smoke test idea " + tag, types: ["idea"] });
+    if (!hits.results?.some((x: any) => x.id === idea.id && x.type === "idea" && x.path === "/ideas/" + idea.id)) throw new Error("search does not find an idea: " + JSON.stringify(hits).slice(0, 300));
+    const opened = (await call(s, "read", { ids: [idea.id] }))[0];
+    if (opened?.type !== "idea" || !opened.pieces?.length) throw new Error("read does not open an idea: " + JSON.stringify(opened).slice(0, 300));
+
+    // Two ideas with something in common: an agent pairs them, the owner sees each from the other, and one set aside is not suggested again.
+    const other = await createIdea(owner, { text: "A second smoke test idea " + tag });
+    if (!(await call(s, "idea_relate", { a: idea.id, b: other.id })).ERROR) throw new Error("two ideas were paired without saying what they share");
+    const pair = await call(s, "idea_relate", { a: idea.id, b: other.id, label: "both about size" });
+    if (!pair.id) throw new Error("idea_relate: " + JSON.stringify(pair));
+    const near = (await getIdea(other.id)).near;
+    if (near.length !== 1 || near[0].idea.id !== idea.id || near[0].label !== "both about size") throw new Error("the other idea does not show the pairing: " + JSON.stringify(near));
+    if ((await call(claude, "idea_read", { id: idea.id })).near?.[0]?.idea !== other.id) throw new Error("idea_read does not carry what an idea is near");
+    await setAsideNear(owner, pair.id);
+    if ((await getIdea(idea.id)).near.length) throw new Error("a pairing set aside is still shown");
+    const again = await call(claude, "idea_relate", { a: other.id, b: idea.id, label: "same thing really" });
+    if (!again.ERROR || !/set this pairing aside/.test(again.ERROR)) throw new Error("a pairing the owner set aside was suggested again: " + JSON.stringify(again));
+
+    // Ready to act on: an agent names the first step, the owner says not yet or makes the task with one tap, and the agent hears which.
+    const unkept = await call(s, "idea_ripe", { idea: other.id, step: "Do the thing" });
+    if (!unkept.ERROR || !/kept/.test(unkept.ERROR)) throw new Error("an idea with nothing kept was called ready: " + JSON.stringify(unkept));
+    await call(s, "changes");
+    if (!(await call(s, "idea_ripe", { idea: idea.id, step: "Build one at half the size " + tag })).ok) throw new Error("idea_ripe was refused on an idea with something kept");
+    if ((await getIdea(idea.id)).ripe?.step !== "Build one at half the size " + tag || !(await listIdeas()).find((x) => x.id === idea.id)!.ripe) throw new Error("the owner is not shown that the idea is ready");
+    await notYet(owner, idea.id);
+    if ((await getIdea(idea.id)).ripe) throw new Error("an idea is still shown as ready after not yet");
+    if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "idea.not_yet" && i.id === idea.id)) throw new Error("the agent was not told the owner said not yet");
+    const pressed = await call(s, "idea_ripe", { idea: idea.id, step: "Build it anyway" });
+    if (!pressed.ERROR || !/not yet/.test(pressed.ERROR)) throw new Error("an agent asked again straight after not yet: " + JSON.stringify(pressed));
+    await q("UPDATE ideas SET not_yet_at = now() - interval '15 days' WHERE id = $1", [idea.id]);
+    await call(s, "idea_ripe", { idea: idea.id, step: "Build one at half the size " + tag });
+    const made = await makeTask(owner, idea.id);
+    const task = await getTodo(made.todo.id);
+    if (task.title !== "Build one at half the size " + tag || !task.notes.includes("/ideas?idea=" + idea.id) || !task.notes.includes("What if it were half the size?")) throw new Error("the task made of an idea does not carry its step and what was kept: " + JSON.stringify(task).slice(0, 400));
+    if ((await makeTask(owner, idea.id)).todo.id !== task.id) throw new Error("a second tap made a second task");
+    const done = await getIdea(idea.id);
+    if (done.task?.id !== task.id || done.ripe) throw new Error("the idea does not show its task: " + JSON.stringify({ task: done.task, ripe: done.ripe }));
+    if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "idea.task" && i.id === idea.id)) throw new Error("the agent was not told its step became a task");
+    const twice = await call(s, "idea_ripe", { idea: idea.id, step: "And another" });
+    if (!twice.ERROR || !/already made a task/.test(twice.ERROR)) throw new Error("an idea with a task was called ready again: " + JSON.stringify(twice));
+    await deleteTodo(owner, task.id, true);
+    await deleteIdea(owner, other.id);
     await deleteIdea(owner, idea.id);
+    if ((await call(s, "search", { query: "smoke test idea " + tag, types: ["idea"] })).results.some((x: any) => x.id === idea.id || x.id === other.id)) throw new Error("a removed idea is still found by search");
     if ((await call(s, "idea_list")).ideas.some((x: any) => x.id === idea.id)) throw new Error("a removed idea is still listed");
   }
 
@@ -478,6 +541,26 @@ async function main() {
     if (!seenAs.children.some((x: any) => x.path === "/routines/news-gaps" && x.about.includes("@" + s.handle))) throw new Error("explore(/routines) does not say who does the routine");
     if (!(await call(s, "briefing")).your_routines?.length) throw new Error("the briefing does not name the agent's routines");
     await assignRoutine(owner, "news-gaps", null);
+    // Idea growth may be shared: a second agent joins the first instead of taking it, each is handed its own job, and taking it from one leaves the other.
+    await assignRoutine(owner, "idea-growth", s.id, true);
+    await assignRoutine(owner, "idea-growth", claude.id, true);
+    const shared = (await listRoutines()).find((r) => r.key === "idea-growth")!;
+    if (shared.agent_id !== s.id || shared.also.join() !== claude.id || !shared.shared) throw new Error("a second agent did not join a shared routine: " + JSON.stringify(shared));
+    await tick();
+    for (const who of [s, claude]) {
+      const mine = (await call(who, "jobs")).jobs.filter((j: any) => j.routine === "idea-growth");
+      if (mine.length !== 1) throw new Error(`${who.handle} has ${mine.length} idea-growth jobs, not one`);
+      await call(who, "routine_done", { job_id: mine[0].job_id, note: "Nothing to grow in a test." });
+    }
+    await assignRoutine(owner, "news-gaps", claude.id, true);
+    await assignRoutine(owner, "news-gaps", s.id, true);
+    if ((await listRoutines()).find((r) => r.key === "news-gaps")!.also.length) throw new Error("a routine that is one agent's was shared");
+    await assignRoutine(owner, "idea-growth", s.id, false);
+    const leftWith = (await listRoutines()).find((r) => r.key === "idea-growth")!;
+    if (leftWith.agent_id !== claude.id || leftWith.also.length) throw new Error("taking a shared routine from one agent did not leave it with the other: " + JSON.stringify(leftWith));
+    await assignRoutine(owner, "idea-growth", null);
+    await assignRoutine(owner, "news-gaps", null);
+    await q("UPDATE jobs SET status = 'cancelled', done_at = now() WHERE kind = 'routine' AND status = 'open'");
     // the review's numbers
     const week = await call(s, "usage", { days: 7 });
     if (!week.agents?.some((x: any) => x.agent === "@" + s.handle && x.calls > 10) || !week.tools?.length || !week.rail?.length || week.tasks?.added_by_agents === undefined) throw new Error("usage() is missing its numbers: " + JSON.stringify(week).slice(0, 400));

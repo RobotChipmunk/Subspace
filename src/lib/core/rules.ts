@@ -14,7 +14,7 @@
  */
 import { q, q1 } from "../db";
 import { archiveNode, createNode, getNode, isSystemPath, SYSTEM, updateNode, type ContextNode } from "./context";
-import { listRoutines } from "./routines";
+import { doersOf, listRoutines } from "./routines";
 import { listTrackers } from "./trackers";
 import { agentById, bad, listAgents, newId, notFound, oneLine, ownerAgent, type Agent } from "./util";
 
@@ -67,7 +67,7 @@ export async function houseRules(): Promise<string> {
   const agents = await listAgents(true);
   const handle = (id: string | null) => (id ? "@" + (agents.find((a) => a.id === id)?.handle ?? id) : "nobody yet");
   const routines = await listRoutines();
-  if (routines.length) parts.push(`Routines (each is one agent's duty; explore("/routines") has the briefs):\n${routines.map((r) => `- ${r.title}, ${r.every}: ${handle(r.agent_id)}`).join("\n")}`);
+  if (routines.length) parts.push(`Routines (each is one agent's duty, except idea growth, which several may share; explore("/routines") has the briefs):\n${routines.map((r) => `- ${r.title}, ${r.every}: ${doersOf(r).map(handle).join(" and ") || handle(null)}`).join("\n")}`);
   const topics = await listTrackers();
   if (topics.length) {
     const shown = topics.slice(0, 40);

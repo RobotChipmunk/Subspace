@@ -7,11 +7,11 @@ import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, up
 import { currentNotes, ensureCurrent } from "@/lib/core/current";
 import { search } from "@/lib/core/discover";
 import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
-import { addItem, createIdea, deleteIdea, getIdea, joinItems, listIdeas, moreOf, pruneItem, seenIdea, unjoin, updateIdea, updateItem } from "@/lib/core/ideas";
+import { addItem, createIdea, deleteIdea, getIdea, joinItems, listIdeas, makeTask, moreOf, notYet, pruneItem, seenIdea, setAsideNear, unjoin, updateIdea, updateItem } from "@/lib/core/ideas";
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { registerDevice, removeDevice } from "@/lib/core/push";
-import { activeModules, moduleActed, moduleLater, removeModule, sentAnswers } from "@/lib/core/rail";
+import { activeModules, buttonSets, moduleActed, moduleLater, removeModule, sentAnswers } from "@/lib/core/rail";
 import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
@@ -111,7 +111,8 @@ const routes: [string, RegExp, Handler][] = [
 
   // the app asks for the rail every half minute while it is open, which makes this a good place to
   // notice a routine that has come due, whether or not the scheduler has called
-  ["GET", /^rail$/, async () => (tickSoon(), { modules: await activeModules() })],
+  // button_sets: the sets of buttons modules have carried lately, for the iOS app's notifications (core/push.ts)
+  ["GET", /^rail$/, async () => (tickSoon(), { modules: await activeModules(), button_sets: await buttonSets() })],
   // the answers the owner has sent to agents from a module's button, and whether each agent has picked its up
   ["GET", /^rail\/sent$/, ({ actor }) => ownerOnly(actor, async () => ({ sent: await sentAnswers() }))],
   ["DELETE", /^rail\/([^/]+)$/, ({ actor }, id) => removeModule(actor, id)],
@@ -123,11 +124,13 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^devices$/, ({ actor, body }) => ownerOnly(actor, () => registerDevice(body?.token, body?.env))],
   ["DELETE", /^devices\/([^/]+)$/, ({ actor }, token) => ownerOnly(actor, () => removeDevice(token))],
 
-  ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean), limit: 20 })],
+  // the apps' own search shows notes, links, tasks, posts and topics; ideas are found there only when asked for (types=idea)
+  ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean) ?? ["post", "todo", "context", "link", "tracker"], limit: 20 })],
 
   // Routines: duties that come round on a schedule. The owner gives each to one agent ({ agent: id }) or to nobody ({ agent: null }).
+  // The switch beside an agent sends { agent: id, on }: on gives it to that agent (joining the others when the routine is shared), off takes it from that agent only.
   ["GET", /^routines$/, async () => ({ routines: await listRoutines() })],
-  ["PATCH", /^routines\/([^/]+)$/, ({ actor, body }, key) => ownerOnly(actor, () => assignRoutine(actor, key, body?.agent ?? null))],
+  ["PATCH", /^routines\/([^/]+)$/, ({ actor, body }, key) => ownerOnly(actor, () => assignRoutine(actor, key, body?.agent ?? null, typeof body?.on === "boolean" ? body.on : undefined))],
 
   // Ideas: a canvas per idea. The owner puts text and pictures on it, moves, keeps, prunes and joins pieces;
   // agents add to it through their own tools.
@@ -147,6 +150,11 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^idea-items\/([^/]+)\/more$/, ({ actor }, id) => moreOf(actor, id)],
   ["POST", /^ideas\/([^/]+)\/joins$/, ({ actor, body }, id) => joinItems(actor, id, body?.a, body?.b)],
   ["DELETE", /^idea-joins\/([^/]+)$/, ({ actor }, id) => unjoin(actor, id)],
+  // ready to act on: one tap makes the idea a task ({ todo }); "not yet" lets it go on growing
+  ["POST", /^ideas\/([^/]+)\/task$/, ({ actor }, id) => makeTask(actor, id)],
+  ["POST", /^ideas\/([^/]+)\/not-yet$/, ({ actor }, id) => notYet(actor, id)],
+  // another idea an agent paired with this one: the owner does not see it, and it is not suggested again
+  ["DELETE", /^idea-nears\/([^/]+)$/, ({ actor }, id) => setAsideNear(actor, id)],
 
   // House rules: changes agents have proposed to the notes under /context/system, waiting for the owner. { approve: true | false } answers one.
   ["GET", /^rules\/proposals$/, ({ actor }) => ownerOnly(actor, async () => ({ proposals: await pendingProposals() }))],

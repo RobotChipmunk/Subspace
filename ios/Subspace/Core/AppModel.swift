@@ -64,6 +64,8 @@ final class AppModel {
     var pendingTodoID: String?
     /// A journal entry the journal screen should open as soon as it can; it clears this once it has.
     var pendingJournalID: String?
+    /// An idea to open on the Ideas screen, set by an address that names one.
+    var pendingIdeaID: String?
     var railSheet = false
     /// True while the feed's comments panel is open beside it; the docked rail steps aside.
     var commentsBeside = false
@@ -178,7 +180,11 @@ final class AppModel {
     }
 
     func refreshRail() async {
-        struct R: Codable { var modules: [RailModule] }
+        struct R: Codable {
+            var modules: [RailModule]
+            /// The sets of buttons modules have carried lately, as notification categories.
+            var button_sets: [String]?
+        }
         guard signedIn, let r: R = try? await api.get("rail") else { return }
         // a module whose action was just sent stays where it is until the owner has been shown so
         var next = r.modules
@@ -187,7 +193,7 @@ final class AppModel {
         }
         if next != rail { withAnimation(.ssSoft) { rail = next } }
         if rail.isEmpty { railSheet = false }
-        await Notifier.shared.railChanged(r.modules)
+        await Notifier.shared.railChanged(r.modules, buttonSets: r.button_sets ?? [])
     }
 
     func dismissRail(_ id: String) async {
@@ -269,7 +275,7 @@ final class AppModel {
     // Links
 
     /// Opens an address from content: a page ("/page/<id>"), a task ("/todos?open=<id>"), a journal
-    /// entry ("/journal?entry=<id>"),
+    /// entry ("/journal?entry=<id>"), an idea ("/ideas?idea=<id>"),
     /// another screen ("/feed") or the web, which opens in the viewer inside the app.
     func open(_ link: String) {
         if link.hasPrefix("/page/") {
@@ -289,6 +295,13 @@ final class AppModel {
             railSheet = false
             presentedPage = nil
             withAnimation(.ssSpring) { tab = .journal }
+            return
+        }
+        if link.hasPrefix("/ideas") {
+            if let id = URLComponents(string: link)?.queryItems?.first(where: { $0.name == "idea" })?.value, !id.isEmpty { pendingIdeaID = id }
+            railSheet = false
+            presentedPage = nil
+            withAnimation(.ssSpring) { tab = .ideas }
             return
         }
         if link.hasPrefix("/"), let t = AppTab(rawValue: String(link.dropFirst()).components(separatedBy: CharacterSet(charactersIn: "?#/")).first ?? "") {

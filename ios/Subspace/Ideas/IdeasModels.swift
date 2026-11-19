@@ -25,6 +25,10 @@ struct IdeaCard: Decodable, Identifiable, Hashable {
     var unseen: Int?
     var last_grown_at: String?
     var preview: [Dot]?
+    /// The agent whose find woke it, until the owner has looked.
+    var woken_by: String?
+    /// Ready to act on, and no task made of it yet.
+    var ripe: Bool?
 }
 
 struct IdeaSource: Decodable, Hashable {
@@ -63,10 +67,42 @@ struct IdeasReply: Decodable {
     var ideas: [IdeaCard]?
 }
 
+/// Another idea that has something in common with this one, as an agent saw it.
+struct IdeaNear: Decodable, Identifiable, Hashable {
+    struct Other: Decodable, Hashable {
+        var id: String
+        var title: String?
+    }
+    let id: String
+    var idea: Other
+    var label: String?
+    var author: String?
+}
+
+/// Ready to act on: the first step an agent named (empty when the idea simply has enough kept), and who said so.
+struct IdeaRipe: Decodable, Hashable {
+    var step: String?
+    var by: String?
+}
+
+/// The task the owner made of an idea.
+struct IdeaTask: Decodable, Hashable {
+    var id: String
+    var title: String?
+    var done: Bool?
+}
+
 struct IdeaCanvasReply: Decodable {
     var idea: Idea
     var items: [IdeaItem]?
     var links: [IdeaLink]?
+    var near: [IdeaNear]?
+    var ripe: IdeaRipe?
+    var task: IdeaTask?
+}
+
+struct IdeaTaskReply: Decodable {
+    var todo: IdeaTask?
 }
 
 struct IdeaMoreReply: Decodable {

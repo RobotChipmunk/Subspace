@@ -22,7 +22,7 @@
 import { validateBlock, type AnyBlock } from "../blocks";
 import { q, q1 } from "../db";
 import { addDays, bad, logEvent, newId, notFound, timezone, type Agent } from "./util";
-import { pushRail } from "./push";
+import { pushRail, railCategory } from "./push";
 
 /** Blocks that read well in a narrow column. A module holds one. */
 export const RAIL_BLOCKS = ["facts", "timeline", "callout", "stats", "cards", "map", "text"] as const;
@@ -236,9 +236,18 @@ export async function setModule(
   );
   // A new or changed module that shows now reaches the owner's phone; one that waits for show_from
   // is left to the app, which notices it the next time it looks at the rail.
-  if (!same && new Date(from) <= new Date()) pushRail({ id, title, subtitle, label, badge: (await activeModules()).length });
+  if (!same && new Date(from) <= new Date()) pushRail({ id, title, subtitle, label, badge: (await activeModules()).length, actions });
   if (!same) await logEvent({ actor: actor.id, type: mine ? "rail.updated" : "rail.added", entity_type: "rail", entity_id: id, summary: `${level === "info" ? "" : level.toUpperCase() + ": "}${title}${label ? ` (${label})` : ""}`, data: { key, level, ...(todoId ? { todo: todoId } : {}) } });
   return (await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1", [id]))!;
+}
+
+/**
+ * The sets of buttons modules have carried lately, as notification categories (see core/push.ts).
+ * The iOS app registers them, so a notification that arrives while it is closed shows its buttons.
+ */
+export async function buttonSets(): Promise<string[]> {
+  const rows = await q<{ actions: RailAction[] }>("SELECT actions FROM rail_modules WHERE updated_at > now() - interval '90 days' AND jsonb_array_length(actions) > 0 ORDER BY updated_at DESC LIMIT 200");
+  return [...new Set(rows.map((r) => railCategory(r.actions)).filter((c): c is string => !!c))].slice(0, 40);
 }
 
 /** What the owner sees now: warnings and errors, then tasks a guest added that still need a day, then the rest. */

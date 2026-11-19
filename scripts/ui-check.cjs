@@ -1003,6 +1003,7 @@ async function run(profile) {
     const card = page.locator("[data-idea]", { hasText: "A cargo trailer for the bike" });
     await reachable(card, "ideas: the seeded idea");
     await reachable(page.getByRole("button", { name: "New idea" }), "ideas: New idea");
+    if (!(await card.locator("[data-ripe]").count())) fail("ideas: an idea that is ready to act on does not say so on its card");
     await noSidewaysScroll("ideas");
     await shot("ideas");
     await press(card);
@@ -1023,6 +1024,21 @@ async function run(profile) {
     // nothing on the canvas overlaps anything else when it is first shown
     const boxes = await pieces.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })));
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (boxes[i].l < boxes[j].r - 4 && boxes[j].l < boxes[i].r - 4 && boxes[i].t < boxes[j].b - 4 && boxes[j].t < boxes[i].b - 4) fail("ideas: two pieces overlap on the seeded canvas");
+    // Under its name the idea says what stands: that an agent thinks it is ready, with the first step, and which idea it is near.
+    const ideaId = await canvas.getAttribute("data-canvas");
+    const life = canvas.locator("[data-idea-life]");
+    const ripe = life.locator("[data-ripe]");
+    await reachable(ripe.getByRole("button", { name: "Make a task" }), "ideas: Make a task, on an idea that is ready");
+    await reachable(ripe.getByRole("button", { name: "Not yet" }), "ideas: Not yet");
+    const ripeSays = await ripe.innerText().catch(() => "");
+    if (!/Scout thinks this is ready/.test(ripeSays) || !/Measure the garage wall/.test(ripeSays)) fail(`ideas: the ready note does not say who thinks so and what the first step is: "${ripeSays}"`);
+    const near = life.locator("[data-near]");
+    await reachable(near.getByRole("button", { name: /^Near/ }), "ideas: the idea this one is near");
+    await reachable(near.getByRole("button", { name: /^Not related/ }), "ideas: Not related, on a near idea");
+    // on a phone these take the top of the screen, and the pieces are framed beneath them
+    const lifeBox = await life.boundingBox();
+    const narrow = (await canvas.boundingBox()).width < 500;
+    if (narrow && lifeBox && boxes.some((b) => b.l < lifeBox.x + lifeBox.width - 4 && lifeBox.x < b.r - 4 && b.t < lifeBox.y + lifeBox.height - 4 && lifeBox.y < b.b - 4)) fail("ideas: what the idea says under its name covers a piece when the canvas is first shown");
     await noSidewaysScroll("idea canvas");
     await shot("idea-canvas");
     // double-tap empty space and write: the words go down where the tap was
@@ -1053,8 +1069,40 @@ async function run(profile) {
     await reachable(page.getByRole("button", { name: "Bring back" }), "ideas: Bring back, after pruning");
     await page.getByRole("button", { name: "Bring back" }).click();
     await found.waitFor({ timeout: 6000 }).catch(() => fail("ideas: Bring back did not return the pruned piece"));
+    // One tap makes the idea a task: the step is its title, what was kept is in its notes, and the idea shows the task in the step's place.
+    const readyBefore = (await get(`/api/v1/ideas/${ideaId}`)).ripe;
+    await press(ripe.getByRole("button", { name: "Make a task" }));
+    const made = life.locator("[data-idea-task]");
+    await made.waitFor({ timeout: 6000 }).catch(() => fail("ideas: Make a task did not show the task on the canvas"));
+    await ripe.waitFor({ state: "detached", timeout: 4000 }).catch(() => fail("ideas: the ready note is still there after the task was made"));
+    const withTask = await get(`/api/v1/ideas/${ideaId}`);
+    if (withTask.task?.title !== "Measure the garage wall for a fold-flat trailer") fail(`ideas: the task made of the idea is "${withTask.task?.title}", not its first step`);
+    if (withTask.task) {
+      const notes = (await get(`/api/v1/todos/${withTask.task.id}`)).notes ?? "";
+      if (!notes.includes(`/ideas?idea=${ideaId}`) || !/folded flat/.test(notes)) fail("ideas: the task's notes do not lead back to the idea with what was kept");
+    }
+    await reachable(made, "ideas: the task made of the idea");
+    await shot("idea-task-made");
+    // the way across to the idea it is near, and back again
+    await press(near.getByRole("button", { name: /^Near/ }));
+    await page.waitForURL((u) => u.search.includes("idea=") && !u.search.includes(ideaId), { timeout: 6000 }).catch(() => fail("ideas: tapping a near idea did not open it"));
+    await page.locator("[data-piece]", { hasText: "A bench under the window" }).waitFor({ timeout: 6000 }).catch(() => fail("ideas: the near idea's canvas did not show"));
+    const back = page.locator("[data-near]").getByRole("button", { name: /^Near/ });
+    await reachable(back, "ideas: the way back from the near idea");
+    if (!/A cargo trailer/.test(await back.innerText().catch(() => ""))) fail("ideas: the near idea does not name the idea it came from");
+    await press(back);
+    await page.waitForURL((u) => u.search.includes(ideaId), { timeout: 6000 }).catch(() => fail("ideas: the way back from a near idea did not return"));
+    await canvas.locator("[data-piece]").first().waitFor({ timeout: 6000 });
     // put back as it was seeded, for the next screen size
-    const now = await get(`/api/v1/ideas/${await canvas.getAttribute("data-canvas")}`);
+    if (withTask.task) await send("DELETE", `/api/v1/todos/${withTask.task.id}?forever=1`);
+    if (process.env.DATABASE_URL && readyBefore) {
+      const { Client } = require("pg");
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      await db.connect();
+      await db.query("UPDATE ideas SET task_id = NULL, ripe = $2::jsonb WHERE id = $1", [ideaId, JSON.stringify({ ...readyBefore, at: new Date().toISOString() })]);
+      await db.end();
+    }
+    const now = await get(`/api/v1/ideas/${ideaId}`);
     for (const it of now.items.filter((x) => x.text === "Ride it to the beach")) await send("DELETE", `/api/v1/idea-items/${it.id}`);
     for (const it of now.items.filter((x) => /Burley/.test(x.text) && x.kept)) await send("PATCH", `/api/v1/idea-items/${it.id}`, { kept: false });
     await press(page.getByRole("button", { name: "All ideas" }));

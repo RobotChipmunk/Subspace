@@ -20,12 +20,12 @@ import { listEntries, listMonths, monthLine } from "./journal";
 import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule, railGone } from "./rail";
-import { listRoutines, ROUTINES } from "./routines";
+import { doersOf, listRoutines, ROUTINES } from "./routines";
 import { ensureSystem, houseRules, SYSTEM } from "./rules";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
-import { addDays, bad, listAgents, listGuests, notFound, oneLine, timezone, type Agent } from "./util";
+import { addDays, bad, listAgents, listGuests, notFound, oneLine, ownerAgent, timezone, type Agent } from "./util";
 
 const PAGE = 30;
 
@@ -454,7 +454,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         path: `/routines/${r.key}`,
         title: r.title,
         about: r.about,
-        items: [{ key: r.key, every: r.every, done_by: who(r.agent_id) ?? "nobody yet", next_due: r.next_at, last_handed_over: r.last_at, last_done: r.last_done_at, ...(r.last_note ? { last_note: r.last_note } : {}), brief: ROUTINES.find((x) => x.key === r.key)!.brief }],
+        items: [{ key: r.key, every: r.every, done_by: doersOf(r).map((d) => who(d)).filter(Boolean).join(" and ") || "nobody yet", next_due: r.next_at, last_handed_over: r.last_at, last_done: r.last_done_at, ...(r.last_note ? { last_note: r.last_note } : {}), brief: ROUTINES.find((x) => x.key === r.key)!.brief }],
         hint: "The brief is what the agent that does this routine follows. It is handed to that agent as a job when it comes due.",
       };
     }
@@ -462,7 +462,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       path: "/routines",
       title: "Routines",
       about: "Duties that come round on a schedule. The owner gives each to one agent (Agents screen). When a routine is due, that agent is handed a job of kind \"routine\" with its brief, and finishes it with routine_done.",
-      children: all.map((r) => ({ path: `/routines/${r.key}`, title: r.title, about: `${r.about} ${r.every === "weekly" ? "Weekly" : "Daily"}; done by ${who(r.agent_id) ?? "nobody yet"}.`, latest: r.last_done_at })),
+      children: all.map((r) => ({ path: `/routines/${r.key}`, title: r.title, about: `${r.about} ${r.every === "weekly" ? "Weekly" : "Daily"}; done by ${doersOf(r).map((d) => who(d)).filter(Boolean).join(" and ") || "nobody yet"}.`, latest: r.last_done_at })),
       hint: "If a routine is yours it reaches you by itself; you do not need to check here. If it is another agent's, leave it to them.",
     };
   }
@@ -623,7 +623,7 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
 
 // ---------- Search ----------
 
-const TYPES = ["post", "todo", "context", "link", "tracker"];
+const TYPES = ["post", "todo", "context", "link", "tracker", "idea"];
 
 export async function search(opts: { query: string; types?: string[]; since?: string; limit?: number; offset?: number; /** the agent searching; what it may not see is not found */ actor?: Agent }) {
   const sight = sightOf(opts.actor);
@@ -631,7 +631,7 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   // by kind: posts, tasks and followed topics follow their part of the app; everything else is a context node and must be one it may see
   const visible = sight.full
     ? null
-    : `(CASE d.entity_type WHEN 'post' THEN ${yes(sight.section("feed"))} WHEN 'todo' THEN ${yes(sight.section("todos"))} WHEN 'tracker' THEN ${yes(sight.section("following"))}
+    : `(CASE d.entity_type WHEN 'post' THEN ${yes(sight.section("feed"))} WHEN 'todo' THEN ${yes(sight.section("todos"))} WHEN 'tracker' THEN ${yes(sight.section("following"))} WHEN 'idea' THEN ${yes(sight.section("ideas"))}
          ELSE EXISTS (SELECT 1 FROM context_nodes n WHERE n.id = d.entity_id AND ${sight.nodeSql("n")}) END)`;
   const query = (opts.query ?? "").trim();
   if (!query) throw bad("Search needs a query.");
@@ -721,6 +721,7 @@ export async function search(opts: { query: string; types?: string[]; since?: st
         ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
         ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
         ...(r.entity_type === "todo" ? share.tag(guestOf.get(r.entity_id)) : {}),
+        ...(r.entity_type === "idea" ? { path: "/ideas/" + r.entity_id } : {}),
         // found by what it says rather than its words; likeness runs from 0 (unrelated) to 1 (the same)
         ...(meant.has(r.entity_type + ":" + r.entity_id) ? { match: "meaning", likeness: Math.round((likeness.get(r.entity_type + ":" + r.entity_id) ?? 0) * 100) / 100 } : {}),
         snippet: oneLine(r.snippet, 220),
@@ -756,7 +757,7 @@ export async function gather(actor: Agent, aboutIn: unknown) {
   const yes = (b: boolean) => (b ? "TRUE" : "FALSE");
   const visible = sight.full
     ? "TRUE"
-    : `(CASE d.entity_type WHEN 'post' THEN ${yes(sight.section("feed"))} WHEN 'todo' THEN ${yes(sight.section("todos"))} WHEN 'tracker' THEN ${yes(sight.section("following"))}
+    : `(CASE d.entity_type WHEN 'post' THEN ${yes(sight.section("feed"))} WHEN 'todo' THEN ${yes(sight.section("todos"))} WHEN 'tracker' THEN ${yes(sight.section("following"))} WHEN 'idea' THEN ${yes(sight.section("ideas"))}
          ELSE EXISTS (SELECT 1 FROM context_nodes n WHERE n.id = d.entity_id AND ${sight.nodeSql("n")}) END)`;
   const self = task ? ` AND NOT (d.entity_type = 'todo' AND d.entity_id = '${task.id}')` : "";
   const words = [...new Set(about.toLowerCase().match(/[a-z0-9][a-z0-9'-]{2,}/g) ?? [])].map((w) => w.replace(/[^a-z0-9]/g, "")).filter((w) => w.length > 2 && !STOP.has(w)).slice(0, 16);
@@ -785,6 +786,8 @@ export async function gather(actor: Agent, aboutIn: unknown) {
   const todos = todoIds.length ? await q<{ id: string; title: string; done: boolean; scope: string; date: string | null; tags: string[] }>("SELECT id, title, done, scope, date, tags FROM todos WHERE id = ANY($1) AND deleted_at IS NULL", [todoIds]) : [];
   const postIds = idsOf("post");
   const posts = postIds.length ? await q<{ id: string; body: string; created_at: string }>("SELECT id, body, created_at FROM posts WHERE id = ANY($1) AND created_at > now() - interval '90 days'", [postIds]) : [];
+  const ideaIds = idsOf("idea");
+  const ideas = ideaIds.length ? await q<{ id: string; title: string; state: string }>("SELECT id, title, state FROM ideas WHERE id = ANY($1) AND deleted_at IS NULL", [ideaIds]) : [];
   const topicIds = idsOf("tracker");
   const topics = topicIds.length ? await q<{ id: string; slug: string; title: string; latest: string }>("SELECT id, slug, title, latest FROM trackers WHERE id = ANY($1) AND NOT archived", [topicIds]) : [];
   const now = (await currentNotes().catch(() => [])).filter((c) => !c.lapsed && sight.node(c));
@@ -800,6 +803,7 @@ export async function gather(actor: Agent, aboutIn: unknown) {
     ...some("links", ordered.filter((n) => n.kind === "link").slice(0, 4).map((n) => ({ id: n.id, title: n.title, url: n.url, ...(n.summary ? { why: n.summary } : {}) }))),
     ...some("tasks", inOrder(todoIds, todos).slice(0, 7).map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}) }))),
     ...some("posts", inOrder(postIds, posts).slice(0, 6).map((p) => ({ id: p.id, day: new Date(p.created_at).toISOString().slice(0, 10), line: oneLine(p.body, 120) }))),
+    ...some("ideas", inOrder(ideaIds, ideas).slice(0, 3).map((i) => ({ id: i.id, path: "/ideas/" + i.id, title: i.title || "(no title yet)", state: i.state }))),
     ...some("topics", inOrder(topicIds, topics).slice(0, 3).map((t) => ({ id: t.id, path: "/following/" + t.slug, title: t.title, ...(t.latest ? { latest: oneLine(t.latest, 100) } : {}) }))),
     next: "These are titles and summaries, best match first in each group. read([ids]) the few you need. If something you expected is missing, search() for it by name.",
   };
@@ -844,6 +848,9 @@ export async function read(ids: string[], opts: { after?: string; /** the agent 
           replies: t.replies.map((r) => slimPost(r, handles)),
           ...(t.next_after ? { more_replies_after: t.next_after } : {}),
         });
+      } else if (id.startsWith("i_") || id.startsWith("/ideas/")) {
+        if (!sight.section("ideas")) throw gone();
+        out.push({ type: "idea", ...(await ideaForAgent(opts.actor ?? (await ownerAgent()), id.replace(/^\/ideas\//, ""))) } as unknown as Item);
       } else if (id.startsWith("t_")) {
         if (!sight.section("todos")) throw gone();
         const t = await getTodo(id);
@@ -930,7 +937,7 @@ export async function briefing(agent: Agent) {
   await ensureSystem().catch((e) => console.error("briefing: System section", (e as Error).message));
   await ensureCurrent().catch((e) => console.error("briefing: Current section", (e as Error).message));
   const access = sight.full ? null : describeAccess(agent, await contextChildren(null));
-  const mine = (await listRoutines()).filter((r) => r.agent_id === agent.id);
+  const mine = (await listRoutines()).filter((r) => doersOf(r).includes(agent.id));
   // said here as well as on connecting: an app may hold instructions from the day it connected, but it reads this every session
   const rules = sight.node({ path: SYSTEM, kind: "note" }) ? await houseRules().catch(() => "") : "";
   // what is true for now, so every session starts knowing it; a note past its day is left out, and its writer is reminded of it
