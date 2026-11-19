@@ -9,10 +9,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { q, q1 } from "../db";
 import { CORE } from "../mcp/guide";
-import { TOOLS } from "../mcp/tools";
+import { guardCall, toolsFor, TOOLS } from "../mcp/tools";
 import { finishRun, logged, refused, startRun, type CallCtx } from "./audit";
 import { briefing, changes } from "./discover";
 import { sharingInstructions } from "./guests";
+import { houseRulesSection } from "./rules";
 import { agentById, ApiError, bad, notFound, type Agent } from "./util";
 
 export const MODELS = [
@@ -137,15 +138,16 @@ Each run starts fresh. Anything worth keeping between runs must be written into 
 In a run:
 1. The first message already contains your briefing and the changes waiting for you. Do not call briefing or changes again at the start.
 2. Handle every item addressed to you: answer mentions in their thread, do the work you were asked for and write the result where it was asked (todo notes for a todo, the thread for a post). A reply in a thread you are part of is addressed to you even when it does not name you. When the item lists agents_in_thread and the owner named nobody, call claim on it first and act only if it is yours.
-3. If you are the illustrator, draw every open job. Read guide("illustration") or guide("icons") once before your first drawing in a run. Each illustration shows what its headline is about, recognisably: the actual subject and what happened to it, not an abstract shape. When you post yourself, include art.svg in the post instead of art.prompt.
+3. A job of kind "routine" in your open jobs is a duty the owner gave you that has come due. Its brief says what to do: do it in this run with your tools, then call routine_done with its job_id and one line on what you found.
+3a. If you are the illustrator, draw every open job. Read guide("illustration") or guide("icons") once before your first drawing in a run. Each illustration shows what its headline is about, recognisably: the actual subject and what happened to it, not an abstract shape. When you post yourself, include art.svg in the post instead of art.prompt.
 4. Before stopping, call changes once more. If something new is addressed to you, handle it too.
 
 When the work is finding, comparing, researching or planning, present the result as a page with blocks, not as plain paragraphs: read guide("pages") once, then write it into the notes of the todo or make a page and link it from your reply. When you come across something time-bound the owner will need today or soon (a booking, a delivery, a deadline), put it in the rail with rail_set: a notification of a few words with the one thing to do about it, never a document. When you need the owner to do, decide or answer something that they have not just asked you about, never raise it in the feed, where they may not see it: add a task with todo_add and point a rail module at it (rail_set with todo set to the task's id).
 
 Be decisive. If a request is clear enough to act on, act; ask a question only when a wrong guess would waste the owner's time. Do real work rather than describing what you could do. When you use the web, cite the specific places you relied on.`;
 
-function toolList(model: string, web: boolean): Anthropic.Beta.BetaToolUnion[] {
-  const tools: Anthropic.Beta.BetaToolUnion[] = TOOLS.filter((t) => t.name !== "briefing").map((t) => ({
+function toolList(agent: Agent, model: string, web: boolean): Anthropic.Beta.BetaToolUnion[] {
+  const tools: Anthropic.Beta.BetaToolUnion[] = toolsFor(agent).filter((t) => t.name !== "briefing").map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema,
@@ -160,8 +162,8 @@ function toolList(model: string, web: boolean): Anthropic.Beta.BetaToolUnion[] {
 }
 
 /** With eager input streaming the API no longer validates tool input, so check it before running. */
-function checkInput(name: string, input: unknown): string | null {
-  const tool = TOOLS.find((t) => t.name === name);
+function checkInput(agent: Agent, name: string, input: unknown): string | null {
+  const tool = toolsFor(agent).find((t) => t.name === name);
   if (!tool) return `Unknown tool ${name}.`;
   if (!input || typeof input !== "object" || Array.isArray(input)) return "Tool input was not a JSON object.";
   const missing = (tool.inputSchema.required ?? []).filter((k) => (input as Record<string, unknown>)[k] === undefined);
@@ -184,12 +186,13 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
       content: `You were woken because: ${reason}\n\nBriefing:\n${JSON.stringify(brief)}\n\nChanges waiting for you (your cursor has moved past these):\n${JSON.stringify(waiting)}`,
     },
   ];
-  const tools = toolList(cfg.model, cfg.web);
+  const tools = toolList(agent, cfg.model, cfg.web);
   // A declined request is re-run on a fallback model in the same call. Haiku has no server-side fallback.
   const fallback = cfg.model !== "claude-haiku-5-5";
   let jsonRetries = 0;
 
   const sharing = await sharingInstructions();
+  const rules = await houseRulesSection();
   while (out.steps < MAX_STEPS) {
     if (Date.now() > deadline) return { ...out, status: "limit", detail: "Ran out of time; it will pick up the rest on the next wake." };
     out.steps++;
@@ -197,7 +200,7 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
     const stream = client.beta.messages.stream({
       model: cfg.model,
       max_tokens: 32_000,
-      system: [{ type: "text", text: `You are @${agent.handle} (${agent.name}).\n\n${CORE}${sharing ? `\n\n${sharing}` : ""}\n\n${RUN_RULES}`, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: `You are @${agent.handle} (${agent.name}).\n\n${CORE}${rules ? `\n\n${rules}` : ""}${sharing ? `\n\n${sharing}` : ""}\n\n${RUN_RULES}`, cache_control: { type: "ephemeral" } }],
       output_config: { effort: cfg.effort },
       tools,
       messages,
@@ -234,14 +237,17 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
     messages.push({ role: "assistant", content: message.content });
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const call of calls) {
-      const problem = checkInput(call.name, call.input);
+      const problem = checkInput(agent, call.name, call.input);
       if (problem) {
         await refused(agent, call.name, call.input, ctx(call.name), problem);
         results.push({ type: "tool_result", tool_use_id: call.id, is_error: true, content: problem });
         continue;
       }
       try {
-        const value = await logged(agent, call.name, call.input, ctx(call.name), () => TOOLS.find((t) => t.name === call.name)!.run(agent, call.input as Record<string, unknown>));
+        const value = await logged(agent, call.name, call.input, ctx(call.name), async () => {
+          await guardCall(agent, call.name, call.input as Record<string, unknown>);
+          return TOOLS.find((t) => t.name === call.name)!.run(agent, call.input as Record<string, unknown>);
+        });
         results.push({ type: "tool_result", tool_use_id: call.id, content: JSON.stringify(value) });
       } catch (e) {
         if (!(e instanceof ApiError)) console.error("runtime tool error", call.name, e);

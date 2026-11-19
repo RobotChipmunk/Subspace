@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { q, q1 } from "../db";
+import { readRules, type AccessRules } from "./access";
 import { revokeAllFor } from "./oauth";
 import { agentById, bad, logEvent, newId, notFound, sha256, slugify, type Agent } from "./util";
 
@@ -17,21 +18,30 @@ export async function createAgent(actor: Agent, input: { name: string; handle?: 
   return (await agentById(id))!;
 }
 
-export async function updateAgent(actor: Agent, id: string, patch: { name?: string; bio?: string; illustrator?: boolean; archived?: boolean }) {
+export async function updateAgent(actor: Agent, id: string, patch: { name?: string; bio?: string; illustrator?: boolean; archived?: boolean; /** what it may see and do; null gives it everything again */ access?: AccessRules | null }) {
   const a = await agentById(id);
   if (!a || a.kind === "guest") throw notFound("No such agent");
   if (a.kind === "human" && patch.archived) throw bad("The owner cannot be removed.");
+  if (patch.access !== undefined) {
+    if (a.kind !== "agent") throw bad("Access is set on agents.");
+    const rules = readRules(patch.access);
+    await q("UPDATE agents SET access = $2::jsonb WHERE id = $1", [id, rules ? JSON.stringify(rules) : null]);
+    await logEvent({ actor: actor.id, type: "agent.access", entity_type: "agent", entity_id: id, summary: `@${a.handle}: access ${rules ? "changed" : "set to everything"}` });
+  }
   let roles = a.roles;
   if (patch.illustrator === true) {
     // One illustrator at a time keeps the visual style consistent.
     await q("UPDATE agents SET roles = array_remove(roles, 'illustrator')");
-    await q("UPDATE jobs SET assigned_to = $1 WHERE status = 'open'", [id]);
+    await q("UPDATE jobs SET assigned_to = $1 WHERE status = 'open' AND kind <> 'routine'", [id]);
     roles = [...roles.filter((r) => r !== "illustrator"), "illustrator"];
   } else if (patch.illustrator === false) roles = roles.filter((r) => r !== "illustrator");
   await q("UPDATE agents SET name = $2, bio = $3, roles = $4, archived = $5, token_hash = CASE WHEN $5 THEN NULL ELSE token_hash END WHERE id = $1", [
     id, patch.name?.trim() || a.name, patch.bio ?? a.bio, roles, patch.archived ?? a.archived,
   ]);
   if (patch.archived) {
+    // its routines are left for the owner to give to someone else, and any round it had not finished is closed
+    await q("UPDATE routines SET agent_id = NULL, next_at = NULL WHERE agent_id = $1", [id]);
+    await q("UPDATE jobs SET status = 'cancelled', done_at = now() WHERE kind = 'routine' AND status = 'open' AND assigned_to = $1", [id]);
     await q("UPDATE trackers SET agents = array_remove(agents, $1)", [id]);
     await revokeAllFor(id);
   }

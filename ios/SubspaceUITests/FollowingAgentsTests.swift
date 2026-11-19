@@ -46,6 +46,33 @@ final class FollowingAgentsTests: SubspaceTestCase {
         connect.tap()
         expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.address.'")).firstMatch, "the connector address")
         shot("40-agents-connect")
+
+        // Access is set on the agent: read only, then one part of the app off, each saved as it is changed.
+        let readOnly = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.access.readonly.'")).firstMatch
+        bringIntoView(readOnly)
+        expect(readOnly, "the Read only switch").tap()
+        expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.access.badge.' AND label CONTAINS 'Read only'")).firstMatch, "Read only beside the agent's name")
+        let journal = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agents.access.section.journal.'")).firstMatch
+        bringIntoView(journal)
+        XCTAssertTrue(expect(journal, "Journal among the parts of the app").isSelected, "Every part of the app starts allowed")
+        journal.tap()
+        let off = NSPredicate(format: "isSelected == false")
+        wait(for: [XCTNSPredicateExpectation(predicate: off, object: journal)], timeout: 8)
+        expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agents.access.context.'")).firstMatch, "the top-level sections of context")
+        shot("40-agents-access")
+        // Everything back on and able to write is no limit at all.
+        journal.tap()
+        wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: journal)], timeout: 8)
+        readOnly.tap()
+        waitToVanish(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.access.badge.'")).firstMatch, "the badge once the limits are off")
+
+        // Routines are given to an agent here: turned on, the routine is this agent's and says when it is next due.
+        let routine = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.routine.news-gaps.'")).firstMatch
+        bringIntoView(routine)
+        expect(routine, "the switch that gives this agent the news-gap check")
+        expect(text("News-gap check"), "the routine, by name")
+        shot("40-agents-routines")
+        bringIntoView(connect, down: false)
         connect.tap()
 
         // A direct message is sent and shows in the conversation

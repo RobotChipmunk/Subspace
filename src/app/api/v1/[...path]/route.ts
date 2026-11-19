@@ -1,14 +1,19 @@
 import { actorFromRequest, SESSION_COOKIE, signIn } from "@/lib/auth";
+import { restAllowed } from "@/lib/core/access";
 import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
 import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
+import { currentNotes } from "@/lib/core/current";
 import { search } from "@/lib/core/discover";
 import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
+import { addItem, createIdea, deleteIdea, getIdea, joinItems, listIdeas, moreOf, pruneItem, seenIdea, unjoin, updateIdea, updateItem } from "@/lib/core/ideas";
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { registerDevice, removeDevice } from "@/lib/core/push";
 import { activeModules, moduleActed, moduleLater, removeModule } from "@/lib/core/rail";
+import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
+import { decide, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
@@ -62,7 +67,8 @@ const routes: [string, RegExp, Handler][] = [
 
   ["GET", /^context$/, async ({ url }) => {
     const ref = url.searchParams.get("node");
-    if (!ref) return { node: null, trail: [], children: await children(null) };
+    // the top of the tree also says what is true for now (the notes under Current), soonest to end first
+    if (!ref) return { node: null, trail: [], children: await children(null), current: await currentNotes() };
     const node = await getNode(ref);
     return { node, trail: await breadcrumb(node), children: await children(node.id) };
   }],
@@ -98,7 +104,9 @@ const routes: [string, RegExp, Handler][] = [
   ["PATCH", /^trackers\/([^/]+)$/, ({ actor, body }, id) => updateTracker(actor, id, body)],
   ["DELETE", /^trackers\/([^/]+)$/, async ({ actor }, id) => (await archiveTracker(actor, id), { ok: true })],
 
-  ["GET", /^rail$/, async () => ({ modules: await activeModules() })],
+  // the app asks for the rail every half minute while it is open, which makes this a good place to
+  // notice a routine that has come due, whether or not the scheduler has called
+  ["GET", /^rail$/, async () => (tickSoon(), { modules: await activeModules() })],
   ["DELETE", /^rail\/([^/]+)$/, ({ actor }, id) => removeModule(actor, id)],
   // the owner tapped one of a module's buttons ({ label } says which): it has done its job and leaves the rail
   ["POST", /^rail\/([^/]+)\/action$/, ({ actor, body }, id) => moduleActed(actor, id, body?.label)],
@@ -109,6 +117,33 @@ const routes: [string, RegExp, Handler][] = [
   ["DELETE", /^devices\/([^/]+)$/, ({ actor }, token) => ownerOnly(actor, () => removeDevice(token))],
 
   ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean), limit: 20 })],
+
+  // Routines: duties that come round on a schedule. The owner gives each to one agent ({ agent: id }) or to nobody ({ agent: null }).
+  ["GET", /^routines$/, async () => ({ routines: await listRoutines() })],
+  ["PATCH", /^routines\/([^/]+)$/, ({ actor, body }, key) => ownerOnly(actor, () => assignRoutine(actor, key, body?.agent ?? null))],
+
+  // Ideas: a canvas per idea. The owner puts text and pictures on it, moves, keeps, prunes and joins pieces;
+  // agents add to it through their own tools.
+  ["GET", /^ideas$/, async () => ({ ideas: await listIdeas() })],
+  ["POST", /^ideas$/, ({ actor, body }) => createIdea(actor, body)],
+  ["GET", /^ideas\/([^/]+)$/, (_c, id) => getIdea(id)],
+  ["PATCH", /^ideas\/([^/]+)$/, ({ actor, body }, id) => updateIdea(actor, id, body)],
+  ["DELETE", /^ideas\/([^/]+)$/, ({ actor }, id) => deleteIdea(actor, id)],
+  // the owner has looked: nothing on the canvas is new any more
+  ["POST", /^ideas\/([^/]+)\/seen$/, (_c, id) => seenIdea(id)],
+  ["POST", /^ideas\/([^/]+)\/items$/, ({ actor, body }, id) => addItem(actor, id, body)],
+  ["PATCH", /^idea-items\/([^/]+)$/, ({ actor, body }, id) => updateItem(actor, id, body)],
+  // pruned (not this way), and brought back
+  ["DELETE", /^idea-items\/([^/]+)$/, ({ actor }, id) => pruneItem(actor, id)],
+  ["POST", /^idea-items\/([^/]+)\/restore$/, ({ actor }, id) => pruneItem(actor, id, true)],
+  // "more of this": the agents that grow ideas are asked to branch from this piece
+  ["POST", /^idea-items\/([^/]+)\/more$/, ({ actor }, id) => moreOf(actor, id)],
+  ["POST", /^ideas\/([^/]+)\/joins$/, ({ actor, body }, id) => joinItems(actor, id, body?.a, body?.b)],
+  ["DELETE", /^idea-joins\/([^/]+)$/, ({ actor }, id) => unjoin(actor, id)],
+
+  // House rules: changes agents have proposed to the notes under /context/system, waiting for the owner. { approve: true | false } answers one.
+  ["GET", /^rules\/proposals$/, ({ actor }) => ownerOnly(actor, async () => ({ proposals: await pendingProposals() }))],
+  ["POST", /^rules\/proposals\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => decide(actor, id, body?.approve === true))],
 
   ["POST", /^agents$/, ({ actor, body }) => ownerOnly(actor, () => createAgent(actor, body))],
   ["PATCH", /^agents\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => updateAgent(actor, id, body))],
@@ -158,6 +193,8 @@ async function handle(req: Request, ctx: { params: Promise<{ path: string[] }> }
     }
     const actor = await actorFromRequest(req);
     if (!actor) throw new ApiError(401, "Sign in first.");
+    // this API knows nothing of what a limited agent may see, so such an agent is kept to its MCP address
+    restAllowed(actor);
     for (const [method, re, fn] of routes) {
       if (method !== req.method) continue;
       const m = path.match(re);

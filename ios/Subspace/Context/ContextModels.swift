@@ -15,6 +15,8 @@ struct ContextTree: Codable {
     var node: ContextNode?
     var trail: [ContextCrumb]?
     var children: [ContextNode]?
+    /// At the top of the tree: what is true for now, soonest to end first.
+    var current: [ContextCurrentNote]?
 }
 
 /// GET `pages`.

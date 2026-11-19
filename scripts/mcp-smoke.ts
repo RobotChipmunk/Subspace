@@ -1,6 +1,12 @@
 /** End-to-end check of the MCP surface against the database in DATABASE_URL. */
-import { createAgent, issueToken } from "../src/lib/core/agents";
+import { createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
 import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
+import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
+import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
+import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
+import { embedPending, meaningOn } from "../src/lib/core/meaning";
+import { createIdea, deleteIdea, getIdea, moreOf, pruneItem, updateIdea, updateItem } from "../src/lib/core/ideas";
+import { archiveNode, createNode, getNode } from "../src/lib/core/context";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
 import { handleMcp } from "../src/lib/mcp/server";
@@ -140,6 +146,17 @@ async function main() {
   await call(s, "search", { query: "robot", types: ["context"] });
   await call(s, "read", { ids: [p.id, t.id, c.id, tr.slug] });
   await call(s, "todo_list", {});
+  {
+    // order: each task says where it stands on its day; an agent can put one first, and the rest keep their order
+    const before: { id: string; order: number }[] = (await call(s, "todo_list", { view: "today" })).todos;
+    if (before.find((x) => x.id === t.id)?.order !== before.length) throw new Error("a task added without an order is not last on its day: " + JSON.stringify(before));
+    await call(s, "todo_update", { id: t.id, order: 1 });
+    const after: { id: string; order: number }[] = (await call(s, "todo_list", { view: "today" })).todos;
+    if (after[0]?.id !== t.id || after[0].order !== 1) throw new Error("todo_update(order: 1) did not put the task first: " + JSON.stringify(after.slice(0, 3)));
+    const rest = (l: { id: string }[]) => l.map((x) => x.id).filter((x) => x !== t.id).join();
+    if (rest(after) !== rest(before)) throw new Error("placing one task changed the order of the others");
+    if (after.map((x) => x.order).join() !== after.map((_, i) => i + 1).join()) throw new Error("orders on one day are not 1, 2, 3: " + JSON.stringify(after.map((x) => x.order)));
+  }
   // a follow-up: a tagged task, and a rail module that points at it
   const followUp = await call(s, "todo_add", { title: "Decide on the smoke test " + tag, view: "week", tags: ["smoke"], notes: "Two options, pick one." });
   const onSubject = await call(s, "todo_list", { view: "all", tag: "smoke" });
@@ -164,6 +181,25 @@ async function main() {
   }
   await call(s, "todo_update", { id: followUp.id, done: true });
   await call(s, "rail_remove", { key: pointer.key });
+  {
+    // A button may send an action back to the module's author instead of opening a link. The owner's
+    // tap clears the module, answers at once with who it went to, and reaches the author in changes().
+    const both = await call(s, "rail_set", { key: railKey + "-s", title: "Smoke test: follow it?", show_until: until, actions: [{ label: "Follow it", url: "https://example.com/", send: "approve" }] });
+    if (!both.ERROR || !/both url and send/.test(both.ERROR)) throw new Error("rail_set accepted a button with a link and a send: " + JSON.stringify(both));
+    const neither = await call(s, "rail_set", { key: railKey + "-s", title: "Smoke test: follow it?", show_until: until, actions: [{ label: "Follow it" }] });
+    if (!neither.ERROR || !/needs url/.test(neither.ERROR)) throw new Error("rail_set accepted a button that does nothing: " + JSON.stringify(neither));
+    const ask = await call(s, "rail_set", { key: railKey + "-s", icon: "question", title: "Smoke test: follow it?", show_until: until, actions: [{ label: "Follow it", send: "approve" }, { label: "Not this", send: "decline" }] });
+    await call(s, "changes");
+    const tap = await moduleActed(owner, ask.id, "Follow it");
+    if (!tap.cleared || tap.sent?.to?.handle !== s.handle || tap.sent.label !== "Follow it") throw new Error("a button that sends did not answer with who it went to: " + JSON.stringify(tap));
+    const got = (await call(s, "changes")).for_you.find((i: any) => i.id === ask.id && i.type === "rail.cleared");
+    if (got?.sent !== "approve" || got.action !== "Follow it" || got.by_owner !== "action") throw new Error("the author was not sent the action: " + JSON.stringify(got));
+    const again = await moduleActed(owner, ask.id, "Not this");
+    if (again.cleared || again.sent?.label !== "Follow it") throw new Error("a second answer was taken after the first: " + JSON.stringify(again));
+    const listed = (await call(s, "explore", { path: "/rail" })).items.find((i: any) => i.id === ask.id);
+    if (listed?.sent !== "approve" || listed.cleared_by_owner !== "action") throw new Error("explore(/rail) does not show what was sent: " + JSON.stringify(listed));
+    await call(s, "rail_remove", { key: railKey + "-s" });
+  }
   // The owner acts on a module and it is gone: a tap on a button, then "Later", then closing it. Each time its author hears how.
   const parcel = { key: railKey + "-p", icon: "package", label: "Arrives today", title: "Smoke test parcel " + tag, subtitle: "Two boxes, signature needed.", blocks: [fact], actions: [{ label: "Track parcel", url: "https://example.com/track" }], show_until: until };
   const shown = await call(s, "rail_set", parcel);
@@ -218,6 +254,213 @@ async function main() {
   const jread = await call(s, "read", { ids: [je.id] });
   if (jread.items?.[0]?.type !== "journal" && jread[0]?.type !== "journal") console.log("note: read() shape for a journal entry:", JSON.stringify(jread).slice(0, 200));
   await call(s, "context_archive", { id: je.id });
+
+  {
+    // Access: an agent the owner has limited sees only its part, as if the rest did not exist, and a read-only one has no tools that change things.
+    const made = await createAgent(owner, { name: "Viewer " + tag, handle: "viewer" + tag, bio: "Looks, from elsewhere." });
+    await updateAgent(owner, made.id, { access: { read_only: true, sections: ["todos"], context: ["work"] } });
+    const viewer = (await agentByToken(await issueToken(made.id)))!;
+    const offered: string[] = ((await handleMcp(viewer, { jsonrpc: "2.0", id: ++n, method: "tools/list" })) as any).json.result.tools.map((x: any) => x.name);
+    for (const name of ["post", "reply", "todo_add", "todo_update", "context_write", "page_write", "rail_set", "journal_write", "link_save"]) if (offered.includes(name)) throw new Error(`a read-only agent was offered ${name}`);
+    for (const name of ["briefing", "explore", "search", "read", "todo_list", "changes"]) if (!offered.includes(name)) throw new Error(`a read-only agent that sees todos was not offered ${name}`);
+    const refusedWrite: any = await handleMcp(viewer, { jsonrpc: "2.0", id: ++n, method: "tools/call", params: { name: "todo_add", arguments: { title: "Should not exist " + tag } } });
+    if (!refusedWrite.json.error) throw new Error("a read-only agent could call todo_add: " + JSON.stringify(refusedWrite.json));
+    const vBrief = await call(viewer, "briefing");
+    if (!/read-only/.test(vBrief.your_access ?? "") || vBrief.rail || vBrief.recent_pages) throw new Error("the briefing of a limited agent does not say so, or shows what it may not see: " + JSON.stringify(vBrief).slice(0, 400));
+    const vMap: string[] = vBrief.map.map((x: any) => x.path);
+    if (vMap.join() !== "/todos,/context,/agents,/routines") throw new Error("a limited agent's map shows " + vMap.join());
+    const vCtx: string[] = (await call(viewer, "explore", { path: "/context" })).children.map((x: any) => x.path);
+    if (vCtx.join() !== "/context/work") throw new Error("a limited agent sees these sections of context: " + vCtx.join());
+    for (const path of ["/context/home", "/feed", "/feed/recent", "/journal", "/pages", "/links", "/rail", "/following", "/log"]) {
+      const r = await call(viewer, "explore", { path });
+      if (!r.ERROR) throw new Error(`a limited agent could explore ${path}`);
+    }
+    const homeNote = (await call(claude, "explore", { path: "/context/home/weekly-rhythm" })).items[0].id;
+    const vRead = await call(viewer, "read", { ids: [homeNote, p.id, je.id, t.id, c.id] });
+    const byId = (id: string) => vRead.find((x: any) => x.id === id);
+    for (const id of [homeNote, p.id, je.id]) if (byId(id)?.error !== "Nothing by that id.") throw new Error("a limited agent read something outside its access: " + JSON.stringify(byId(id)).slice(0, 200));
+    if (byId(t.id)?.type !== "todo" || byId(c.id)?.type !== "context") throw new Error("a limited agent could not read what it may see: " + JSON.stringify(vRead).slice(0, 300));
+    const vHome = await call(viewer, "search", { query: "compost recycling" });
+    if (vHome.results.some((x: any) => x.type !== "todo" && !(x.path ?? "").startsWith("/context/work"))) throw new Error("search found something in a hidden part: " + JSON.stringify(vHome.results));
+    if (!(await call(claude, "search", { query: "compost recycling" })).results.some((x: any) => (x.path ?? "").startsWith("/context/home"))) throw new Error("the note the access test looks for is not in the seed any more");
+    const vFound = await call(viewer, "search", { query: "robotics" });
+    if (!vFound.results.length || vFound.results.some((x: any) => x.type === "post" || (x.path && !x.path.startsWith("/context/work")))) throw new Error("search for a limited agent returned the wrong things: " + JSON.stringify(vFound.results).slice(0, 400));
+    // it hears only of changes to its part: a post is not news to it, a task is
+    await call(viewer, "changes");
+    await call(s, "post", { body: "Nothing a viewer should hear of " + tag + ".", art: { prompt: "a closed door at the end of a quiet corridor" } });
+    const vTask = await call(s, "todo_add", { title: "Something a viewer may see " + tag, view: "backlog" });
+    const vNews = await call(viewer, "changes");
+    const heard = [...vNews.for_you, ...vNews.other];
+    if (heard.some((x: any) => String(x.type).startsWith("post.")) || !heard.some((x: any) => x.id === vTask.id)) throw new Error("changes() for a limited agent: " + JSON.stringify(heard).slice(0, 400));
+    // limits lifted: it is an ordinary agent again
+    await updateAgent(owner, made.id, { access: null });
+    const freed = (await agentByToken(await issueToken(made.id)))!;
+    if (!(await call(freed, "explore", { path: "/feed" })).children) throw new Error("an agent whose limits were lifted still cannot see the feed");
+    await updateAgent(owner, made.id, { archived: true });
+  }
+
+  {
+    // Ideas: the owner seeds a canvas; agents branch from what is there, a line at a time, within a daily budget; the owner's keeping and pruning steer what comes next.
+    const idea = await createIdea(owner, { text: "A smoke test idea " + tag });
+    const root = (await getIdea(idea.id)).items[0];
+    if (!(await call(s, "idea_list")).ideas.some((x: any) => x.id === idea.id && x.state === "growing")) throw new Error("idea_list does not show a new idea");
+    const read = await call(s, "idea_read", { id: idea.id });
+    if (read.pieces?.[0]?.by !== "the owner" || read.may_add_today?.yours !== 3) throw new Error("idea_read: " + JSON.stringify(read).slice(0, 300));
+    const refusals: [string, Record<string, unknown>, RegExp][] = [
+      ["a piece that branches from nothing", { kind: "riff", text: "What if it were smaller?" }, /from/],
+      ["a report", { from: root.id, kind: "riff", text: "x".repeat(300) }, /280/],
+      ["something found with no source", { from: root.id, kind: "found", text: "It exists." }, /source/],
+      ["an unknown kind", { from: root.id, kind: "essay", text: "Long." }, /kind is one of/],
+    ];
+    for (const [what, args, why] of refusals) {
+      const r = await call(s, "idea_grow", { idea: idea.id, ...args });
+      if (!r.ERROR || !why.test(r.ERROR)) throw new Error(`idea_grow accepted ${what}, or did not say why not: ${JSON.stringify(r)}`);
+    }
+    const first = await call(s, "idea_grow", { idea: idea.id, from: root.id, kind: "riff", text: "What if it were half the size?" });
+    if (!first.id || first.may_add_today?.yours !== 2) throw new Error("idea_grow: " + JSON.stringify(first));
+    const after = await getIdea(idea.id);
+    const grown = after.items.find((x) => x.id === first.id)!;
+    if (Math.hypot(grown.x - root.x, grown.y - root.y) < 150 || grown.seen) throw new Error("a grown piece should sit clear of what it grew from, and be new to the owner: " + JSON.stringify(grown));
+    if (!after.links.some((l) => l.a === root.id && l.b === first.id)) throw new Error("a grown piece is not joined to what it grew from");
+    const second = await call(s, "idea_grow", { idea: idea.id, from: first.id, kind: "question", text: "Who is it for?" });
+    await call(s, "idea_grow", { idea: idea.id, from: root.id, kind: "counter", text: "It may be too small to be useful." });
+    const over = await call(s, "idea_grow", { idea: idea.id, from: root.id, kind: "riff", text: "And one more." });
+    if (!over.ERROR || !/your 3 for today/.test(over.ERROR)) throw new Error("an agent could add more than its share in a day: " + JSON.stringify(over));
+    if (!(await call(s, "idea_connect", { idea: idea.id, a: root.id, b: second.id })).ERROR) throw new Error("a join was accepted without saying why");
+    const joined = await call(s, "idea_connect", { idea: idea.id, a: root.id, b: second.id, label: "the real question" });
+    if (joined.label !== "the real question") throw new Error("idea_connect: " + JSON.stringify(joined));
+    // the owner keeps one and prunes another: the next read says so
+    await updateItem(owner, first.id, { kept: true });
+    await pruneItem(owner, second.id);
+    const steered = await call(claude, "idea_read", { id: idea.id });
+    if (!steered.steering.kept.includes("What if it were half the size?") || !steered.steering.pruned.includes("Who is it for?") || steered.pieces.some((x: any) => x.id === second.id)) throw new Error("idea_read does not carry the owner's steering: " + JSON.stringify(steered.steering));
+    // press and hold: the agent that wrote the piece is asked for more
+    await call(s, "changes");
+    const asked = await moreOf(owner, first.id);
+    if (!asked.to.includes(s.name)) throw new Error("asking for more did not go to the piece's agent: " + JSON.stringify(asked));
+    if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "idea.more" && i.id === idea.id)) throw new Error("the agent was not told the owner wants more");
+    await updateIdea(owner, idea.id, { state: "resting" });
+    const resting = await call(claude, "idea_grow", { idea: idea.id, from: root.id, kind: "riff", text: "While it rests." });
+    if (!resting.ERROR || !/resting/.test(resting.ERROR)) throw new Error("a resting idea was grown: " + JSON.stringify(resting));
+    await deleteIdea(owner, idea.id);
+    if ((await call(s, "idea_list")).ideas.some((x: any) => x.id === idea.id)) throw new Error("a removed idea is still listed");
+  }
+
+  {
+    // Reading well: a list that is not the whole says so, the week's feed comes in one call, gather() brings what bears on a piece of work, and a note whose body moved is asked about its summary.
+    const week = await call(s, "explore", { path: "/feed/week" });
+    if (!week.items?.length || week.count !== week.items.length || !week.items[0].day || !week.items[0].line) throw new Error("explore(/feed/week) is not the week, a line a post: " + JSON.stringify(week).slice(0, 300));
+    const firstPage = await call(s, "explore", { path: "/log" });
+    if (firstPage.next_cursor && !/^\d+ of \d+/.test(firstPage.showing ?? "")) throw new Error("a first page does not say how much of the whole it is: " + JSON.stringify({ showing: firstPage.showing, count: firstPage.count }));
+    const place = await call(claude, "context_write", { parent: "home", title: "Cornwall " + tag, summary: "Holiday idea.", body: "Summer holiday by the sea." });
+    const grown = await call(claude, "context_write", { id: place.id, body: "Summer holiday by the sea.\n\n" + "- A cottage near St Ives, a week in August, walking the coast path each morning. ".repeat(6) });
+    if (!/summary did not/.test(grown.check_summary ?? "")) throw new Error("a note whose body grew a great deal was not asked about its summary: " + JSON.stringify(grown));
+    await call(claude, "context_write", { id: place.id, body: "Summer holiday by the sea.", summary: "Holiday idea." });
+    const forTask = await call(s, "gather", { about: t.id });
+    if (forTask.about?.task !== t.id || !forTask.next) throw new Error("gather(task id) did not take the task as its subject: " + JSON.stringify(forTask).slice(0, 300));
+    const forWork = await call(s, "gather", { about: "the summer holiday in Cornwall" });
+    if (!forWork.context?.some((x: any) => x.id === place.id) || !forWork.current?.length) throw new Error("gather(sentence) did not bring the note that bears on it, or what is current: " + JSON.stringify(forWork).slice(0, 500));
+    if (!(await call(s, "usage", { days: 7 })).context_to_tidy) throw new Error("usage() does not list notes to tidy");
+    // By meaning, when that is on (in this check a stand-in embedder is used, which knows that a vacation is a holiday).
+    const asked = await call(s, "search", { query: "vacation", types: ["context"] });
+    if (meaningOn()) {
+      if ((await embedPending(40, 60)) < 1) throw new Error("nothing was given an embedding");
+      const meant = await call(s, "search", { query: "vacation", types: ["context"] });
+      const hit = meant.results.find((x: any) => x.id === place.id);
+      if (meant.mode !== "words and meaning" || hit?.match !== "meaning") throw new Error("search by meaning did not find the holiday note for \"vacation\": " + JSON.stringify(meant).slice(0, 500));
+      const worded = (await call(s, "search", { query: "Cornwall " + tag })).results.find((x: any) => x.id === place.id);
+      if (!worded || worded.match) throw new Error("a match by its words was marked as a match by meaning: " + JSON.stringify(worded));
+      if (!(await call(s, "gather", { about: "booking a vacation" })).context?.some((x: any) => x.id === place.id)) throw new Error("gather did not use meaning");
+    } else if (asked.mode !== "words only" || asked.results.some((x: any) => x.id === place.id)) throw new Error("with meaning off, search should be by words only: " + JSON.stringify(asked).slice(0, 300));
+    await call(claude, "context_archive", { id: place.id });
+  }
+
+  {
+    // Current: a note under /context/current says what is true for now and until when. It is in every briefing while it holds; past its day it drops out and its writer is told once.
+    await ensureCurrent();
+    const noDay = await call(s, "context_write", { parent: "/context/current", title: "Smoke focus " + tag, summary: "Testing the current tier." });
+    if (!noDay.ERROR || !/until/.test(noDay.ERROR)) throw new Error("a current note was accepted without an end day: " + JSON.stringify(noDay));
+    const soon = new Date(Date.now() + 5 * 86400_000).toISOString().slice(0, 10);
+    const focus = await call(s, "context_write", { parent: "/context/current", title: "Smoke focus " + tag, summary: "Testing the current tier.", body: "- From the smoke test.", until: soon });
+    if (focus.until !== soon) throw new Error("context_write did not keep the end day: " + JSON.stringify(focus));
+    const told = (await call(claude, "briefing")).current?.find((x: any) => x.path === focus.path);
+    if (told?.until !== soon || told.set_by !== "@" + s.handle) throw new Error("the briefing does not list what is current: " + JSON.stringify(told));
+    if ((await call(claude, "read", { ids: [focus.id] }))[0]?.until !== soon) throw new Error("read() does not give a note's end day");
+    await call(s, "changes");
+    await q("UPDATE context_nodes SET until = current_date - 2 WHERE id = $1", [focus.id]);
+    if ((await tellLapsed()) < 1 || (await tellLapsed()) !== 0) throw new Error("a note past its day should be told of once");
+    if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "context.lapsed" && i.id === focus.id)) throw new Error("the writer was not told its note passed its day");
+    const after = await call(s, "briefing");
+    if (after.current?.some((x: any) => x.path === focus.path) || !after.lapsed_notes_of_yours?.some((x: any) => x.path === focus.path)) throw new Error("a lapsed note should leave current and be named to its writer: " + JSON.stringify(after).slice(0, 300));
+    // renewed, it is current again
+    await call(s, "context_write", { id: focus.id, until: soon });
+    if (!(await call(claude, "briefing")).current?.some((x: any) => x.path === focus.path)) throw new Error("a renewed note did not come back into current");
+    await call(s, "context_archive", { id: focus.id });
+  }
+
+  {
+    // House rules: an agent cannot change a note under /context/system by itself. Its change waits for the owner, who answers from the rail, and an approved change is applied exactly as it was written.
+    const sys = await ensureSystem();
+    const rule = await createNode(owner, { parent: sys.id, title: "Smoke rule " + tag, summary: "A rule for the smoke test.", body: "- First line." });
+    const noWhy = await call(s, "context_write", { id: rule.id, body_append: "- Second line." });
+    if (!noWhy.ERROR || !/why/.test(noWhy.ERROR)) throw new Error("a house rule could be changed without saying why: " + JSON.stringify(noWhy));
+    const change = { id: rule.id, body_append: "- Second line.", why: "The smoke test needs a second line." };
+    const asked = await call(s, "context_write", change);
+    if (!asked.proposed || !asked.id) throw new Error("a change to a house rule was not held as a proposal: " + JSON.stringify(asked));
+    if ((await getNode(rule.id)).body.includes("Second line")) throw new Error("a house rule changed before the owner approved it");
+    if ((await call(s, "context_write", change)).id !== asked.id) throw new Error("the same proposal was made twice");
+    const inside = await call(s, "context_write", { parent: "/context/system", title: "Smoke rule two " + tag, body: "- Another." });
+    if (!inside.ERROR || !/why/.test(inside.ERROR)) throw new Error("an agent could add a house rule without approval: " + JSON.stringify(inside));
+    const waitingRule = (await pendingProposals()).find((x) => x.id === asked.id);
+    if (!waitingRule || waitingRule.excerpt !== "Adds: Second line." || waitingRule.by !== s.handle) throw new Error("the proposal is not waiting as it was made: " + JSON.stringify(waitingRule));
+    // every agent is given the house rules without asking
+    const again: any = await handleMcp(s, { jsonrpc: "2.0", id: ++n, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+    if (!again.json.result.instructions.includes("HOUSE RULES") || !again.json.result.instructions.includes("Smoke rule " + tag)) throw new Error("the connection instructions do not carry the house rules");
+    if (!(await call(s, "briefing")).house_rules?.includes("First line")) throw new Error("the briefing does not carry the house rules");
+    await call(s, "changes");
+    if (waitingRule.module_id) {
+      // the owner taps Approve on the module: the server applies it, and the agent hears
+      const yes = await moduleActed(owner, waitingRule.module_id, "Approve");
+      if (!yes.cleared || yes.sent?.label !== "Approve") throw new Error("approving from the rail: " + JSON.stringify(yes));
+      if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "rail.cleared" && i.sent === "approve")) throw new Error("the agent did not hear that its proposal was approved");
+    } else await decide(owner, asked.id, true);
+    const applied = await getNode(rule.id);
+    if (!applied.body.endsWith("- Second line.") || applied.updated_by !== s.id) throw new Error("an approved proposal was not applied as written: " + JSON.stringify({ body: applied.body, by: applied.updated_by }));
+    // declined: nothing changes, and it stops waiting
+    const removal = await call(s, "context_archive", { id: rule.id, why: "The smoke test is over." });
+    if (!removal.proposed) throw new Error("removing a house rule was not held as a proposal: " + JSON.stringify(removal));
+    await decide(owner, removal.id, false);
+    await getNode(rule.id);
+    if ((await pendingProposals()).some((x) => x.id === removal.id)) throw new Error("a declined proposal is still waiting");
+    await archiveNode(owner, rule.id);
+  }
+
+  {
+    // Routines: given to an agent, a routine comes due at once, reaches the agent as a job with its brief, and is finished with routine_done.
+    if ((await tick()).due.length) throw new Error("a routine came due with nobody assigned to it");
+    await call(s, "changes");
+    await assignRoutine(owner, "news-gaps", s.id);
+    const first = await tick();
+    if (first.due.join() !== "news-gaps") throw new Error("the assigned routine did not come due: " + JSON.stringify(first));
+    if ((await tick()).due.length) throw new Error("a routine was handed over twice");
+    const told = await call(s, "changes");
+    const duty = told.open_jobs?.find((j: any) => j.kind === "routine" && j.routine === "news-gaps");
+    if (!duty?.brief || !told.for_you.some((i: any) => i.type === "job.created")) throw new Error("the agent was not handed the routine: " + JSON.stringify(told).slice(0, 400));
+    const waitingJobs = await call(s, "jobs");
+    if (!waitingJobs.routines || !waitingJobs.jobs.some((j: any) => j.job_id === duty.job_id)) throw new Error("jobs() does not list the routine");
+    if (!(await call(claude, "routine_done", { job_id: duty.job_id, note: "Not mine." })).ERROR) throw new Error("another agent could finish a routine that is not its own");
+    const finished = await call(s, "routine_done", { job_id: duty.job_id, note: "No gaps this week." });
+    if (!finished.ok || !finished.next_due) throw new Error("routine_done: " + JSON.stringify(finished));
+    const kept = (await listRoutines()).find((r) => r.key === "news-gaps")!;
+    if (kept.last_note !== "No gaps this week." || !kept.last_done_at || new Date(kept.next_at!).getTime() - Date.now() < 6 * 86400_000) throw new Error("the routine did not keep its last round or its next day: " + JSON.stringify(kept));
+    const seenAs = await call(claude, "explore", { path: "/routines" });
+    if (!seenAs.children.some((x: any) => x.path === "/routines/news-gaps" && x.about.includes("@" + s.handle))) throw new Error("explore(/routines) does not say who does the routine");
+    if (!(await call(s, "briefing")).your_routines?.length) throw new Error("the briefing does not name the agent's routines");
+    await assignRoutine(owner, "news-gaps", null);
+    // the review's numbers
+    const week = await call(s, "usage", { days: 7 });
+    if (!week.agents?.some((x: any) => x.agent === "@" + s.handle && x.calls > 10) || !week.tools?.length || !week.rail?.length || week.tasks?.added_by_agents === undefined) throw new Error("usage() is missing its numbers: " + JSON.stringify(week).slice(0, 400));
+  }
 
   // What agents did is on record: every call above, with what it asked for and what it was shown.
   await call(s, "search", { query: "zzzqqq" + tag + "xk" });

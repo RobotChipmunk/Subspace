@@ -53,6 +53,9 @@ dismissed rail modules between sizes. It takes more than ten minutes: start it i
 read the screenshots in `<outDir>` as they appear, and wait for the summary line. When you change
 behaviour, change the matching assertions in it in the same commit.
 
+The `Web` workflow runs the same check, with `typecheck` and `mcp-smoke`, on every push that
+touches `src/` or `scripts/`; its screenshots are the `ui-check` artifact.
+
 ## The iOS app
 
 `ios/` is the native SwiftUI app for iPhone and iPad (see "The iOS app" in `README.md`). It is the
@@ -165,3 +168,35 @@ being true. Read this list before starting work.
   actual subject and what happened to it. Keep `guide("illustration")`, "The picture brief" in
   `guide("posting")` and the seeded scenes in `scripts/seed.ts` literal; do not steer them back
   towards mood or metaphor.
+- On the owner's Mac (Nov 2026) `npm ci` fails: npm there is pointed at a company package feed
+  that lacks some packages (`motion-dom`), and there is no Postgres or Docker. Do not switch
+  registry to get round it, and do not print `~/.npmrc`: ask the owner. Only the iOS app can be
+  compiled there (`xcodebuild build-for-testing`). For the server, push the branch: the `Web`
+  workflow (`.github/workflows/web.yml`) runs `typecheck`, `mcp-smoke` and `ui-check`, each on its
+  own seeded database, and names its failures as annotations on the run.
+- Without `gh` or a token, GitHub's API answers 60 requests an hour and then refuses for the rest
+  of it; polling several branches used that up in minutes. Read a run's public page instead
+  (`https://github.com/<owner>/<repo>/actions/runs/<id>`): its status and its annotations are in
+  the HTML, and the `Web` workflow writes its failures as annotations for that reason.
+- `ui-check` runs in an en-US browser in CI, so a day prints as "Nov 25", not "25 Nov". An
+  assertion on a date must accept either order.
+- Two checks have each failed once and passed unchanged on the next run (Nov 2026): `ui-check`
+  with "journal: a deleted entry is still listed" on one screen size, and `mcp-smoke` on one
+  branch. Before chasing a single failure in either, look at whether the next run repeats it; the
+  smoke step now names the error that stopped it.
+- iOS CI: a failed run used to say only "exit code 65", and the log needs a signed-in session.
+  `ios/scripts/ci-test.sh` now writes each failed expectation as an annotation on the run, so it
+  can be read on the run's public page. Main's own iPhone job failed this way before (Nov 2026),
+  so do not assume a red iPhone job is your change until the annotation names the test.
+- SwiftUI: a `Button` whose label is a symbol inside a `.frame` answers taps only on the symbol
+  itself unless the label has a `.contentShape`. The idea canvas's round controls looked 40 points
+  wide and were tappable on a few; the UI test's tap landed on the canvas behind (it failed on
+  iPad and happened to pass on iPhone). Give every such label `.contentShape(Circle())` or
+  `Rectangle()`, as the app bar's buttons have.
+- iOS UI tests: "Done" also names a key on the keyboard, and the system web viewer's own button is
+  "Close" on newer simulators. Recognise the viewer by its bar (`TopBrowserBar`), not by "Done".
+- iOS CI: to chase one failing test, commit `ios/only-testing` with one test a line; the job then
+  runs only those (a few minutes instead of forty) and says what was on screen at each failure.
+  Remove the file before the work is finished.
+- When a command chain ends in `git commit && git push`, make the build's own exit status gate it
+  (`xcodebuild ... | grep` returns grep's status, so a failed build was committed and pushed once).

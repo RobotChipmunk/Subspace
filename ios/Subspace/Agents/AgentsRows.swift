@@ -265,20 +265,21 @@ struct AgentsGrantRow: View {
     }
 }
 
-/// A small accent pill beside a name: "Realtime", "Illustrator".
+/// A small pill beside a name: "Realtime", "Illustrator" in accent; "Read only" quietly.
 struct AgentsBadge: View {
     var icon: String
     var text: String
+    var quiet: Bool = false
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon).font(.system(size: 10, weight: .semibold))
             Text(text).font(.system(size: 11.5, weight: .medium))
         }
-        .foregroundStyle(Theme.accent)
+        .foregroundStyle(quiet ? Theme.ink2 : Theme.accent)
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
-        .background(Theme.accentSoft, in: Capsule())
+        .background(quiet ? Theme.fill : Theme.accentSoft, in: Capsule())
     }
 }
 
@@ -394,6 +395,10 @@ struct AgentsAgentRow: View {
             }
             if live { AgentsBadge(icon: "bolt.fill", text: "Realtime") }
             if illustrator { AgentsBadge(icon: "wand.and.stars", text: "Illustrator") }
+            if let access = agent.access {
+                AgentsBadge(icon: "eye", text: access.read_only == true ? "Read only" : "Limited", quiet: true)
+                    .accessibilityIdentifier("agents.access.badge.\(agent.id)")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -477,6 +482,8 @@ struct AgentsAgentRow: View {
                 .fixedSize(horizontal: false, vertical: true)
             AgentsCopyField(label: "Connector address", value: origin + "/api/mcp/" + agent.handle, identifier: "agents.address.\(agent.id)")
             AgentsConnections(id: agent.id, empty: "No app has signed in yet.")
+            AgentsAccess(agent: agent)
+            AgentsRoutines(agent: agent)
             scriptsBox(origin: origin)
             footer
         }

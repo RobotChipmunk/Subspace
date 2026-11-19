@@ -871,3 +871,19 @@ input[list]::-webkit-calendar-picker-indicator {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Ideas: words set down on a canvas are in the rounded face, which reads as written rather than
+   typeset. A piece that is new since the owner last looked carries a dot that breathes. */
+.idea-hand {
+  font-family: ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN", "Nunito", system-ui, sans-serif;
+}
+.idea-new {
+  animation: idea-new 2.4s ease-in-out infinite;
+}
+@keyframes idea-new {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .idea-new { animation: none; }
+}

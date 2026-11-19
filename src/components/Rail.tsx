@@ -1,6 +1,6 @@
 "use client";
 import {
-  ArrowUpRight, Banknote, BedDouble, Bell, CalendarDays, Car, ChevronDown, CircleCheck, CircleHelp, Clock, CloudSun, CreditCard, FileText, Gift, GraduationCap,
+  ArrowUpRight, Banknote, BedDouble, Bell, CalendarDays, Car, Check, ChevronDown, CircleCheck, CircleHelp, Clock, CloudSun, CreditCard, FileText, Gift, GraduationCap,
   HeartPulse, House, KeyRound, Mail, MapPin, Package, Phone, Plane, ShoppingCart, Ticket, TrainFront, TriangleAlert, User, Utensils, Wrench, X, type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -33,7 +33,11 @@ export function useRail() {
   const { data, mutate } = useSWR<{ modules: RailModule[] }>("rail", fetcher, { refreshInterval: 30_000 });
   const { mutate: globalMutate } = useSWRConfig();
   const [sheet, setSheet] = useState(false);
-  const modules = data?.modules ?? [];
+  const server = data?.modules ?? [];
+  // A module whose button sends an action to its agent stays in place for a moment after the
+  // server has cleared it, so the owner sees that it was sent.
+  const [held, setHeld] = useState<{ m: RailModule; at: number } | null>(null);
+  const modules = held && !server.some((x) => x.id === held.m.id) ? [...server.slice(0, held.at), held.m, ...server.slice(held.at)] : server;
   const wide = useWide();
   /** Takes a module off the screen at once, tells the server why, then lets the rail catch up. */
   const clear = async (id: string, tell: () => Promise<unknown>) => {
@@ -56,6 +60,23 @@ export function useRail() {
     dismiss: (id: string) => clear(id, () => api(`rail/${id}`, { method: "DELETE" })),
     /** One of a module's buttons was tapped. That is what it was there for, so it leaves the rail. */
     acted: (m: RailModule, label: string) => clear(m.id, () => api(`rail/${m.id}/action`, { method: "POST", body: { label } })),
+    /**
+     * One of its buttons sends an action to the agent that raised it. Answers with who it went to,
+     * as soon as the server has it: the agent may pick it up now or later.
+     */
+    send: async (m: RailModule, label: string): Promise<string> => {
+      setHeld({ m, at: Math.max(0, modules.findIndex((x) => x.id === m.id)) });
+      try {
+        const r = await api<{ sent?: { to?: { name: string } | null } | null }>(`rail/${m.id}/action`, { method: "POST", body: { label } });
+        mutate();
+        return r.sent?.to?.name ?? "the agent";
+      } catch (e) {
+        setHeld(null);
+        throw e;
+      }
+    },
+    /** The owner has been shown that it was sent: the module can go. */
+    sentShown: () => (setHeld(null), void mutate()),
     /** "Later": the module becomes a task on that day and leaves the rail. */
     later: (m: RailModule, view: string) => clear(m.id, () => api(`rail/${m.id}/later`, { method: "POST", body: { view } }).then(() => globalMutate((k) => typeof k === "string" && k.startsWith("todos")))),
   };
@@ -106,14 +127,14 @@ function Days({ busy, onPick, primary, only = DAYS.length, even }: { busy: boole
   );
 }
 
-type Button = { label: string; url: string };
+type Button = { label: string; url?: string; send?: string };
 
 /**
  * One module: a notification. Closed, it is a glance: a picture or icon, when, what, and the one
  * thing to do. Opened, it adds a sentence, one small block and its other buttons. Any button
  * takes it off the rail; "Later" keeps it as a task first.
  */
-function Module({ m, open, onToggle, onDismiss, onAct, onLater, onLeave }: { m: RailModule; open: boolean; onToggle: () => void; onDismiss: () => void; /** one of its buttons was tapped */ onAct: (label: string) => void; onLater: (view: string) => void; /** a button leads to another screen of the app */ onLeave: () => void }) {
+function Module({ m, open, onToggle, onDismiss, onAct, onSend, onSentShown, onLater, onLeave }: { m: RailModule; open: boolean; onToggle: () => void; onDismiss: () => void; /** one of its buttons was tapped */ onAct: (label: string) => void; /** a button that sends an action to its agent was tapped; answers with who it went to */ onSend: (label: string) => Promise<string>; /** the owner has seen that it was sent */ onSentShown: () => void; onLater: (view: string) => void; /** a button leads to another screen of the app */ onLeave: () => void }) {
   const { agent } = useMe();
   const { mutate } = useSWRConfig();
   const by = agent(m.author);
@@ -123,6 +144,27 @@ function Module({ m, open, onToggle, onDismiss, onAct, onLater, onLeave }: { m: 
   useEffect(() => {
     if (!open) setAsking(false);
   }, [open]);
+  // An action sent to the agent: "sending" while the server takes it, then who it went to, held
+  // long enough to read before the module leaves. The agent may act on it now or later.
+  const [sent, setSent] = useState<{ label: string; to: string | null; failed?: boolean } | null>(null);
+  const send = async (label: string) => {
+    if (sent && !sent.failed) return;
+    setSent({ label, to: null });
+    try {
+      const to = await onSend(label);
+      setSent({ label, to });
+    } catch {
+      setSent({ label, to: null, failed: true });
+    }
+  };
+  const acknowledged = !!sent?.to;
+  useEffect(() => {
+    if (!acknowledged) return;
+    const t = setTimeout(onSentShown, 1600);
+    return () => clearTimeout(t);
+    // onSentShown is a new function on every render of the rail; the timer must not restart with it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acknowledged]);
   // what it offers, most important first: its own actions, then the task and the page it points at
   const buttons: Button[] = [...m.actions, ...(m.task ? [{ label: "Open task", url: `/todos?open=${m.task.id}` }] : []), ...(m.page ? [{ label: "Open page", url: `/page/${m.page.id}` }] : [])];
   const shown = open ? buttons : buttons.slice(0, 1);
@@ -156,7 +198,7 @@ function Module({ m, open, onToggle, onDismiss, onAct, onLater, onLeave }: { m: 
         </span>
       </button>
       {/* closed without acting. A waiting task has none: it leaves by being given a day, so it cannot be missed. */}
-      {!waiting && (
+      {!waiting && !(sent && !sent.failed) && (
         <button onClick={onDismiss} aria-label={`Dismiss ${m.title}`} title="Dismiss" className="rail-x absolute right-1 top-1 grid h-8 w-8 place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink">
           <X size={14} />
         </button>
@@ -177,7 +219,18 @@ function Module({ m, open, onToggle, onDismiss, onAct, onLater, onLeave }: { m: 
           </motion.div>
         )}
       </AnimatePresence>
-      {asking ? (
+      {sent && !sent.failed ? (
+        // the tap has been taken: say so in the buttons' place, then the module goes
+        <div role="status" data-rail-sent={sent.to ? "done" : "sending"} className="flex h-8 items-center gap-1.5 pb-2.5 pl-[58px] pr-3 text-[13px] font-medium text-accent">
+          {sent.to ? (
+            <motion.span initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring} className="flex items-center gap-1.5">
+              <Check size={14} /> Sent to {sent.to}
+            </motion.span>
+          ) : (
+            <span className="text-ink3">Sending “{sent.label}”</span>
+          )}
+        </div>
+      ) : asking ? (
         // "Later" asks one thing: which day. It takes the whole width, so the three days sit on one line.
         <div className="px-3 pb-3" data-rail-later>
           <div className="mb-1.5 flex h-6 items-center justify-between text-[11.5px] text-ink3">
@@ -206,7 +259,12 @@ function Module({ m, open, onToggle, onDismiss, onAct, onLater, onLeave }: { m: 
             ) : (
               <>
                 {shown.map((a, i) =>
-                  a.url.startsWith("/") ? (
+                  a.send || !a.url ? (
+                    // sent to the agent that raised this: the owner is told at once, the agent acts when it looks
+                    <button key={i} onClick={() => send(a.label)} className={i === 0 ? PRIMARY : QUIET}>
+                      {a.label}
+                    </button>
+                  ) : a.url.startsWith("/") ? (
                     <Link key={i} href={a.url} onClick={() => (onLeave(), onAct(a.label))} className={i === 0 ? PRIMARY : QUIET}>
                       {a.label}
                     </Link>
@@ -230,6 +288,11 @@ function Module({ m, open, onToggle, onDismiss, onAct, onLater, onLeave }: { m: 
             <ChevronDown size={15} className={`transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
           </button>
         </div>
+      )}
+      {sent?.failed && (
+        <p role="alert" className="pb-2 pl-[58px] pr-3 text-[12.5px] text-danger">
+          “{sent.label}” was not sent. Try again.
+        </p>
       )}
       <AnimatePresence initial={false}>
         {open && !asking && (
@@ -258,7 +321,7 @@ function Modules({ rail }: { rail: RailState }) {
     <div className="flex flex-col gap-2">
       <AnimatePresence initial={false} mode="popLayout">
         {rail.modules.map((m) => (
-          <Module key={m.id} m={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} onDismiss={() => rail.dismiss(m.id)} onAct={(label) => rail.acted(m, label)} onLater={(view) => rail.later(m, view)} onLeave={rail.close} />
+          <Module key={m.id} m={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} onDismiss={() => rail.dismiss(m.id)} onAct={(label) => rail.acted(m, label)} onSend={(label) => rail.send(m, label)} onSentShown={rail.sentShown} onLater={(view) => rail.later(m, view)} onLeave={rail.close} />
         ))}
       </AnimatePresence>
       {rail.modules.length === 0 && <p className="px-3 py-8 text-[13.5px] text-ink3">Nothing timely right now.</p>}

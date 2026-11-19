@@ -12,6 +12,7 @@ import { Editor } from "@/components/Editor";
 import { Floating } from "@/components/Floating";
 import { TagPills } from "@/components/TagPills";
 import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
+import type { RailAction } from "@/lib/core/rail";
 import type { BinnedTodo, Folder, Repeat, TagCount, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
@@ -62,10 +63,28 @@ function placeLabel(r: Pick<Row, "scope" | "date">, today?: string): string {
  */
 function FromRail({ rail }: { rail: NonNullable<Todo["rail"]> }) {
   const { agent } = useMe();
+  const { mutate } = useSWRConfig();
   const by = agent(rail.author);
-  const buttons = [...rail.actions, ...(rail.page_id ? [{ label: "Open page", url: `/page/${rail.page_id}` }] : [])];
-  if (!buttons.length && !(rail.kept && by)) return null;
+  // A button that sends an action to the module's agent can still be used from here. Once sent,
+  // the buttons that send give way to a line saying so, and whether the agent has picked it up.
+  const [sending, setSending] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const sent = rail.sent;
+  const buttons: RailAction[] = [...rail.actions.filter((a) => !(a.send && (sent || sending))), ...(rail.page_id ? [{ label: "Open page", url: `/page/${rail.page_id}` }] : [])];
+  if (!buttons.length && !(rail.kept && by) && !sent && !sending) return null;
   const cls = "flex h-8 items-center gap-1 whitespace-nowrap rounded-full bg-fill px-3 text-[13px] font-medium text-ink transition-colors hover:bg-fill2";
+  const send = async (label: string) => {
+    setSending(label);
+    setFailed(false);
+    try {
+      await api(`rail/${rail.id}/action`, { method: "POST", body: { label } });
+      await mutate((k) => typeof k === "string" && (k === "rail" || k.startsWith("todos")));
+    } catch {
+      setFailed(true);
+    } finally {
+      setSending(null);
+    }
+  };
   return (
     <div data-from-rail className="ml-[40px] mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-ink2">
       {rail.kept && by && (
@@ -74,7 +93,11 @@ function FromRail({ rail }: { rail: NonNullable<Todo["rail"]> }) {
         </span>
       )}
       {buttons.map((a, i) =>
-        a.url.startsWith("/") ? (
+        a.send || !a.url ? (
+          <button key={i} onClick={() => send(a.label)} className={cls}>
+            {a.label}
+          </button>
+        ) : a.url.startsWith("/") ? (
           <Link key={i} href={a.url} className={cls}>
             {a.label}
           </Link>
@@ -85,6 +108,19 @@ function FromRail({ rail }: { rail: NonNullable<Todo["rail"]> }) {
           </a>
         ),
       )}
+      {(sent || sending) && (
+        <span role="status" data-rail-sent className={`flex h-8 items-center gap-1.5 font-medium ${sent ? "text-accent" : "text-ink3"}`}>
+          {sent ? (
+            <>
+              <Check size={14} /> “{sent.label}” sent to {by?.name ?? "the agent"}
+              <span className="font-normal text-ink3">{sent.picked_up ? "· picked up" : "· waiting for it"}</span>
+            </>
+          ) : (
+            `Sending “${sending}”`
+          )}
+        </span>
+      )}
+      {failed && <span role="alert" className="text-danger">Not sent. Try again.</span>}
     </div>
   );
 }
@@ -96,6 +132,9 @@ function FromTag({ id }: { id: string | null }) {
   if (!g) return null;
   return <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-accent-soft px-2 py-[1px] align-middle text-[11.5px] font-medium text-accent">From {g.name}</span>;
 }
+
+/** Where the chosen tags are kept while the owner is elsewhere in the app. */
+const FILTER_KEY = "ss_todo_tags";
 
 export default function TodosPage() {
   // the address is read (?open=), which needs a boundary above it
@@ -113,9 +152,26 @@ function Todos() {
   const [openId, setOpenId] = useState<string | null>(null);
   // the list a carried task is being held over, lit as the place it will land
   const [carry, setCarry] = useState<string | null>(null);
-  // the tags the list is narrowed to; it starts afresh on every list, so no task is hidden by a choice made elsewhere
-  const [filter, setFilter] = useState<string[]>([]);
-  const show = (key: string) => (key !== view && setFilter([]), setView(key), setOpenId(null));
+  // the tags the lists are narrowed to. The choice stays until the owner takes it off: across lists, and
+  // on leaving this screen and coming back (it is kept for as long as the browser tab is).
+  const [filter, setFilterNow] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const kept: unknown = JSON.parse(sessionStorage.getItem(FILTER_KEY) ?? "[]");
+      if (Array.isArray(kept) && kept.length) setFilterNow(kept.filter((t): t is string => typeof t === "string"));
+    } catch {
+      // no storage, or something else's value under the key: start with no choice
+    }
+  }, []);
+  const setFilter = (tags: string[]) => {
+    setFilterNow(tags);
+    try {
+      sessionStorage.setItem(FILTER_KEY, JSON.stringify(tags));
+    } catch {
+      // private windows may refuse; the choice then lasts only while this screen is up
+    }
+  };
+  const show = (key: string) => (setView(key), setOpenId(null));
 
   // The rail links here with ?open=<task id> to show one task, also while this screen is already up.
   useEffect(() => {

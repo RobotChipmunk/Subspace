@@ -7,7 +7,10 @@
  * Everything in it is transient. A module is a glance: a small picture or icon, a timing line, a
  * title, and the one thing to do about it. Opened, it adds a sentence, at most one compact block and
  * its other buttons, and no more. It leaves the rail when the owner acts on it:
- * - taps any of its buttons (an action, its task, its page, or "Got it" when there is nothing to do);
+ * - taps any of its buttons (an action, its task, its page, or "Got it" when there is nothing to do).
+ *   A button is either a link, or an action sent back to the agent that raised the module (send):
+ *   "Approve", "Not this", "Shorter", whatever that agent offers. The owner is told at once that it
+ *   was sent; the agent is woken, and finds it in changes() whenever it next looks;
  * - opens the task it points at, from here or from their list;
  * - keeps it for later, which puts it on a day in their list as a task and takes it off the rail;
  * - dismisses it.
@@ -39,7 +42,13 @@ export const RAIL_ICONS = [
 ] as const;
 export type RailIcon = (typeof RAIL_ICONS)[number];
 
-export type RailAction = { label: string; url: string };
+/**
+ * A module's button. Either a link (url), or an action sent back to the module's author (send): a
+ * short word or phrase the author chose and will recognise when it comes back, such as "approve".
+ */
+export type RailAction = { label: string; url?: string; send?: string };
+/** What the owner sent from a module, and when. seq is the place of that news in the log, so it is known whether the author has read that far. */
+export type RailSent = { label: string; send: string; at: string; seq?: number; picked_up?: boolean };
 /** info: something to know. warning: something may go wrong or needs a decision. error: something failed. */
 export const RAIL_LEVELS = ["info", "warning", "error"] as const;
 export type RailLevel = (typeof RAIL_LEVELS)[number];
@@ -81,6 +90,8 @@ export type RailModule = {
   cleared_by?: RailCleared | null;
   /** The task the owner made of this module by keeping it for later. */
   kept_todo_id?: string | null;
+  /** The action the owner sent to its author from one of its buttons, if they did. */
+  sent?: RailSent | null;
   created_at: string;
   updated_at: string;
 };
@@ -171,8 +182,14 @@ export async function setModule(
   if (!Array.isArray(actions) || actions.length > 2) throw bad("actions is a list of at most 2 buttons, the first being the one thing to do. A module about a task or a page gets its Open button on its own.");
   for (const [i, a] of actions.entries()) {
     if (!a || typeof a.label !== "string" || !a.label.trim() || a.label.length > 24) throw bad(`actions[${i}].label is required, at most 24 characters: a verb and a word, e.g. "Reconnect", "Get directions".`);
-    if (!okLink(a.url)) throw bad(`actions[${i}].url must start with https://, tel:, mailto: or sms:.`);
+    const send = (a as { send?: unknown }).send;
+    if (send !== undefined && send !== null) {
+      if (a.url) throw bad(`actions[${i}] has both url and send. A button either opens a link or sends an action back to you, not both.`);
+      if (typeof send !== "string" || !send.trim() || send.trim().length > 60) throw bad(`actions[${i}].send is what comes back to you when the owner taps it: a short word or phrase you will recognise, at most 60 characters, e.g. "approve".`);
+      actions[i] = { label: a.label.trim(), send: send.trim() };
+    } else if (!okLink(a.url)) throw bad(`actions[${i}] needs url (starting https://, tel:, mailto: or sms:) to open a link, or send to have the tap sent back to you.`);
   }
+  if (new Set(actions.map((a) => a.label.trim().toLowerCase())).size !== actions.length) throw bad("actions: each button needs its own label.");
 
   let pageId: string | null = null;
   if (input.page) {
@@ -213,7 +230,8 @@ export async function setModule(
      ON CONFLICT (author, key) DO UPDATE SET level = EXCLUDED.level, title = EXCLUDED.title, subtitle = EXCLUDED.subtitle, label = EXCLUDED.label, image = EXCLUDED.image, icon = EXCLUDED.icon,
        blocks = EXCLUDED.blocks, actions = EXCLUDED.actions, page_id = EXCLUDED.page_id, todo_id = EXCLUDED.todo_id, priority = EXCLUDED.priority,
        show_from = EXCLUDED.show_from, show_until = EXCLUDED.show_until, updated_at = now(),
-       dismissed_at = CASE WHEN $14 THEN rail_modules.dismissed_at ELSE NULL END, cleared_by = CASE WHEN $14 THEN rail_modules.cleared_by ELSE NULL END`,
+       dismissed_at = CASE WHEN $14 THEN rail_modules.dismissed_at ELSE NULL END, cleared_by = CASE WHEN $14 THEN rail_modules.cleared_by ELSE NULL END,
+       sent = CASE WHEN $14 THEN rail_modules.sent ELSE NULL END`,
     [id, key, actor.id, title, subtitle, label, input.image ?? null, JSON.stringify(blocks), JSON.stringify(actions), pageId, Math.max(0, Math.min(Number(input.priority) || 0, 10)), from, until, !!same, level, todoId, icon],
   );
   // A new or changed module that shows now reaches the owner's phone; one that waits for show_from
@@ -261,11 +279,13 @@ export async function getModule(ref: string) {
  * Why a module is no longer showing, if it is not, in the words agents are given. A module cleared
  * before this was recorded (cleared_by empty) is told apart by what it used to clear on.
  */
-export function railGone(m: { dismissed_at: string | null; cleared_by?: string | null; clears_on?: string; kept_todo_id?: string | null; task_done?: boolean | null }) {
-  if (!m.dismissed_at) return m.task_done ? { task_done: true } : {};
+export function railGone(m: { dismissed_at: string | null; cleared_by?: string | null; clears_on?: string; kept_todo_id?: string | null; task_done?: boolean | null; sent?: RailSent | null }) {
+  // what the owner sent back from one of its buttons, whenever they did
+  const sent = m.sent ? { sent: m.sent.send, sent_label: m.sent.label, sent_at: m.sent.at } : {};
+  if (!m.dismissed_at) return m.task_done ? { task_done: true, ...sent } : sent;
   const by = m.cleared_by ?? (m.clears_on && m.clears_on !== "dismiss" ? "action" : "dismiss");
-  if (by === "dismiss") return { dismissed_by_owner: true };
-  return { cleared_by_owner: by, ...(by === "later" && m.kept_todo_id ? { kept_as: m.kept_todo_id } : {}) };
+  if (by === "dismiss") return { dismissed_by_owner: true, ...sent };
+  return { cleared_by_owner: by, ...(by === "later" && m.kept_todo_id ? { kept_as: m.kept_todo_id } : {}), ...sent };
 }
 
 /** Says in the log that a module left the rail and why, addressed to the agent that put it there. */
@@ -292,12 +312,50 @@ export async function removeModule(actor: Agent, ref: string) {
  * The owner tapped one of a module's buttons (an action, its page, its task, or "Got it"). That
  * is what the module was there for, so it leaves the rail. Its author is told which button.
  */
-export async function moduleActed(actor: Agent, id: string, label?: unknown) {
+export async function moduleActed(actor: Agent, id: string, label?: unknown): Promise<{ cleared: boolean; sent?: { label: string; to: { name: string; handle: string } | null } | null }> {
   if (actor.kind !== "human") return { cleared: false };
-  const m = await q1<RailModule>("UPDATE rail_modules SET dismissed_at = now(), cleared_by = 'action' WHERE id = $1 AND dismissed_at IS NULL RETURNING *", [id]);
   const tapped = typeof label === "string" ? label.trim().slice(0, 40) : "";
+  const before = await q1<RailModule>("SELECT * FROM rail_modules WHERE id = $1", [id]);
+  const sends = before?.actions?.find((a) => a.send && a.label === tapped);
+  if (before && sends) return moduleSent(actor, before, sends);
+  const m = await q1<RailModule>("UPDATE rail_modules SET dismissed_at = now(), cleared_by = 'action' WHERE id = $1 AND dismissed_at IS NULL RETURNING *", [id]);
   if (m) await logGone(actor, m, "rail.cleared", "action", `${m.title}: the owner ${tapped ? `chose "${tapped}"` : "acted on it"}`, tapped ? { action: tapped } : {});
   return { cleared: !!m };
+}
+
+/**
+ * The owner tapped a button that sends an action back to the module's author. The module has done
+ * its job and leaves the rail; the action is kept on it, the author is woken, and it waits under
+ * for_you in the author's changes() until it looks. The answer comes back at once, whether or not
+ * the agent is running, so the owner can be told it was sent. It can be sent from the task a module
+ * became, after the module itself has gone; it is sent once, and a second tap changes nothing.
+ */
+async function moduleSent(actor: Agent, m: RailModule, action: RailAction) {
+  const author = await q1<{ handle: string; name: string }>("SELECT handle, name FROM agents WHERE id = $1", [m.author]);
+  const to = author ? { name: author.name, handle: author.handle } : null;
+  const sent: RailSent = { label: action.label, send: action.send!, at: new Date().toISOString() };
+  const done = await q1<RailModule>(
+    `UPDATE rail_modules SET sent = $2::jsonb, cleared_by = CASE WHEN dismissed_at IS NULL THEN 'action' ELSE cleared_by END, dismissed_at = COALESCE(dismissed_at, now())
+     WHERE id = $1 AND sent IS NULL RETURNING *`,
+    [m.id, JSON.stringify(sent)],
+  );
+  if (!done) return { cleared: false, sent: m.sent ? { label: m.sent.label, to } : null };
+  const seq = await logEvent({
+    actor: actor.id,
+    type: "rail.cleared",
+    entity_type: "rail",
+    entity_id: m.id,
+    summary: `${m.title}: the owner chose "${action.label}"`,
+    // naming the author is what wakes it
+    mentions: author ? [author.handle] : [],
+    data: { key: m.key, by: "action", author: author?.handle, action: action.label, sent: action.send, ...(m.todo_id ? { todo: m.todo_id } : {}) },
+  });
+  await q("UPDATE rail_modules SET sent = sent || jsonb_build_object('seq', $2::bigint) WHERE id = $1", [m.id, seq]);
+  // A module that asks about a house rule is answered here, by the server: an approved change is
+  // applied exactly as proposed, whether or not its agent ever runs again.
+  const { decideByModule, isProposalModule } = await import("./rules");
+  if (isProposalModule(m.key)) await decideByModule(m.id, action.send === "approve");
+  return { cleared: true, sent: { label: action.label, to } };
 }
 
 /** What a module says beyond its title, as the notes of the task it becomes: its sentence, then its block. */
@@ -343,13 +401,14 @@ export async function moduleLater(actor: Agent, id: string, view: unknown) {
 }
 
 /** What a task shows of the module it came from, so the owner can still act from the task. */
-export type TodoRail = { id: string; key: string; author: string; title: string; label: string; actions: RailAction[]; page_id: string | null; kept: boolean };
+export type TodoRail = { id: string; key: string; author: string; title: string; label: string; actions: RailAction[]; page_id: string | null; kept: boolean; /** what the owner sent its author from one of its buttons; picked_up once the author has read that far */ sent: RailSent | null };
 /**
  * The module a task is tied to, as SQL for a column named rail: the one that points at it, or the
  * one it was kept from. It is there while the module is (its author removes it once the matter is
  * settled), so a task never offers a button for something that has passed.
  */
-export const TODO_RAIL = `(SELECT jsonb_build_object('id', m.id, 'key', m.key, 'author', m.author, 'title', m.title, 'label', m.label, 'actions', m.actions, 'page_id', m.page_id, 'kept', m.kept_todo_id IS NOT DISTINCT FROM todos.id)
+export const TODO_RAIL = `(SELECT jsonb_build_object('id', m.id, 'key', m.key, 'author', m.author, 'title', m.title, 'label', m.label, 'actions', m.actions, 'page_id', m.page_id, 'kept', m.kept_todo_id IS NOT DISTINCT FROM todos.id,
+     'sent', CASE WHEN m.sent IS NULL THEN NULL ELSE m.sent || jsonb_build_object('picked_up', COALESCE((SELECT a.cursor_seq >= (m.sent->>'seq')::bigint FROM agents a WHERE a.id = m.author), false)) END)
    FROM rail_modules m WHERE m.todo_id = todos.id OR m.kept_todo_id = todos.id ORDER BY m.updated_at DESC LIMIT 1) AS rail`;
 
 /**

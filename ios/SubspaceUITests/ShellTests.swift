@@ -70,6 +70,19 @@ final class ShellTests: SubspaceTestCase {
             waitToVanish(roof, "the module, once acknowledged or dismissed")
         }
 
+        // A button can send an action to the agent that raised the module. The app says at once
+        // that it was sent, in the buttons' place, and then the module goes. An earlier attempt
+        // may have sent it already.
+        let suggest = app.buttons["rail.module.follow-shaders"]
+        if suggest.waitForExistence(timeout: 5) {
+            let follow = expect(app.buttons["rail.action.follow-shaders.0"], "the suggestion's first answer")
+            XCTAssertTrue(follow.label.contains("Follow it"), "The first button should be the agent's own answer, not \(follow.label)")
+            follow.tap()
+            expect(app.descendants(matching: .any)["rail.sent.follow-shaders"], "word that it was sent, in the buttons' place", timeout: 10)
+            shot("03-now-rail-sent")
+            waitToVanish(suggest, "the module, once its action was sent")
+        }
+
         // "Later": not now, but not lost. The problem becomes a task for tomorrow and leaves the rail.
         let auth = app.buttons["rail.module.calendar-auth"]
         if auth.waitForExistence(timeout: 5) {

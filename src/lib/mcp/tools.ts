@@ -1,16 +1,20 @@
+import { sightOf, type Section } from "../core/access";
 import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
-import { briefing, changes, explore, read, search } from "../core/discover";
+import { briefing, changes, explore, gather, read, search } from "../core/discover";
 import { uploadTicket } from "../auth";
 import { categorize, createEntry, getEntry, plainText } from "../core/journal";
+import { connect as ideaConnect, grow as ideaGrow, ideaForAgent, ideasForAgent, GROW_KINDS } from "../core/ideas";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, RAIL_ICONS, railGone, removeModule, setModule } from "../core/rail";
+import { aimsAtSystem, propose } from "../core/rules";
+import { routineDone, usage } from "../core/routines";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
-import { bad, oneLine, type Agent } from "../core/util";
+import { bad, notFound, oneLine, type Agent } from "../core/util";
 import { q } from "../db";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 
@@ -39,14 +43,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "guide",
-    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, context, todos, following.",
-    inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | context | todos | following") }),
+    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, ideas, context, todos, following.",
+    inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | ideas | context | todos | following") }),
     readOnly: true,
-    run: async (_a, { topic }) => {
+    run: async (a, { topic }) => {
       if (topic && !TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
       // The guide is read fresh on every call, but many apps keep the tool list from the day they
       // connected. Naming the tools here lets an agent tell an old list from a missing feature.
-      return { version: GUIDE_VERSION, ...(topic ? { topic } : {}), guide: topic ? TOPICS[topic] : CORE, tools: TOOLS.map((t) => t.name), if_a_tool_is_missing: STALE };
+      return { version: GUIDE_VERSION, ...(topic ? { topic } : {}), guide: topic ? TOPICS[topic] : CORE, tools: toolsFor(a).map((t) => t.name), if_a_tool_is_missing: STALE };
     },
   },
   {
@@ -71,7 +75,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "search",
-    description: "Full-text search across posts, todos, context, saved links and followed topics. Returns ids with one-line snippets, best match first. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
+    description: "Search across posts, todos, context, saved links and followed topics. It always matches the words you give (and their plain English forms: run, runs, running): every word must appear, so a long query finds less, and only when nothing has every word does it fall back to any of them. Where the owner has turned on search by meaning, it also finds things that say the same in other words (\"vacation\" finds a note about a holiday); those results carry match: \"meaning\". The result's mode says which is in force: \"words only\" or \"words and meaning\". Either way one search is never proof that something is absent: search several times with different words (the name, a synonym, the broader term), a few words at a time, and follow next_offset when there is more. Returns ids with one-line snippets, best match first, 12 at a time. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
     inputSchema: obj(
       {
         query: str('Words to find. Supports "quoted phrases", OR, and -exclusions.'),
@@ -83,14 +87,21 @@ export const TOOLS: Tool[] = [
       ["query"],
     ),
     readOnly: true,
-    run: (_a, args) => search(args as any),
+    run: (a, args) => search({ ...(args as any), actor: a }),
+  },
+  {
+    name: "gather",
+    description: "Everything that bears on one piece of work, in one call: what is current for the owner, and the context notes, pages, journal entries, tasks, recent posts, saved links and followed topics related to it, each as a title and a line. Give a task's id or a sentence saying what the work is. Use it at the start of a task instead of walking the map and searching several times; then read([ids]) only what you need. It ranks by relevance and shows a few of each kind, so it is a starting point, not proof that nothing else exists.",
+    inputSchema: obj({ about: str('A task id ("t_…"), or a sentence: "planning the Portland trip in November".') }, ["about"]),
+    readOnly: true,
+    run: (a, { about }) => gather(a, about),
   },
   {
     name: "read",
     description: "Full content of up to 20 things by id: a post with its whole thread, a todo with notes, a context node or page with its body (id or /context/path; blocks come back as their JSON), or a tracker brief (id or slug).",
     inputSchema: obj({ ids: { type: "array", items: { type: "string" }, description: "Ids or paths." }, after: str("For long threads: more_replies_after from the previous read.") }, ["ids"]),
     readOnly: true,
-    run: (_a, { ids, after }) => read(Array.isArray(ids) ? ids : [ids], { after }),
+    run: (a, { ids, after }) => read(Array.isArray(ids) ? ids : [ids], { after, actor: a }),
   },
   {
     name: "post",
@@ -195,19 +206,19 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_list",
-    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Pass tag to see only the tasks carrying it (several, separated by commas, for tasks carrying all of them).",
+    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Tasks come in the order the owner keeps them, and each carries order: its place among the tasks of its own day or list, 1 first. Pass tag to see only the tasks carrying it (several, separated by commas, for tasks carrying all of them).",
     inputSchema: obj({ view: str("Default today."), tag: str('Optional. Only tasks carrying this tag, e.g. "finance". With view "all" this is every open task on that subject.') }),
     readOnly: true,
     run: async (_a, { view, tag }) => {
       const l = await listTodos(view || "today", { tags: tag ? String(tag).split(",") : undefined });
       const share = await sharingFor(l.todos.map((t) => t.guest_id));
-      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
+      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, order: t.ord, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
     },
   },
   {
     name: "todo_add",
     description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions). This is also how you ask the owner for anything: when you need them to do, decide or answer something, add the task here with what they need in its notes, then point a rail module at it with rail_set(todo: id). Never ask in the feed.",
-    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished.") }, ["title"]),
+    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished."), order: { type: "integer", description: "Optional: where it goes among the tasks of that day or list, 1 for first. Left out, it goes last, which is usually right." } }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
       return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, label, title, show_until, todo: this id)." };
@@ -224,6 +235,7 @@ export const TOOLS: Tool[] = [
         view: str("Move to: today, week, weekend, next_week, backlog or YYYY-MM-DD."),
         repeat: str("daily, every_3_days, weekly, biweekly, monthly, yearly, or none to stop. Finishing a repeating task creates the next one that long after the day it was finished; the result then names it under next."),
         tags: { type: "array", items: { type: "string" }, description: "The task's whole set of tags, replacing what it has; [] takes them all off. Leave out to keep them. Do not remove tags the owner chose." },
+        order: { type: "integer", description: "Its place among the tasks of its day or list (the one it is moved to, when view is given too): 1 for first, a number past the end for last. The other tasks keep their order around it. The order is the owner's: change it only when they ask." },
         notes_append: str("Markdown to add at the end of the notes. May contain blocks: fenced code blocks whose language is the block type and whose body is JSON."),
         notes_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement markdown.") }, required: ["find", "replace"] },
       },
@@ -248,13 +260,28 @@ export const TOOLS: Tool[] = [
       body_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement.") }, required: ["find", "replace"] },
       about: str("Saved links only: the line on what the page is."),
       expect_version: { type: "integer", description: "Version you last read. The write fails if someone else edited since." },
+      until: str("For what is only true for now: the last day the note holds, YYYY-MM-DD. Required for a new note under /context/current. Pass null to take an end day off."),
+      why: str("Only for a house rule (a note under /context/system): one sentence, at most 120 characters, telling the owner why the change is worth making. Such a change is not made at once: it is put to the owner, and applied if they approve."),
     }),
     run: async (a, args) => {
+      // a house rule changes only with the owner's approval: the call becomes a proposal put to them
+      if (a.kind === "agent" && (await aimsAtSystem(args))) return propose(a, args as any);
+      const was = args.id ? await getNode(args.id).catch(() => null) : null;
       const parent = args.parent === undefined ? undefined : ["", "/", "/context", "/context/"].includes(args.parent) ? null : args.parent;
       const n = args.id
         ? await updateNode(a, args.id, { ...args, parent } as any)
-        : await createNode(a, { parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append });
-      return { id: n.id, path: "/context/" + n.path, version: n.version };
+        : await createNode(a, { parent, title: args.title, summary: args.summary, body: args.body ?? args.body_append, until: args.until });
+      // Other agents judge a note by its summary. When the body moves a long way and the summary stays, say so.
+      const moved = was ? Math.abs(n.body.length - was.body.length) > Math.max(300, was.body.length * 0.3) || (args.body !== undefined && n.body !== was.body) : false;
+      const check =
+        n.kind === "note" && args.summary === undefined && n.body.trim()
+          ? !n.summary
+            ? "This note has no summary. Give it one sentence (summary) that lets another agent decide whether to open it."
+            : moved
+              ? `The body changed a good deal and the summary did not: "${n.summary}". If that no longer says what the note holds, update it (summary).`
+              : null
+          : null;
+      return { id: n.id, path: "/context/" + n.path, version: n.version, ...(n.until ? { until: n.until } : {}), ...(check ? { check_summary: check } : {}) };
     },
   },
   {
@@ -338,8 +365,9 @@ export const TOOLS: Tool[] = [
   {
     name: "context_archive",
     description: "Remove a context node (a note, page or saved link) and its children from the tree. History is kept. Use for things that are wrong or obsolete, after merging anything still useful elsewhere.",
-    inputSchema: obj({ id: str("Node id or path.") }, ["id"]),
-    run: async (a, { id }) => {
+    inputSchema: obj({ id: str("Node id or path."), why: str("Only for a house rule (a note under /context/system): one sentence telling the owner why it should go. Removing one is put to the owner first.") }, ["id"]),
+    run: async (a, { id, why }) => {
+      if (a.kind === "agent" && (await aimsAtSystem({ id }))) return propose(a, { id, archive: true, why });
       await archiveNode(a, id);
       return { ok: true };
     },
@@ -412,7 +440,15 @@ export const TOOLS: Tool[] = [
           type: "array",
           description:
             'Up to 2 buttons, most important first. The first is the one thing to do about this module and is shown before it is opened, so its label must be a plain verb that says what happens: "Get directions", "Reconnect", "Track parcel", "Call", "Pay". url may be https://, tel:, mailto: or sms:. Tapping any button clears the module from the rail. Leave actions out when there is nothing to tap: a module about a task gets "Open task", one with a page gets "Open page", and a module with nothing to do gets "Got it".',
-          items: { type: "object", properties: { label: str("At most 24 characters; a verb and a word."), url: str("Where it goes.") }, required: ["label", "url"] },
+          items: {
+            type: "object",
+            properties: {
+              label: str("At most 24 characters; a verb and a word."),
+              url: str("A link the button opens. Give this or send, not both."),
+              send: str('Instead of a link: the tap is sent back to you. A short word or phrase you will recognise ("approve", "decline", "shorter", "ask-next-week"), at most 60 characters. The owner sees at once that it was sent; you are woken, and it arrives under for_you in changes() as rail.cleared with sent set to this value. Use it for anything you can then do yourself: approve a change, pick one of two options, say no.'),
+            },
+            required: ["label"],
+          },
           maxItems: 2,
         },
         page: str("Optional id of a page with the full detail; adds an Open page button. Use it when there is more to read than a module may hold."),
@@ -447,13 +483,69 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "jobs",
-    description: "Open illustration and icon jobs waiting for you. An illustration job carries the poster's brief (prompt, when they gave one), the post's headline, its source and followed topic, and the palette to draw in. For the illustrator agent.",
+    description: "Jobs waiting for you: illustrations and icons to draw, and routines the owner assigned to you that have come due (kind \"routine\", each with its brief). An illustration job carries the poster's brief (prompt, when they gave one), the post's headline, its source and followed topic, and the palette to draw in. For the illustrator agent.",
     inputSchema: obj({}),
     readOnly: true,
     run: async (a) => {
       const jobs = await openJobs(a, 20);
-      return { jobs, ...(jobs.length ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art. An illustration shows what its headline is about: the actual subject and what happened to it, recognisable at a glance, never an abstract shape or a stock metaphor.' } : {}) };
+      const drawings = jobs.some((j) => j.kind !== "routine");
+      const routines = jobs.some((j) => j.kind === "routine");
+      return {
+        jobs,
+        ...(drawings ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art. An illustration shows what its headline is about: the actual subject and what happened to it, recognisable at a glance, never an abstract shape or a stock metaphor.' } : {}),
+        ...(routines ? { routines: "A job of kind routine is a duty the owner gave you. Its brief says what to do; do it now with your ordinary tools, then call routine_done with its job_id and one line on what you found." } : {}),
+      };
     },
+  },
+  {
+    name: "idea_list",
+    description: "The owner's ideas: canvases where an idea is left to grow. Each has a state (growing or resting), how many pieces are on it and when it last grew. Start here before growing one.",
+    inputSchema: obj({}),
+    readOnly: true,
+    run: () => ideasForAgent(),
+  },
+  {
+    name: "idea_read",
+    description: "One idea's canvas: every piece on it (the owner's text and pictures, and what agents have branched from them), how the pieces are joined, and the owner's steering: what they kept (more like this) and what they pruned (not this way). Also how much may still be added today.",
+    inputSchema: obj({ id: str("The idea's id, from idea_list.") }, ["id"]),
+    readOnly: true,
+    run: (a, { id }) => ideaForAgent(a, id),
+  },
+  {
+    name: "idea_grow",
+    description: `Add one piece to an idea, branching from a piece that is there. The idea is the owner's thinking space, so a piece is one thought in a line or two, never a report. Kinds: riff (a turn on the idea), found (something real you looked up, with source), counter (the honest objection), question (one that would move it on), image (a real picture you found). The server places the piece near what it branches from and holds a daily budget (a few pieces per idea), so add the one that matters most. Read the idea first (idea_read) and follow its steering.`,
+    inputSchema: obj(
+      {
+        idea: str("The idea's id."),
+        from: str("The id of the piece this grows out of. Required once the canvas has anything on it."),
+        kind: { type: "string", enum: [...GROW_KINDS], description: "What sort of branch this is." },
+        text: str("The thought, in a line or two: at most 280 characters. No preamble."),
+        image: str("For kind image (or to go with a found piece): the https address of a real picture."),
+        source: { type: "object", properties: { name: str('The publication or site, e.g. "The Verge".'), url: str("The https address.") }, description: "Where something found came from. Required for kind found." },
+        connects: { type: "array", items: { type: "string" }, description: "Optional: up to three other pieces this also belongs with, by id." },
+      },
+      ["idea", "kind"],
+    ),
+    run: (a, { idea, ...rest }) => ideaGrow(a, idea, rest as any),
+  },
+  {
+    name: "idea_connect",
+    description: "Join two pieces on an idea's canvas that belong together and are not yet joined, with two or three words on why. A few a day at most; a join should show the owner something they had not put together.",
+    inputSchema: obj({ idea: str("The idea's id."), a: str("One piece's id."), b: str("The other's."), label: str('Why they belong together, in two or three words: "same constraint", "cheaper version".') }, ["idea", "a", "b", "label"]),
+    run: (a, { idea, a: one, b: two, label }) => ideaConnect(a, idea, one, two, label),
+  },
+  {
+    name: "routine_done",
+    description: "Say that a routine you were given is done for this round. A routine arrives as a job of kind \"routine\" (in changes() and jobs()), with its brief. Do the work with your ordinary tools, then call this once.",
+    inputSchema: obj({ job_id: str("The routine job's id, from jobs() or changes()."), note: str("One line on what you found or did, at most 300 characters. The owner sees it beside the routine.") }, ["job_id", "note"]),
+    run: (a, { job_id, note }) => routineDone(a, job_id, note),
+  },
+  {
+    name: "usage",
+    description: "How Subspace was used over the last days, in numbers: tool calls and failures by agent and by tool, searches that found nothing, what became of rail modules (acted on, sent, kept, dismissed), tasks added and finished, and the built-in agents' runs. For reviewing how well the system is working; not needed for ordinary tasks.",
+    inputSchema: obj({ days: { type: "integer", description: "How far back, 1 to 60. Default 7." } }),
+    readOnly: true,
+    run: (_a, { days }) => usage(days),
   },
   {
     name: "submit_art",
@@ -471,3 +563,64 @@ export const TOOLS: Tool[] = [
     },
   },
 ];
+
+// ---------- What one agent is offered ----------
+
+/** The part of the app each tool belongs to. An agent that may not see that part is not offered the tool. */
+const AREA: Record<string, Section> = {
+  post: "feed",
+  reply: "feed",
+  claim: "feed",
+  todo_list: "todos",
+  todo_add: "todos",
+  todo_update: "todos",
+  journal_write: "journal",
+  page_write: "pages",
+  link_save: "links",
+  tracker_create: "following",
+  tracker_update: "following",
+  rail_set: "rail",
+  rail_remove: "rail",
+  idea_list: "ideas",
+  idea_read: "ideas",
+  idea_grow: "ideas",
+  idea_connect: "ideas",
+};
+
+/**
+ * The tools an agent has on a connection: all of them, less those that change things when the
+ * agent (or this connection) is read-only, less those for parts of the app it may not see.
+ * A tool that is not offered does not exist for that agent: calling it is an unknown tool.
+ */
+export function toolsFor(agent: Agent, connectionReadOnly = false): Tool[] {
+  const sight = sightOf(agent);
+  const readOnly = connectionReadOnly || sight.readOnly;
+  return TOOLS.filter((t) => (!readOnly || t.readOnly) && (!AREA[t.name] || sight.section(AREA[t.name])));
+}
+
+/** The context nodes a call names, which the agent must be able to see for the call to go ahead. */
+const NODE_ARGS: Record<string, string[]> = {
+  context_write: ["id", "parent"],
+  page_write: ["id", "parent"],
+  link_save: ["parent"],
+  journal_write: ["id"],
+  context_archive: ["id"],
+  context_history: ["id"],
+};
+
+/**
+ * Checked before a tool runs for an agent that sees only part of the system: a context node it
+ * names must be one it may see (otherwise it is not there), and it may not start a new top-level
+ * section of context, which would be outside what the owner chose for it.
+ */
+export async function guardCall(agent: Agent, name: string, args: Record<string, any>) {
+  const sight = sightOf(agent);
+  if (sight.full) return;
+  const top = (v: unknown) => v === undefined || v === null || ["", "/", "/context", "/context/"].includes(String(v));
+  for (const key of NODE_ARGS[name] ?? []) {
+    if (top(args?.[key])) continue;
+    const node = await getNode(String(args[key]));
+    if (!sight.node(node)) throw notFound(`No context node "${args[key]}"`);
+  }
+  if (name === "context_write" && !args?.id && top(args?.parent)) throw bad("You cannot add a top-level section of context. Add under a section you can see.");
+}

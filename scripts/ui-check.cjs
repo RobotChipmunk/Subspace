@@ -93,6 +93,17 @@ async function run(profile) {
   // ---------- Sign in ----------
   await page.goto(`${BASE}/login`);
   await settle(1000); // let the page finish loading before typing, as a person would
+  // the mark is drawn, not blank: particles in a latent space, turning slowly
+  const inked = await page
+    .locator("canvas[data-mark]")
+    .evaluate((c) => {
+      const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+      let n = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++;
+      return n / (c.width * c.height);
+    })
+    .catch(() => 0);
+  if (inked < 0.02 || inked > 0.6) fail(`login: the mark is ${inked ? "not drawn as particles" : "missing"} (${(inked * 100).toFixed(1)}% of it is inked)`);
   await shot("login");
   await page.fill("input[type=password]", "wrong-password");
   await page.keyboard.press("Enter");
@@ -106,14 +117,14 @@ async function run(profile) {
     const { Client } = require("pg");
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     await db.connect();
-    await db.query("UPDATE rail_modules SET dismissed_at = NULL, cleared_by = NULL");
+    await db.query("UPDATE rail_modules SET dismissed_at = NULL, cleared_by = NULL, sent = NULL");
     await db.end();
     await page.reload();
     await settle(1500);
   }
 
   // Navigation is reachable everywhere.
-  for (const label of ["Feed", "Todos", "Journal", "Context", "Following", "Agents"]) await reachable(page.getByRole("link", { name: label, exact: true }), `nav ${label}`);
+  for (const label of ["Feed", "Todos", "Journal", "Ideas", "Context", "Following", "Agents"]) await reachable(page.getByRole("link", { name: label, exact: true }), `nav ${label}`);
 
   // ---------- The rail ----------
   const wide = profile.viewport.width >= 1100;
@@ -152,7 +163,7 @@ async function run(profile) {
     // each says what kind of thing it is by the picture at its front
     const tones = await page.locator("[data-rail-module]").evaluateAll((mods) => Object.fromEntries(mods.map((m) => [m.dataset.railModule, m.dataset.tone])));
     if (tones["calendar-auth"] !== "error" || tones["agility-topup"] !== "act" || tones["portland-hotel"] !== "know") fail(`rail: modules are not told apart at a glance (${JSON.stringify(tones)})`);
-    if (await page.locator("[data-rail-module] .rail-tile svg").count() !== 4) fail("rail: a module is missing its icon");
+    if (await page.locator("[data-rail-module] .rail-tile svg").count() !== 5) fail("rail: a module is missing its icon");
     await shot("rail-closed");
     await press(hotel.getByRole("button", { expanded: false }));
     await settle(700);
@@ -162,7 +173,7 @@ async function run(profile) {
     await reachable(hotel.getByRole("link", { name: "Open page" }), "rail module page link");
     await reachable(hotel.getByRole("button", { name: "Later" }), "rail module: Later");
     const count = await page.locator("[data-rail-module]").count();
-    if (count !== 4) fail(`rail: ${count} modules shown, expected 4`);
+    if (count !== 5) fail(`rail: ${count} modules shown, expected 5`);
     // an error from an agent is listed first and marked
     const firstMod = page.locator("[data-rail-module]").first();
     if ((await firstMod.getAttribute("data-level")) !== "error") fail("rail: the error module is not shown first");
@@ -181,11 +192,25 @@ async function run(profile) {
     await reachable(roof.getByRole("button", { name: "Got it" }), "rail: Got it on a module with nothing to do");
     await press(wide ? roof.getByRole("button", { name: "Got it" }) : page.getByRole("button", { name: "Dismiss Roofer comes to inspect" }));
     await settle(900);
-    if ((await page.locator("[data-rail-module]").count()) !== 3) fail(`rail: ${wide ? "Got it" : "dismissing a module"} did not remove it`);
+    if ((await page.locator("[data-rail-module]").count()) !== 4) fail(`rail: ${wide ? "Got it" : "dismissing a module"} did not remove it`);
 
     // "Later": not now, but not lost. The module becomes a task on the day chosen and leaves the rail.
     const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
     const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
+    // A button can send an action to the agent that raised the module. The owner is told at once that
+    // it was sent, whether or not the agent is running; then the module leaves like any other.
+    const suggest = page.locator('[data-rail-module="follow-shaders"]');
+    await reachable(suggest.getByRole("button", { name: "Follow it" }), "rail: a button that sends an action to its agent");
+    if (await suggest.getByRole("button", { name: "Not this" }).count()) fail("rail: a closed module shows its second answer");
+    await press(suggest.getByRole("button", { name: "Follow it" }));
+    await suggest
+      .locator('[data-rail-sent="done"]', { hasText: "Sent to Scout" })
+      .waitFor({ timeout: 6000 })
+      .catch(() => fail('rail: tapping a button that sends did not say "Sent to Scout"'));
+    await shot("rail-sent");
+    await suggest.waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("rail: a module whose action was sent is still in the rail"));
+    await settle(500);
+    if ((await get("/api/v1/rail")).modules.some((m) => m.key === "follow-shaders")) fail("rail: sending an action did not clear the module");
     const auth = page.locator('[data-rail-module="calendar-auth"]');
     await press(auth.getByRole("button", { expanded: false }));
     await settle(700);
@@ -839,7 +864,7 @@ async function run(profile) {
     await press(tagMenu.getByRole("menuitem", { name: "Show all" }));
     await settle(800);
     if ((await titles()).length !== shownAll.length) fail("todos tags: Show all did not bring every task back");
-    // a choice belongs to the list it was made on
+    // a choice stays until it is taken off: on another list, and after a visit to another screen
     await press(filter);
     await press(tagMenu.getByRole("menuitemcheckbox", { name: /^house/ }));
     await page.keyboard.press("Escape");
@@ -847,7 +872,18 @@ async function run(profile) {
     await todayBtn.scrollIntoViewIfNeeded();
     await press(todayBtn);
     await settle(1000);
-    if ((await filter.getAttribute("aria-label")) !== "Filter by tag") fail("todos tags: a choice of tags followed to another list");
+    if ((await filter.getAttribute("aria-label")) !== "Tags: house") fail("todos tags: the chosen tag did not follow to another list");
+    await page.goto(BASE + "/feed");
+    await settle(1200);
+    await page.goto(BASE + "/todos");
+    await filter.waitFor({ timeout: 8000 }).catch(() => {});
+    await settle(800);
+    if ((await filter.getAttribute("aria-label").catch(() => null)) !== "Tags: house") fail("todos tags: the chosen tag was lost on leaving Todos and coming back");
+    await shot("todos-tag-kept");
+    await press(filter);
+    await press(tagMenu.getByRole("menuitem", { name: "Show all" }));
+    await settle(600);
+    if ((await filter.count()) && (await filter.getAttribute("aria-label")) !== "Filter by tag") fail("todos tags: Show all did not take the kept choice off");
     // and a list with no tagged tasks offers no filter
     for (const f of (await get("/api/v1/todos/folders")).folders) {
       if (f.key === "all" || f.guest) continue;
@@ -957,6 +993,132 @@ async function run(profile) {
     await settle(1100);
     await noSidewaysScroll("context note");
   });
+  await step("ideas", async () => {
+    // Ideas: each idea is a canvas. The owner's words sit bare on it; what agents add are rounded pieces joined to what they grew from.
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const send = (method, url, body) => page.evaluate(([m, u, b]) => fetch(u, { method: m, headers: b ? { "Content-Type": "application/json" } : undefined, body: b ? JSON.stringify(b) : undefined }).then((r) => r.status), [method, url, body]);
+    await press(page.getByRole("link", { name: "Ideas", exact: true }));
+    await page.waitForURL("**/ideas");
+    await settle(1200);
+    const card = page.locator("[data-idea]", { hasText: "A cargo trailer for the bike" });
+    await reachable(card, "ideas: the seeded idea");
+    await reachable(page.getByRole("button", { name: "New idea" }), "ideas: New idea");
+    await noSidewaysScroll("ideas");
+    await shot("ideas");
+    await press(card);
+    const canvas = page.locator("[data-canvas]");
+    await canvas.waitFor({ timeout: 8000 });
+    await settle(1500);
+    const pieces = canvas.locator("[data-piece]");
+    if ((await pieces.count()) !== 4) fail(`ideas: ${await pieces.count()} pieces on the seeded canvas, expected 4`);
+    const mine = canvas.locator('[data-piece][data-by="owner"]', { hasText: "A cargo trailer for the bike" });
+    const riff = canvas.locator('[data-piece][data-by="agent"]', { hasText: "folded flat" });
+    const found = canvas.locator('[data-piece][data-by="agent"]', { hasText: "Burley" });
+    await reachable(mine, "ideas: the owner's own words on the canvas");
+    await reachable(riff, "ideas: an agent's piece");
+    await reachable(found, "ideas: a second agent's piece");
+    if (!/Scout/.test(await riff.innerText())) fail("ideas: an agent's piece does not say whose it is");
+    if ((await riff.getAttribute("data-kept")) !== "true") fail("ideas: a kept piece is not marked as kept");
+    if ((await canvas.locator("[data-join]").count()) !== 3) fail(`ideas: ${await canvas.locator("[data-join]").count()} joins drawn, expected 3`);
+    // nothing on the canvas overlaps anything else when it is first shown
+    const boxes = await pieces.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })));
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (boxes[i].l < boxes[j].r - 4 && boxes[j].l < boxes[i].r - 4 && boxes[i].t < boxes[j].b - 4 && boxes[j].t < boxes[i].b - 4) fail("ideas: two pieces overlap on the seeded canvas");
+    await noSidewaysScroll("idea canvas");
+    await shot("idea-canvas");
+    // double-tap empty space and write: the words go down where the tap was
+    const area = await canvas.boundingBox();
+    await page.mouse.dblclick(area.x + area.width / 2, area.y + area.height - 96);
+    const writing = page.getByLabel("Write on the canvas");
+    await writing.waitFor({ timeout: 4000 }).catch(() => fail("ideas: double-tapping the canvas did not open a place to write"));
+    if (await writing.count()) {
+      await settle(200);
+      await page.keyboard.type("Ride it to the beach", { delay: 12 });
+      await page.keyboard.press("Enter");
+      await canvas.locator('[data-piece][data-by="owner"]', { hasText: "Ride it to the beach" }).waitFor({ timeout: 6000 }).catch(() => fail("ideas: what was written did not appear on the canvas"));
+    }
+    // a chosen piece offers keep, more and prune; keeping marks it, pruning takes it away and can be undone
+    await found.click();
+    const acts = page.locator("[data-piece-actions]");
+    await reachable(acts.getByRole("button", { name: /^Keep/ }), "ideas: Keep, on a chosen piece");
+    await reachable(acts.getByRole("button", { name: "More of this" }), "ideas: More of this");
+    await reachable(acts.getByRole("button", { name: /^Prune/ }), "ideas: Prune");
+    await acts.getByRole("button", { name: /^Keep/ }).click();
+    await settle(900);
+    if ((await found.getAttribute("data-kept")) !== "true") fail("ideas: Keep did not mark the piece");
+    await shot("idea-piece-chosen");
+    await acts.getByRole("button", { name: /^Kept/ }).click();
+    await settle(700);
+    await acts.getByRole("button", { name: /^Prune/ }).click();
+    await found.waitFor({ state: "detached", timeout: 5000 }).catch(() => fail("ideas: a pruned piece is still on the canvas"));
+    await reachable(page.getByRole("button", { name: "Bring back" }), "ideas: Bring back, after pruning");
+    await page.getByRole("button", { name: "Bring back" }).click();
+    await found.waitFor({ timeout: 6000 }).catch(() => fail("ideas: Bring back did not return the pruned piece"));
+    // put back as it was seeded, for the next screen size
+    const now = await get(`/api/v1/ideas/${await canvas.getAttribute("data-canvas")}`);
+    for (const it of now.items.filter((x) => x.text === "Ride it to the beach")) await send("DELETE", `/api/v1/idea-items/${it.id}`);
+    for (const it of now.items.filter((x) => /Burley/.test(x.text) && x.kept)) await send("PATCH", `/api/v1/idea-items/${it.id}`, { kept: false });
+    await press(page.getByRole("button", { name: "All ideas" }));
+    await page.waitForURL((u) => !u.search.includes("idea="));
+    await settle(600);
+  });
+
+  await step("current", async () => {
+    // What is true for now sits at the top of Context: each note with who set it and until when.
+    await page.goto(`${BASE}/context`);
+    await settle(1200);
+    const shelf = page.locator("[data-current]");
+    await reachable(shelf.getByRole("button", { name: /This month's focus/ }), "current: a note that holds for now");
+    const labels = await shelf.locator("[data-current-note]").allInnerTexts();
+    if (labels.length !== 2 || !labels.every((t) => /until (\d+ \w+|\w+ \d+)/.test(t))) fail(`current: each note should say until when (${labels.map((t) => t.replace(/\s+/g, " ")).join(" | ")})`);
+    if (!/Scout/.test(labels.find((t) => t.includes("This month's focus")) ?? "")) fail("current: a note does not say who set it");
+    await noSidewaysScroll("current");
+    await shot("context-current");
+    // opened, a current note offers its end day, which the owner can move or take off
+    await press(shelf.getByRole("button", { name: /Portland trip/ }));
+    await page.getByLabel("Title").waitFor({ timeout: 5000 });
+    await settle(700);
+    const until = page.locator("[data-until]");
+    await reachable(until.getByRole("button", { name: /^Date: Until / }), "current: the end day on a note");
+    await reachable(until.getByRole("button", { name: "Take the end day off" }), "current: taking the end day off");
+    await shot("context-current-note");
+  });
+
+  await step("house rules", async () => {
+    // System holds the house rules. What an agent has proposed waits at the top of Context and inside System.
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    await page.goto(`${BASE}/context`);
+    await settle(1200);
+    const waiting = page.locator("[data-proposals]");
+    await reachable(waiting.getByText("Scout proposes a change to “Quiet hours”"), "house rules: who proposes what");
+    await reachable(waiting.getByText("You dismissed every Saturday morning module this month."), "house rules: why");
+    await reachable(waiting.getByText("Adds: At weekends nothing is raised before 10 am."), "house rules: the change");
+    await reachable(waiting.getByRole("button", { name: "Approve" }), "house rules: Approve");
+    await reachable(waiting.getByRole("button", { name: "Decline" }), "house rules: Decline");
+    await noSidewaysScroll("house rules proposal");
+    await shot("house-rules-proposal");
+    const before = (await get("/api/v1/rules/proposals")).proposals;
+    if (before.length !== 1) fail(`house rules: ${before.length} proposals waiting, expected the seeded one`);
+    await press(page.locator("main button", { hasText: "House rules: how agents work here" }).first());
+    await settle(900);
+    await reachable(page.locator("main button", { hasText: "Quiet hours" }).first(), "house rules: a rule inside System");
+    if (!(await waiting.count())) fail("house rules: the waiting proposal is not shown inside System");
+    await shot("house-rules");
+    // approving applies the change exactly as proposed, under the agent's name, and the proposal is gone
+    await press(waiting.getByRole("button", { name: "Approve" }));
+    await waiting.waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("house rules: an approved proposal is still waiting"));
+    const rule = (await get(`/api/v1/context?node=${before[0]?.node_id}`)).node;
+    if (!/At weekends nothing is raised before 10 am\./.test(rule?.body ?? "")) fail("house rules: approving did not apply the change");
+    // put back, so every screen size meets the same proposal
+    if (process.env.DATABASE_URL && before[0]) {
+      const { Client } = require("pg");
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      await db.connect();
+      await db.query("UPDATE rule_proposals SET status = 'pending', decided_at = NULL WHERE id = $1", [before[0].id]);
+      await db.query("UPDATE context_nodes SET body = replace(body, E'\\n\\n- At weekends nothing is raised before 10 am.', '') WHERE id = $1", [before[0].node_id]);
+      await db.end();
+    }
+  });
+
   await step("context search", async () => {
     const search = page.getByLabel("Search context");
     await reachable(search, "context search field");
@@ -1381,6 +1543,55 @@ async function run(profile) {
     await reachable(page.getByRole("button", { name: "Make a token" }), "make a token");
     await noSidewaysScroll("agents connect panel");
     await shot("agents-connect");
+    // access: what this agent may see and do is set here and saved as it is changed
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const access = page.locator("[data-access]");
+    await access.scrollIntoViewIfNeeded();
+    const probeId = async () => (await get("/api/v1/me")).agents.find((x) => /^probe/.test(x.handle));
+    if ((await probeId()).access) fail("agents access: a new agent should start with no limits");
+    await reachable(access.getByRole("switch", { name: "Read only" }), "the Read only switch");
+    await press(access.getByRole("switch", { name: "Read only" }));
+    await settle(900);
+    if ((await probeId()).access?.read_only !== true) fail("agents access: Read only was not saved");
+    if (!(await page.locator("[data-access-badge]", { hasText: "Read only" }).count())) fail("agents access: a read-only agent does not say so beside its name");
+    for (const name of ["Feed", "Todos", "Journal", "Following", "Pages", "Links", "Now", "Ideas"]) await reachable(access.getByRole("checkbox", { name, exact: true }), `access choice "${name}"`);
+    await press(access.getByRole("checkbox", { name: "Journal", exact: true }));
+    await settle(900);
+    const limited = (await probeId()).access;
+    if (!limited || limited.sections?.includes("journal") || !limited.sections?.includes("todos")) fail(`agents access: turning Journal off saved ${JSON.stringify(limited)}`);
+    // the top levels of context are offered by name, and one can be turned off
+    const work = access.getByRole("checkbox", { name: "Work", exact: true });
+    await reachable(work, 'access choice "Work" (context)');
+    await press(work);
+    await settle(900);
+    const narrowed = (await probeId()).access;
+    if (!narrowed?.context || narrowed.context.includes("work") || !narrowed.context.includes("me")) fail(`agents access: turning Work off saved ${JSON.stringify(narrowed)}`);
+    await noSidewaysScroll("agents access");
+    await shot("agents-access");
+    // everything back on and able to write is no limit at all
+    await press(work);
+    await settle(700);
+    await press(access.getByRole("checkbox", { name: "Journal", exact: true }));
+    await settle(700);
+    await press(access.getByRole("switch", { name: "Read only" }));
+    await settle(900);
+    if ((await probeId()).access) fail("agents access: with everything on again the agent should have no limits");
+    // routines: a duty that comes round is given to an agent with a switch, and says when it is next due
+    const routines = page.locator("[data-routines]");
+    await routines.scrollIntoViewIfNeeded();
+    const gaps = routines.locator('[data-routine="news-gaps"]');
+    await reachable(gaps.getByText("News-gap check"), "routines: the news-gap check");
+    if (!(await gaps.getByText("Nobody does this yet.").count())) fail("routines: an unassigned routine does not say nobody does it");
+    await press(gaps.getByRole("switch"));
+    await settle(1200);
+    const given = (await get("/api/v1/routines")).routines.find((r) => r.key === "news-gaps");
+    if (given?.agent_id !== (await probeId()).id) fail(`routines: turning the switch on did not give the routine to the agent (${JSON.stringify(given)})`);
+    if (await gaps.getByText("Nobody does this yet.").count()) fail("routines: an assigned routine still says nobody does it");
+    await noSidewaysScroll("agents routines");
+    await shot("agents-routines");
+    await press(gaps.getByRole("switch"));
+    await settle(900);
+    if ((await get("/api/v1/routines")).routines.find((r) => r.key === "news-gaps")?.agent_id) fail("routines: turning the switch off did not take the routine back");
     // removing asks once more
     await press(page.getByRole("button", { name: "Remove agent", exact: true }));
     await settle(500);

@@ -79,6 +79,10 @@ private struct RailModuleView: View {
     @State private var busy = false
     /// "Later" asks which day; closing the module takes the question back.
     @State private var asking = false
+    /// An action sent to the module's agent: its label while the server takes it, then who it went to.
+    @State private var sending: String? = nil
+    @State private var sentTo: String? = nil
+    @State private var sendFailed: String? = nil
 
     private var level: String { module.level ?? "info" }
     private var key: String { module.key ?? module.id }
@@ -105,12 +109,22 @@ private struct RailModuleView: View {
         VStack(alignment: .leading, spacing: 0) {
             header(m)
             if open, hasMore(m) { more(m).transition(.opacity) }
-            if asking {
+            if sending != nil || sentTo != nil {
+                sentRow.transition(.opacity)
+            } else if asking {
                 question.transition(.opacity)
             } else {
                 actionRow(m)
             }
-            if open, !asking { footer(m).transition(.opacity) }
+            if let failed = sendFailed {
+                Text("“\(failed)” was not sent. Try again.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.danger)
+                    .padding(.leading, 58)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 8)
+            }
+            if open, !asking, sending == nil, sentTo == nil { footer(m).transition(.opacity) }
         }
         .background(Theme.surface, in: shape)
         .overlay(shape.strokeBorder(Theme.line, lineWidth: 1))
@@ -216,14 +230,19 @@ private struct RailModuleView: View {
                     ForEach(Array(shown.enumerated()), id: \.offset) { item in
                         let a = item.element
                         Button {
-                            if a.url.hasPrefix("/") { withAnimation(.ssSpring) { app.railSheet = false } }
-                            app.open(a.url)
+                            if a.sends {
+                                // sent to the agent that raised this: the owner is told at once, the agent acts when it looks
+                                send(m, a.label)
+                                return
+                            }
+                            if a.link.hasPrefix("/") { withAnimation(.ssSpring) { app.railSheet = false } }
+                            app.open(a.link)
                             // it has done its job: any button takes the module off the rail
                             Task { await app.railActed(m, label: a.label) }
                         } label: {
                             HStack(spacing: 4) {
                                 Text(a.label)
-                                if a.url.hasPrefix("http") { Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).opacity(0.6) }
+                                if a.link.hasPrefix("http") { Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).opacity(0.6) }
                             }
                         }
                         .buttonStyle(PillStyle(soft: item.offset == 0))
@@ -248,6 +267,47 @@ private struct RailModuleView: View {
         .padding(.leading, 58)
         .padding(.trailing, 6)
         .padding(.bottom, open ? 4 : 10)
+    }
+
+    /// In the buttons' place once one that sends has been tapped: that it is going, then who it went
+    /// to, held long enough to read before the module leaves.
+    private var sentRow: some View {
+        HStack(spacing: 6) {
+            if let to = sentTo {
+                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
+                Text("Sent to \(to)")
+            } else {
+                Text("Sending “\(sending ?? "")”").foregroundStyle(Theme.ink3)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(Theme.accent)
+        .frame(minHeight: 32)
+        .padding(.leading, 58)
+        .padding(.trailing, 12)
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("rail.sent.\(key)")
+    }
+
+    private func send(_ m: RailModule, _ label: String) {
+        guard sending == nil, sentTo == nil else { return }
+        sendFailed = nil
+        withAnimation(.ssSoft) { sending = label }
+        Task {
+            let to = await app.railSend(m, label: label)
+            guard let to else {
+                withAnimation(.ssSoft) {
+                    sending = nil
+                    sendFailed = label
+                }
+                return
+            }
+            withAnimation(.ssSpring) { sentTo = to }
+            try? await Task.sleep(for: .milliseconds(1600))
+            await app.railSentShown(m.id)
+        }
     }
 
     /// Who says so, and the way to put it off without losing it.

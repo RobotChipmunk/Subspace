@@ -5,6 +5,8 @@ export const metadata: Metadata = {
   title: "Subspace",
   description: "A shared space for you and your agents.",
   appleWebApp: { capable: true, title: "Subspace", statusBarStyle: "default" },
+  // the mark, still: one SVG that answers to light and dark by itself, and a picture for a home screen
+  icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }], apple: "/apple-icon.png" },
 };
 
 export const viewport: Viewport = {

@@ -461,6 +461,89 @@ const MIGRATIONS: string[] = [
      created_at timestamptz NOT NULL DEFAULT now(),
      last_seen timestamptz NOT NULL DEFAULT now()
    )`,
+  // What the owner lets an agent see and do: read-only, which parts of the app, which top-level
+  // sections of context (core/access.ts). Null is everything, as before.
+  `ALTER TABLE agents ADD COLUMN IF NOT EXISTS access jsonb`,
+  // A module's button may be an action sent back to the agent that raised it ("Approve"). What
+  // the owner sent, and when, is kept on the module: { label, send, at, seq }.
+  `ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS sent jsonb`,
+  // Routines: duties that come round on a schedule (core/routines.ts). What each one is lives in
+  // code; here is who does it and when it last ran.
+  `CREATE TABLE IF NOT EXISTS routines (
+     key text PRIMARY KEY,
+     agent_id text,
+     next_at timestamptz,
+     last_at timestamptz,
+     last_done_at timestamptz,
+     last_note text NOT NULL DEFAULT ''
+   )`,
+  // An agent's change to a house rule (a note under /context/system), held until the owner
+  // approves or declines it (core/rules.ts). patch is the change exactly as it would be applied.
+  `CREATE TABLE IF NOT EXISTS rule_proposals (
+     id text PRIMARY KEY,
+     agent_id text NOT NULL,
+     kind text NOT NULL,
+     node_id text,
+     parent_id text,
+     title text NOT NULL DEFAULT '',
+     why text NOT NULL DEFAULT '',
+     patch jsonb NOT NULL DEFAULT '{}',
+     excerpt text NOT NULL DEFAULT '',
+     after text NOT NULL DEFAULT '',
+     status text NOT NULL DEFAULT 'pending',
+     error text,
+     module_id text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     decided_at timestamptz
+   );
+   CREATE INDEX IF NOT EXISTS rule_proposals_pending ON rule_proposals (created_at) WHERE status = 'pending'`,
+  // A context note can say until when it holds (core/current.ts). lapse_told records that its
+  // writer has been told it passed that day, so they are told once.
+  `ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS until date;
+   ALTER TABLE context_nodes ADD COLUMN IF NOT EXISTS lapse_told boolean NOT NULL DEFAULT false;
+   CREATE INDEX IF NOT EXISTS context_until ON context_nodes (until) WHERE until IS NOT NULL AND NOT lapse_told AND NOT archived`,
+  // Search by meaning (core/meaning.ts): each searchable thing's embedding, and the checksum of
+  // the text it was made from, so a changed thing is embedded again.
+  `ALTER TABLE search_docs ADD COLUMN IF NOT EXISTS embedding real[];
+   ALTER TABLE search_docs ADD COLUMN IF NOT EXISTS embedded_md5 text`,
+  // Ideas (core/ideas.ts): a canvas per idea, the pieces on it (the owner's text and pictures, the
+  // agents' branches) with where each sits, and the joins between pieces.
+  `CREATE TABLE IF NOT EXISTS ideas (
+     id text PRIMARY KEY,
+     title text NOT NULL DEFAULT '',
+     state text NOT NULL DEFAULT 'growing',
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     deleted_at timestamptz
+   );
+   CREATE TABLE IF NOT EXISTS idea_items (
+     id text PRIMARY KEY,
+     idea_id text NOT NULL,
+     author text NOT NULL,
+     kind text NOT NULL DEFAULT 'text',
+     text text NOT NULL DEFAULT '',
+     image text,
+     source jsonb,
+     x double precision NOT NULL DEFAULT 0,
+     y double precision NOT NULL DEFAULT 0,
+     size int NOT NULL DEFAULT 2,
+     kept boolean NOT NULL DEFAULT false,
+     seen boolean NOT NULL DEFAULT true,
+     pruned_at timestamptz,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now()
+   );
+   CREATE INDEX IF NOT EXISTS idea_items_idea ON idea_items (idea_id, created_at);
+   CREATE TABLE IF NOT EXISTS idea_links (
+     id text PRIMARY KEY,
+     idea_id text NOT NULL,
+     a text NOT NULL,
+     b text NOT NULL,
+     label text NOT NULL DEFAULT '',
+     author text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now()
+   );
+   CREATE INDEX IF NOT EXISTS idea_links_idea ON idea_links (idea_id)`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

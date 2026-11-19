@@ -94,6 +94,11 @@ struct ContextScreen: View {
                 .padding(.horizontal, 4)
                 .padding(.top, -12)
                 .padding(.bottom, 24)
+            // house rules: what agents have proposed waits here as well as in the rail
+            ContextProposals(onDecided: { Task { await load() } })
+            if let current = tree?.current, !current.isEmpty {
+                ContextCurrentShelf(notes: current, wide: wide) { id in go(id) }
+            }
             if !pages.isEmpty {
                 ContextPagesShelf(pages: pages) { id in go(id) }
             }
@@ -111,7 +116,11 @@ struct ContextScreen: View {
 
     private func inside(_ node: ContextNode, children: [ContextNode]) -> some View {
         let holds = node.kind != "link"
+        let path = node.path ?? ""
         return VStack(alignment: .leading, spacing: 0) {
+            if path == "system" || path.hasPrefix("system/") {
+                ContextProposals(onDecided: { Task { await load() } })
+            }
             ContextNodeDetail(
                 node: node,
                 onChanged: { fresh in adopt(fresh) },

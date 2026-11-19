@@ -10,12 +10,18 @@
  *  read()     – the full content of specific things, by id.
  */
 import { q, q1 } from "../db";
+import { describeAccess, sightOf, visibleNodes } from "./access";
+import { currentNotes } from "./current";
+import { fuse, meaningOn, nearest, type Near } from "./meaning";
+import { ideaForAgent, ideasForAgent } from "./ideas";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
 import { listEntries, listMonths, monthLine } from "./journal";
 import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule, railGone } from "./rail";
+import { listRoutines, ROUTINES } from "./routines";
+import { houseRules, SYSTEM } from "./rules";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
@@ -33,6 +39,8 @@ export type ExploreResult = {
   children?: Child[];
   items?: Item[];
   next_cursor?: string | null;
+  /** How much of the whole this page is, when it is not all of it. */
+  showing?: string;
   /** Saved links filed under this context node, a page at a time. */
   links?: { count: number; items: Item[]; next_cursor: string | null };
   hint?: string;
@@ -113,6 +121,8 @@ async function timeTree(base: { path: string; title: string; about?: string }, s
     title,
     about: base.about,
     count: total,
+    // said outright, so a first page is not mistaken for the whole
+    ...(more || cursor ? { showing: `${rows.length} of ${total}${more ? "; pass next_cursor as cursor for the next page" : " (the last page)"}` } : {}),
     items: rows.map(src.item),
     next_cursor: more ? String(rows[rows.length - 1]._k) : null,
     hint: "Use read([ids]) for full content.",
@@ -137,6 +147,11 @@ const postSource = (where: string, params: unknown[] = []): TimeSource => ({ fro
 export async function explore(actor: Agent, rawPath = "/", cursor?: string): Promise<ExploreResult> {
   const parts = rawPath.split("/").map((s) => s.trim()).filter(Boolean);
   const [space, a, b, c] = parts;
+  // what this agent may see: a part of the app it may not see is not on the map and not at its address
+  const sight = sightOf(actor);
+  const nowhere = () => notFound(`Nothing at "${rawPath}". Start from explore("/").`);
+  if ((space === "feed" || space === "todos" || space === "rail" || space === "pages" || space === "links" || space === "following" || space === "journal" || space === "ideas") && !sight.section(space)) throw nowhere();
+  if (space === "log" && !sight.full) throw nowhere();
 
   if (!space) {
     const n = await q1<Record<string, number>>(
@@ -149,13 +164,10 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
               (SELECT count(*)::int FROM trackers WHERE NOT archived) AS following,
               (SELECT count(*)::int FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()) AS rail,
               (SELECT count(*)::int FROM agents WHERE NOT archived AND kind <> 'guest') AS agents,
+              (SELECT count(*)::int FROM ideas WHERE deleted_at IS NULL) AS ideas,
               (SELECT count(*)::int FROM events) AS log`,
     );
-    return {
-      path: "/",
-      title: "Subspace",
-      about: "Everything in the system, as a map. Open any path with explore(path).",
-      children: [
+    const all: Child[] = [
         { path: "/feed", title: "Feed", about: "Short updates from agents and the owner, with conversation threads.", count: n!.feed },
         { path: "/todos", title: "Todos", about: "The owner's task list, by day and week.", count: n!.todos },
         { path: "/context", title: "Context", about: "Shared long-term memory about the owner, their life and the agents' work. A tree you can reshape.", count: n!.context },
@@ -164,9 +176,22 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/journal", title: "Journal", about: "The owner's own thoughts, musings and wishes, by day. Browse it by month: each month says how it felt and what ran through it, each entry has a mood, themes and a one-line gist. Read it to understand them.", count: n!.journal },
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
         { path: "/rail", title: "Rail", about: "Timely modules shown beside the owner's screen right now (bookings, deadlines, today's details).", count: n!.rail },
+        { path: "/ideas", title: "Ideas", about: "Canvases where the owner leaves an idea to grow. Agents add to them a little at a time, following what the owner kept and pruned.", count: n!.ideas },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
+        { path: "/routines", title: "Routines", about: "Duties that come round on a schedule, and which agent does each.", count: ROUTINES.length },
         { path: "/log", title: "Log", about: "Every change ever made, oldest to newest.", count: n!.log },
-      ],
+    ];
+    const open = (c: Child) => {
+      const key = c.path.slice(1);
+      if (key === "log") return sight.full;
+      return key === "context" || key === "agents" || key === "routines" || sight.section(key as Parameters<typeof sight.section>[0]);
+    };
+    return {
+      path: "/",
+      title: sight.full ? "Subspace" : "Subspace (the parts you can see)",
+      about: "Everything in the system, as a map. Open any path with explore(path).",
+      // the counts are of everything, so an agent that sees only part is not given them
+      children: sight.full ? all : all.filter(open).map((c) => ({ path: c.path, title: c.title, about: c.about })),
     };
   }
 
@@ -177,6 +202,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         title: "Feed",
         children: [
           { path: "/feed/recent", title: "Recent", about: "The latest posts." },
+          { path: "/feed/week", title: "This week", about: "Every post of the last seven days in one call, a line each: for checking what the feed has and has not covered." },
           { path: "/feed/active", title: "Active threads", about: "Conversations with recent replies." },
           { path: "/feed/by-time", title: "By time", about: "The whole feed, split by year, month and day as needed." },
           { path: "/feed/by-agent", title: "By agent", about: "One branch per author." },
@@ -189,6 +215,16 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     if (a === "recent") {
       const r = await timeTree({ path: "/feed/recent", title: "Recent" }, { ...postSource("p.parent_id IS NULL AND p.channel = 'feed'") }, undefined, cursor || "~");
       return r;
+    }
+    if (a === "week") {
+      const rows = await q<Record<string, unknown>>(`SELECT ${POST_SELECT} FROM ${POST_FROM} WHERE p.parent_id IS NULL AND p.channel = 'feed' AND p.created_at > now() - interval '7 days' ORDER BY p.id DESC LIMIT 400`);
+      return {
+        path: "/feed/week",
+        title: "The feed, last seven days",
+        count: rows.length,
+        items: rows.map((r) => ({ id: r.id, day: new Date(r.created_at as string).toISOString().slice(0, 10), by: "@" + r.by, line: oneLine(String(r.body), 110), ...(r.tracker ? { topic: r.tracker } : {}) })),
+        hint: "This is the whole week, newest first, one line a post. read([id]) for a post and its thread.",
+      };
     }
     if (a === "active") {
       const rows = await q<Record<string, unknown>>(
@@ -255,7 +291,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   if (space === "context") {
     const sub = parts.slice(1).join("/");
     if (!sub) {
-      const kids = await contextChildren(null);
+      const kids = (await contextChildren(null)).filter(sight.node);
       return {
         path: "/context",
         title: "Context",
@@ -265,10 +301,11 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       };
     }
     const node = await getNode(sub);
-    const linkPage = node.kind === "link" ? null : await listLinks({ parent: node.id, limit: PAGE, before: cursor });
+    if (!sight.node(node)) throw notFound(`No context node "${sub}"`);
+    const linkPage = node.kind === "link" || !sight.section("links") ? null : await listLinks({ parent: node.id, limit: PAGE, before: cursor });
     const links = linkPage?.total ? { count: linkPage.total, items: linkPage.links.map((l) => linkItem(l as unknown as Record<string, unknown>)), next_cursor: linkPage.next } : undefined;
     if (cursor) return { path: `/context/${node.path}`, title: node.title, links };
-    const kids = await contextChildren(node.id);
+    const kids = (await contextChildren(node.id)).filter(sight.node);
     return {
       path: `/context/${node.path}`,
       title: node.title,
@@ -308,11 +345,11 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     if (a === "by-time")
       return timeTree(
         { path: "/pages/by-time", title: "Pages" },
-        { from: "context_nodes", where: "kind = 'page' AND NOT archived", params: [], ts: "created_at", order: "id", select: "id, path, title, summary, created_at", item: pageItem },
+        { from: "context_nodes", where: `kind = 'page' AND NOT archived AND ${sight.nodeSql("context_nodes")}`, params: [], ts: "created_at", order: "id", select: "id, path, title, summary, created_at", item: pageItem },
         b,
         cursor,
       );
-    const recent = await recentPages(15);
+    const recent = (await recentPages(sight.full ? 15 : 50)).filter(sight.node).slice(0, 15);
     return {
       path: "/pages",
       title: "Pages",
@@ -330,11 +367,11 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     if (a === "by-time")
       return timeTree(
         { path: "/links/by-time", title: "Links" },
-        { from: "context_nodes", where: "kind = 'link' AND NOT archived", params: [], ts: "created_at", order: "id", select: "id, title, url, site, summary, blurb, length(body) AS body_chars, created_at", item: (r) => linkItem(r) },
+        { from: "context_nodes", where: `kind = 'link' AND NOT archived AND ${sight.nodeSql("context_nodes")}`, params: [], ts: "created_at", order: "id", select: "id, title, url, site, summary, blurb, length(body) AS body_chars, created_at", item: (r) => linkItem(r) },
         b,
         cursor,
       );
-    const page = await listLinks({ limit: PAGE, before: cursor });
+    const page = await listLinks({ limit: PAGE, before: cursor, ...(sight.full ? {} : { visible: sight.nodeSql("n") }) });
     return {
       path: "/links",
       title: "Links",
@@ -388,6 +425,45 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       about: x.bio,
       children: [{ path: `/feed/by-agent/${x.handle}`, title: "Posts" }, ...tracked.map((t) => ({ path: `/following/${t.slug}`, title: `Tracks: ${t.title}` }))],
       items: [{ id: x.id, kind: x.kind, roles: x.roles, last_seen: x.last_seen_at }],
+    };
+  }
+
+  if (space === "ideas") {
+    if (a) {
+      const idea = await ideaForAgent(actor, a);
+      return { path: `/ideas/${idea.id}`, title: idea.title, about: `${idea.state}; ${idea.pieces.length} pieces.`, items: [idea as unknown as Item], hint: "This is the same as idea_read. idea_grow adds a piece; idea_connect joins two." };
+    }
+    const all = await ideasForAgent();
+    return {
+      path: "/ideas",
+      title: "Ideas",
+      about: "Each idea is a canvas the owner is thinking on. They put down text and pictures; agents branch from those, a few pieces a day; the owner keeps what they like and prunes what they do not.",
+      children: all.ideas.map((i) => ({ path: `/ideas/${i.id}`, title: i.title, about: `${i.state}; ${i.pieces} pieces${i.last_grown ? "" : "; not grown yet"}.`, latest: i.touched })),
+      hint: all.how,
+    };
+  }
+
+  if (space === "routines") {
+    const agents = await listAgents(true);
+    const who = (id: string | null) => (id ? "@" + (agents.find((x) => x.id === id)?.handle ?? id) : null);
+    const all = await listRoutines();
+    if (a) {
+      const r = all.find((x) => x.key === a);
+      if (!r) throw notFound(`No routine "${a}". explore("/routines") lists them.`);
+      return {
+        path: `/routines/${r.key}`,
+        title: r.title,
+        about: r.about,
+        items: [{ key: r.key, every: r.every, done_by: who(r.agent_id) ?? "nobody yet", next_due: r.next_at, last_handed_over: r.last_at, last_done: r.last_done_at, ...(r.last_note ? { last_note: r.last_note } : {}), brief: ROUTINES.find((x) => x.key === r.key)!.brief }],
+        hint: "The brief is what the agent that does this routine follows. It is handed to that agent as a job when it comes due.",
+      };
+    }
+    return {
+      path: "/routines",
+      title: "Routines",
+      about: "Duties that come round on a schedule. The owner gives each to one agent (Agents screen). When a routine is due, that agent is handed a job of kind \"routine\" with its brief, and finishes it with routine_done.",
+      children: all.map((r) => ({ path: `/routines/${r.key}`, title: r.title, about: `${r.about} ${r.every === "weekly" ? "Weekly" : "Daily"}; done by ${who(r.agent_id) ?? "nobody yet"}.`, latest: r.last_done_at })),
+      hint: "If a routine is yours it reaches you by itself; you do not need to check here. If it is another agent's, leave it to them.",
     };
   }
 
@@ -462,9 +538,11 @@ const linkItem = (r: Record<string, unknown>, where = false): Item => ({
   saved: new Date(r.created_at as string).toISOString().slice(0, 10),
 });
 
-const contextChild = (k: { path: string; title: string; summary: string; kind?: string; blurb?: string | null; child_count?: number; body_chars: number; updated_at: string }): Child => ({
+/** How a note that holds only for a while says so in a listing. The day is compared in UTC, which is near enough for a label. */
+const untilNote = (until?: string | null) => (until ? (until < new Date().toISOString().slice(0, 10) ? ` (lapsed: it held until ${until})` : ` (until ${until})`) : "");
+const contextChild = (k: { path: string; title: string; summary: string; kind?: string; blurb?: string | null; child_count?: number; body_chars: number; updated_at: string; until?: string | null }): Child => ({
   path: `/context/${k.path}`,
-  title: k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.kind === "journal" ? `${k.title} (journal entry)` : k.title,
+  title: (k.kind === "page" ? `${k.title} (page)` : k.kind === "link" ? `${k.title} (link)` : k.kind === "journal" ? `${k.title} (journal entry)` : k.title) + untilNote(k.until),
   about: k.summary || k.blurb || undefined,
   ...(k.child_count ? { count: k.child_count } : {}),
   latest: k.updated_at,
@@ -477,8 +555,8 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
   const saved = await q1<{ cursor_seq: number }>("SELECT cursor_seq FROM agents WHERE id = $1", [agent.id]);
   const cursor = opts.since ?? saved?.cursor_seq ?? agent.cursor_seq;
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
-  const rows = await q<{ seq: number; ts: string; type: string; entity_id: string; summary: string; mentions: string[]; data: Record<string, unknown>; handle: string }>(
-    `SELECT e.seq, e.ts, e.type, e.entity_id, e.summary, e.mentions, e.data, a.handle
+  const rows = await q<{ seq: number; ts: string; type: string; entity_type: string; entity_id: string; summary: string; mentions: string[]; data: Record<string, unknown>; handle: string }>(
+    `SELECT e.seq, e.ts, e.type, e.entity_type, e.entity_id, e.summary, e.mentions, e.data, a.handle
      FROM events e JOIN agents a ON a.id = e.actor
      WHERE e.seq > $1 AND e.actor <> $2 AND (e.type NOT LIKE 'job.%' OR e.data->>'assigned_to' = $2)
      ORDER BY e.seq LIMIT $3`,
@@ -489,7 +567,22 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
   const mine = new Set((await q<{ id: string }>("SELECT id FROM trackers WHERE $1 = ANY(agents) AND NOT archived", [agent.id])).map((t) => t.id));
   const for_you: Item[] = [];
   const other: Item[] = [];
-  for (const e of rows) {
+  // An agent that sees only part of the system hears only of changes to that part. Its place still
+  // moves past the rest, so nothing it may not see is ever waiting for it.
+  const sight = sightOf(agent);
+  const nodesSeen = sight.full ? null : await visibleNodes(sight, rows.filter((e) => e.entity_type === "context").map((e) => e.entity_id));
+  const seen = (e: (typeof rows)[number]) => {
+    if (sight.full) return true;
+    if (e.entity_type === "post") return sight.section("feed") || (typeof e.data?.tracker === "string" && sight.section("following"));
+    if (e.entity_type === "todo") return sight.section("todos");
+    if (e.entity_type === "tracker") return sight.section("following");
+    if (e.entity_type === "rail") return sight.section("rail");
+    if (e.entity_type === "idea") return sight.section("ideas");
+    if (e.entity_type === "context") return nodesSeen!.has(e.entity_id);
+    return e.entity_type === "agent" || e.entity_type === "job";
+  };
+  const shown = rows.filter(seen);
+  for (const e of shown) {
     const item: Item = { seq: e.seq, at: e.ts, by: "@" + e.handle, type: e.type, id: e.entity_id, line: e.summary };
     if (e.data?.root) item.thread = e.data.root;
     if (e.type === "post.replied" && e.mentions.includes(agent.handle)) {
@@ -507,6 +600,8 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
     // how they cleared it: "action" (with the button they chose), "todo_open", "later" (todo is the task it became) or "dismiss"
     if (myModule && e.data?.by) item.by_owner = e.data.by;
     if (myModule && e.data?.action) item.action = e.data.action;
+    // a button of yours that sends an action back: this is the action, in the word you gave it
+    if (myModule && e.data?.sent) item.sent = e.data.sent;
     const direct = e.mentions.includes(agent.handle) || e.type === "job.created" || myModule || (typeof e.data?.tracker === "string" && mine.has(e.data.tracker));
     (direct ? for_you : other).push(item);
   }
@@ -522,7 +617,7 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
     other,
     ...(more ? { has_more: true, note: "More changes are waiting. Call changes again." } : {}),
     ...(jobs.length ? { open_jobs: jobs } : {}),
-    ...(!rows.length && !jobs.length ? { note: "Nothing new." } : {}),
+    ...(!shown.length && !jobs.length ? { note: "Nothing new." } : {}),
   };
 }
 
@@ -530,7 +625,14 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
 
 const TYPES = ["post", "todo", "context", "link", "tracker"];
 
-export async function search(opts: { query: string; types?: string[]; since?: string; limit?: number; offset?: number }) {
+export async function search(opts: { query: string; types?: string[]; since?: string; limit?: number; offset?: number; /** the agent searching; what it may not see is not found */ actor?: Agent }) {
+  const sight = sightOf(opts.actor);
+  const yes = (b: boolean) => (b ? "TRUE" : "FALSE");
+  // by kind: posts, tasks and followed topics follow their part of the app; everything else is a context node and must be one it may see
+  const visible = sight.full
+    ? null
+    : `(CASE d.entity_type WHEN 'post' THEN ${yes(sight.section("feed"))} WHEN 'todo' THEN ${yes(sight.section("todos"))} WHEN 'tracker' THEN ${yes(sight.section("following"))}
+         ELSE EXISTS (SELECT 1 FROM context_nodes n WHERE n.id = d.entity_id AND ${sight.nodeSql("n")}) END)`;
   const query = (opts.query ?? "").trim();
   if (!query) throw bad("Search needs a query.");
   const types = (opts.types ?? []).filter((t) => TYPES.includes(t));
@@ -540,6 +642,7 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   const run = async (tsq: string, qparam: string) => {
     const params: unknown[] = [qparam];
     let where = `d.tsv @@ ${tsq}`;
+    if (visible) where += ` AND ${visible}`;
     if (types.length) {
       params.push(types);
       where += ` AND d.entity_type = ANY($${params.length})`;
@@ -561,12 +664,22 @@ export async function search(opts: { query: string; types?: string[]; since?: st
 
   // An address is looked up directly: "is this page saved?" is one index probe, not a text search.
   const wantsLinks = !types.length || types.includes("link");
-  const exact = wantsLinks && offset === 0 && !opts.since && /^\S+\.\S+$/.test(query) ? await findByUrl(query) : null;
+  const found = wantsLinks && offset === 0 && !opts.since && /^\S+\.\S+$/.test(query) ? await findByUrl(query) : null;
+  const exact = found && sight.node(found) ? found : null;
 
   // when the address itself is saved, that is the answer: no text search needed
   let rows = exact ? [] : await run("websearch_to_tsquery('english', $1)", query);
+  // By meaning as well, when that is on: what says the same thing in other words. First page only.
+  let near: Near[] = [];
+  if (meaningOn() && !exact && offset === 0) {
+    const params: unknown[] = [];
+    let where = visible ?? "TRUE";
+    if (types.length) where += ` AND d.entity_type = ANY($${params.push(types) + 1})`;
+    if (opts.since) where += ` AND d.ts >= $${params.push(opts.since) + 1}::timestamptz`;
+    near = await nearest(query, { where, params, limit });
+  }
   let loose = false;
-  if (!rows.length && offset === 0 && !exact) {
+  if (!rows.length && !near.length && offset === 0 && !exact) {
     // Nothing matched every word: fall back to any word, matching prefixes.
     const words = query.toLowerCase().match(/[a-z0-9]{2,}/g) ?? [];
     if (words.length) {
@@ -576,6 +689,14 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   }
   const more = rows.length > limit;
   if (more) rows.pop();
+  // one order from the two: what both rank well comes first, and a match by meaning alone says so
+  const byWords = new Set(rows.map((r) => r.entity_type + ":" + r.entity_id));
+  const meant = new Set<string>();
+  if (near.length) {
+    const asRow = (n: Near) => ({ entity_type: n.entity_type, entity_id: n.entity_id, title: n.title, snippet: n.start, ts: n.ts });
+    rows = fuse([rows, near.map(asRow)], (r) => r.entity_type + ":" + r.entity_id).slice(0, limit);
+    for (const r of rows) if (!byWords.has(r.entity_type + ":" + r.entity_id)) meant.add(r.entity_type + ":" + r.entity_id);
+  }
 
   if (exact) rows = rows.filter((r) => r.entity_id !== exact.id);
   const ctxIds = rows.filter((r) => r.entity_type === "context" || r.entity_type === "link").map((r) => r.entity_id);
@@ -586,6 +707,8 @@ export async function search(opts: { query: string; types?: string[]; since?: st
   const share = await sharingFor([...guestOf.values()]);
   return {
     query,
+    // what this search did, so the agent knows what an empty answer means
+    mode: meaningOn() ? "words and meaning" : "words only",
     ...(exact ? { note: "This address is already saved (first result)." } : loose ? { note: "No exact match; showing partial matches." } : {}),
     results: [
       ...(exact ? [{ id: exact.id, type: "link", title: exact.title, path: "/context/" + exact.path, url: exact.url, ...(exact.site ? { site: exact.site } : {}), ...(exact.summary ? { why: exact.summary } : {}), snippet: oneLine(exact.blurb || exact.summary || "", 220), at: exact.updated_at }] : []),
@@ -596,11 +719,86 @@ export async function search(opts: { query: string; types?: string[]; since?: st
         ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
         ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
         ...(r.entity_type === "todo" ? share.tag(guestOf.get(r.entity_id)) : {}),
+        ...(meant.has(r.entity_type + ":" + r.entity_id) ? { match: "meaning" } : {}),
         snippet: oneLine(r.snippet, 220),
         at: r.ts,
       })),
     ],
     next_offset: more ? offset + limit : null,
+    ...(more ? { more: `More match these words. Call again with offset: ${offset + limit}.` } : {}),
+  };
+}
+
+// ---------- Gather ----------
+
+const STOP = new Set("the a an and or but for with without from into onto about over under this that these those there here what when where which who whom whose why how are was were been being have has had does did will would shall should can could may might must not you your yours our ours their theirs his her its they them she him one two also than then them some any all each every more most other such only own same very just before after during while because until since".split(" "));
+
+/**
+ * Everything worth knowing for one piece of work, in one call: what is current, and the notes,
+ * pages, journal entries, tasks, posts, links and followed topics that bear on it, by title and
+ * summary only. `about` is a task's id or a sentence. It saves the map-walking and the several
+ * searches an agent would otherwise make before starting; read() then fetches what is needed.
+ */
+export async function gather(actor: Agent, aboutIn: unknown) {
+  const sight = sightOf(actor);
+  let about = typeof aboutIn === "string" ? aboutIn.trim() : "";
+  if (!about) throw bad("gather needs about: a task's id (t_…) or a sentence saying what the work is.");
+  let task: { id: string; title: string } | null = null;
+  if (/^t_[a-z0-9]+$/.test(about)) {
+    if (!sight.section("todos")) throw notFound("Nothing by that id.");
+    const t = await getTodo(about);
+    task = { id: t.id, title: t.title };
+    about = [t.title, (t.tags ?? []).join(" "), oneLine(t.notes, 500)].filter(Boolean).join(". ");
+  }
+  const yes = (b: boolean) => (b ? "TRUE" : "FALSE");
+  const visible = sight.full
+    ? "TRUE"
+    : `(CASE d.entity_type WHEN 'post' THEN ${yes(sight.section("feed"))} WHEN 'todo' THEN ${yes(sight.section("todos"))} WHEN 'tracker' THEN ${yes(sight.section("following"))}
+         ELSE EXISTS (SELECT 1 FROM context_nodes n WHERE n.id = d.entity_id AND ${sight.nodeSql("n")}) END)`;
+  const self = task ? ` AND NOT (d.entity_type = 'todo' AND d.entity_id = '${task.id}')` : "";
+  const words = [...new Set(about.toLowerCase().match(/[a-z0-9][a-z0-9'-]{2,}/g) ?? [])].map((w) => w.replace(/[^a-z0-9]/g, "")).filter((w) => w.length > 2 && !STOP.has(w)).slice(0, 16);
+  type Hit = { entity_type: string; entity_id: string };
+  const worded = words.length
+    ? await q<Hit>(
+        `SELECT d.entity_type, d.entity_id FROM search_docs d WHERE d.tsv @@ to_tsquery('english', $1) AND ${visible}${self}
+         ORDER BY ts_rank_cd(d.tsv, to_tsquery('english', $1)) DESC, d.ts DESC LIMIT 60`,
+        [words.map((w) => `${w}:*`).join(" | ")],
+      )
+    : [];
+  const near: Hit[] = await nearest(about, { where: visible + self, limit: 40 });
+  const ranked = fuse([worded, near], (h) => h.entity_type + ":" + h.entity_id);
+  const idsOf = (type: string) => ranked.filter((h) => h.entity_type === type).map((h) => h.entity_id);
+  const inOrder = <T extends { id: string }>(ids: string[], rows: T[]) => ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is T => !!r);
+
+  const ctxIds = [...idsOf("context"), ...idsOf("link")];
+  const nodes = ctxIds.length
+    ? await q<{ id: string; path: string; title: string; summary: string; kind: string; url: string | null; entry_date: string | null; until: string | null }>(
+        "SELECT id, path, title, summary, kind, url, entry_date, until FROM context_nodes WHERE id = ANY($1) AND NOT archived",
+        [ctxIds],
+      )
+    : [];
+  const ordered = inOrder(ctxIds, nodes);
+  const todoIds = idsOf("todo");
+  const todos = todoIds.length ? await q<{ id: string; title: string; done: boolean; scope: string; date: string | null; tags: string[] }>("SELECT id, title, done, scope, date, tags FROM todos WHERE id = ANY($1) AND deleted_at IS NULL", [todoIds]) : [];
+  const postIds = idsOf("post");
+  const posts = postIds.length ? await q<{ id: string; body: string; created_at: string }>("SELECT id, body, created_at FROM posts WHERE id = ANY($1) AND created_at > now() - interval '90 days'", [postIds]) : [];
+  const topicIds = idsOf("tracker");
+  const topics = topicIds.length ? await q<{ id: string; slug: string; title: string; latest: string }>("SELECT id, slug, title, latest FROM trackers WHERE id = ANY($1) AND NOT archived", [topicIds]) : [];
+  const now = (await currentNotes().catch(() => [])).filter((c) => !c.lapsed && sight.node(c));
+  const line = (n: (typeof nodes)[number]) => ({ id: n.id, path: "/context/" + n.path, title: n.title, ...(n.summary ? { about: n.summary } : {}), ...(n.until ? { until: n.until } : {}) });
+  const some = <T,>(key: string, list: T[]) => (list.length ? { [key]: list } : {});
+  return {
+    about: task ? { task: task.id, title: task.title } : oneLine(about, 200),
+    mode: meaningOn() ? "by words and meaning" : "by words only",
+    ...some("current", now.slice(0, 8).map((c) => ({ path: "/context/" + c.path, title: c.title, about: c.summary || undefined, ...(c.until ? { until: c.until } : {}) }))),
+    ...some("context", ordered.filter((n) => n.kind === "note" && !n.path.startsWith("current/")).slice(0, 7).map(line)),
+    ...some("pages", ordered.filter((n) => n.kind === "page").slice(0, 4).map(line)),
+    ...some("journal", ordered.filter((n) => n.kind === "journal").slice(0, 4).map((n) => ({ id: n.id, day: n.entry_date, title: n.title, ...(n.summary ? { gist: n.summary } : {}) }))),
+    ...some("links", ordered.filter((n) => n.kind === "link").slice(0, 4).map((n) => ({ id: n.id, title: n.title, url: n.url, ...(n.summary ? { why: n.summary } : {}) }))),
+    ...some("tasks", inOrder(todoIds, todos).slice(0, 7).map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}) }))),
+    ...some("posts", inOrder(postIds, posts).slice(0, 6).map((p) => ({ id: p.id, day: new Date(p.created_at).toISOString().slice(0, 10), line: oneLine(p.body, 120) }))),
+    ...some("topics", inOrder(topicIds, topics).slice(0, 3).map((t) => ({ id: t.id, path: "/following/" + t.slug, title: t.title, ...(t.latest ? { latest: oneLine(t.latest, 100) } : {}) }))),
+    next: "These are titles and summaries, best match first in each group. read([ids]) the few you need. If something you expected is missing, search() for it by name.",
   };
 }
 
@@ -617,7 +815,9 @@ const slimPost = (p: Post, handles: Map<string, string>) => ({
   ...(p.art?.status === "pending" ? { illustration: "pending" } : {}),
 });
 
-export async function read(ids: string[], opts: { after?: string } = {}) {
+export async function read(ids: string[], opts: { after?: string; /** the agent reading; what it may not see reads as not there */ actor?: Agent } = {}) {
+  const sight = sightOf(opts.actor);
+  const gone = () => notFound("Nothing by that id.");
   if (!ids?.length) throw bad("read needs at least one id.");
   if (ids.length > 20) throw bad("read takes at most 20 ids at a time.");
   const agents = await listAgents(true);
@@ -626,10 +826,12 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
   for (const id of ids) {
     try {
       if (id.startsWith("r_")) {
+        if (!sight.section("rail")) throw gone();
         const m = await getModule(id);
         out.push({ type: "rail", id: m.id, key: m.key, by: "@" + (handles.get(m.author) ?? m.author), title: m.title, label: m.label, ...(m.icon ? { icon: m.icon } : {}), subtitle: m.subtitle, blocks: m.blocks, actions: m.actions, ...(m.page_id ? { page: m.page_id } : {}), ...(m.todo_id ? { todo: m.todo_id } : {}), from: m.show_from, until: m.show_until, ...railGone(m) });
       } else if (id.startsWith("p_")) {
         const t = await getThread(id, { after: opts.after, limit: 60 });
+        if (!sight.section("feed") && !(t.root.tracker_id && sight.section("following"))) throw gone();
         out.push({
           type: "post",
           ...slimPost(t.root, handles),
@@ -640,9 +842,11 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
           ...(t.next_after ? { more_replies_after: t.next_after } : {}),
         });
       } else if (id.startsWith("t_")) {
+        if (!sight.section("todos")) throw gone();
         const t = await getTodo(id);
         out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.tags?.length ? { tags: t.tags } : {}), ...(await sharingFor([t.guest_id])).warning(t.guest_id), notes: t.notes, updated_at: t.updated_at });
       } else if (id.startsWith("f_") || (!id.startsWith("c_") && !id.includes("/") && (await q1("SELECT 1 FROM trackers WHERE slug = $1", [id])))) {
+        if (!sight.section("following")) throw gone();
         const t = await getTracker(id);
         out.push({
           type: "tracker",
@@ -658,9 +862,10 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         });
       } else {
         const n = await getNode(id);
+        if (!sight.node(n)) throw gone();
         const crumbs = await breadcrumb(n);
-        const kids = await contextChildren(n.id);
-        const saved = n.kind === "link" ? 0 : (await listLinks({ parent: n.id, limit: 1 })).total;
+        const kids = (await contextChildren(n.id)).filter(sight.node);
+        const saved = n.kind === "link" || !sight.section("links") ? 0 : (await listLinks({ parent: n.id, limit: 1 })).total;
         out.push({
           type: n.kind === "page" ? "page" : n.kind === "link" ? "link" : n.kind === "journal" ? "journal" : "context",
           id: n.id,
@@ -671,6 +876,7 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
           trail: crumbs.map((c) => c.title).join(" › "),
           title: n.title,
           summary: n.summary,
+          ...(n.until ? { until: n.until } : {}),
           body: n.body,
           version: n.version,
           updated_by: "@" + (handles.get(n.updated_by) ?? n.updated_by),
@@ -681,7 +887,8 @@ export async function read(ids: string[], opts: { after?: string } = {}) {
         });
       }
     } catch (e) {
-      out.push({ id, error: (e as Error).message });
+      // to an agent that sees only part, a hidden thing and a missing one must read the same
+      out.push({ id, error: sight.full ? (e as Error).message : "Nothing by that id." });
     }
   }
   return out;
@@ -712,8 +919,25 @@ export async function briefing(agent: Agent) {
   );
   const agents = await listAgents();
   await q("UPDATE agents SET last_seen_at = now() WHERE id = $1", [agent.id]);
+  const sight = sightOf(agent);
+  const access = sight.full ? null : describeAccess(agent, await contextChildren(null));
+  const mine = (await listRoutines()).filter((r) => r.agent_id === agent.id);
+  // said here as well as on connecting: an app may hold instructions from the day it connected, but it reads this every session
+  const rules = sight.node({ path: SYSTEM, kind: "note" }) ? await houseRules().catch(() => "") : "";
+  // what is true for now, so every session starts knowing it; a note past its day is left out, and its writer is reminded of it
+  const now = (await currentNotes().catch(() => [])).filter(sight.node);
+  const handleOf = (id: string) => "@" + (agents.find((a) => a.id === id)?.handle ?? id);
+  const mineLapsed = now.filter((c) => c.lapsed && c.updated_by === agent.id);
   return {
     you: { handle: "@" + agent.handle, name: agent.name, roles: agent.roles, bio: agent.bio },
+    ...(access ? { your_access: access } : {}),
+    ...(now.some((c) => !c.lapsed)
+      ? { current: now.filter((c) => !c.lapsed).slice(0, 12).map((c) => ({ path: "/context/" + c.path, title: c.title, about: c.summary || undefined, ...(c.until ? { until: c.until } : {}), set_by: handleOf(c.updated_by) })) }
+      : {}),
+    ...(mineLapsed.length && !sight.readOnly
+      ? { lapsed_notes_of_yours: mineLapsed.map((c) => ({ path: "/context/" + c.path, title: c.title, until: c.until })), lapsed_hint: "These notes of yours under /context/current have passed their day. Renew each with a new until, fold what lasted into long-term context, or archive it." }
+      : {}),
+    ...(rules ? { house_rules: rules.length > 3500 ? rules.slice(0, 3500).trimEnd() + '… (cut short: read the rest under explore("/context/system"))' : rules } : {}),
     owner: "@" + agents.find((a) => a.kind === "human")?.handle,
     now: { today: cal.today, timezone: tz },
     waiting_for_you: {
@@ -722,14 +946,23 @@ export async function briefing(agent: Agent) {
       open_jobs: peek.open_jobs?.length ?? 0,
       next: "Call changes() to see them and move your cursor forward.",
     },
-    rail: (await allModules()).filter((m) => !m.dismissed_at && !m.task_done).map((m) => ({ key: m.key, by: "@" + m.handle, title: m.title, until: m.show_until, ...(m.todo_id ? { todo: m.todo_id } : {}) })),
+    ...(sight.section("rail")
+      ? { rail: (await allModules()).filter((m) => !m.dismissed_at && !m.task_done).map((m) => ({ key: m.key, by: "@" + m.handle, title: m.title, until: m.show_until, ...(m.todo_id ? { todo: m.todo_id } : {}) })) }
+      : {}),
     // said here as well as in the guide: an app may hold an old copy of the instructions, but it reads this every session
-    when_you_need_the_owner:
-      'The feed is for reading and the owner may never see a given post, so never ask for anything in a post or a reply under your own post. Add a task with what they need in its notes (todo_add, tagged with its subject), then point a rail module at it: rail_set with todo set to the task\'s id. guide("followups") has the steps.',
-    recent_pages: (await recentPages(5)).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })),
-    your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })),
+    ...(sight.readOnly
+      ? {}
+      : {
+          when_you_need_the_owner:
+            'The feed is for reading and the owner may never see a given post, so never ask for anything in a post or a reply under your own post. Add a task with what they need in its notes (todo_add, tagged with its subject), then point a rail module at it: rail_set with todo set to the task\'s id. guide("followups") has the steps.',
+        }),
+    ...(sight.section("pages")
+      ? { recent_pages: (await recentPages(sight.full ? 5 : 30)).filter(sight.node).slice(0, 5).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })) }
+      : {}),
+    ...(sight.section("following") ? { your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })) } : {}),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),
-    ...(await sharedListsNote()),
+    ...(mine.length ? { your_routines: mine.map((r) => ({ path: `/routines/${r.key}`, title: r.title, every: r.every, next_due: r.next_at })) } : {}),
+    ...(sight.section("todos") && !sight.readOnly ? await sharedListsNote() : {}),
     map: (await explore(agent, "/")).children,
   };
 }

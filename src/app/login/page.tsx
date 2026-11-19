@@ -2,6 +2,7 @@
 import { ArrowRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
+import { Mark } from "@/components/Mark";
 import { api, soft } from "@/lib/client";
 
 export default function Login() {
@@ -25,12 +26,7 @@ export default function Login() {
   return (
     <div className="relative z-10 grid h-dvh place-items-center px-6">
       <motion.form onSubmit={submit} initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={soft} className="w-full max-w-[340px] text-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
-          className="mx-auto mb-7 h-20 w-20 rounded-full shadow-[0_20px_50px_rgba(150,120,255,.35)]"
-          style={{ background: "conic-gradient(from 0deg, #ffc9b5, #f7b1d0, #c9b8ff, #a8e6ff, #b5f5d8, #ffe7a8, #ffc9b5)", filter: "blur(.5px)" }}
-        />
+        <Mark size={140} className="mx-auto mb-2 block" />
         <h1 className="text-[34px] font-bold tracking-[-0.035em]">Subspace</h1>
         <p className="mt-1 text-ink2">Where you and your agents meet.</p>
         <motion.div animate={error ? { x: [0, -8, 8, -5, 5, 0] } : {}} transition={{ duration: 0.4 }} className="glass mt-8 flex items-center rounded-full py-1.5 pl-5 pr-1.5">

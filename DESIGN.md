@@ -139,8 +139,8 @@ Patterns:
 ## Components and patterns
 
 - **App bar** (`Shell.tsx`): icons only, one glass pill; left on wide screens, bottom on phones.
-  Six tabs: Feed, Todos, Journal, Context, Following, Agents. Targets are 48px, 44px on phones so
-  the six and the Now button fit a 390px screen.
+  Seven tabs: Feed, Todos, Journal, Ideas, Context, Following, Agents. Targets are 48px; on
+  phones they are 40px wide and 44px tall, so the seven and the Now button fit a 360px screen.
 - **Rows** (todos, links): no dividers; hover fill; title, one secondary line, one meta line.
   A row that stands for something in another place (a task in a person's list) names that place
   in a word or two at its end, in meta type.
@@ -235,6 +235,103 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **Ideas** (`ideas/page.tsx`; `Ideas/` in the app): a place to let an idea grow, and the one
+  screen that is a canvas rather than a list. It is a visual ideation space, not a tool: calm,
+  nearly empty of controls, and worked with the hands.
+  - *The shelf.* Ideas as 26px glass cards, three across (two on a tablet or phone), each topped
+    by a small picture of its canvas: a dot where every piece sits, the owner's in `ink`, the
+    agents' in `accent`. Beneath, the idea's name and a meta line ("Grew 2h ago · 9 pieces"); an
+    accent dot beside the name when agents have added something not yet looked at. The first
+    cell is the dashed "New idea".
+  - *The canvas.* The whole screen, over a faint field of dots that moves and scales with it.
+    Drag to move about; pinch, or scroll with ctrl, to zoom. Glass pills float at the top: the
+    way back and the idea's name at the left; add a picture, Growing or Resting, and remove at
+    the right. Nothing else is on screen until a piece is touched.
+  - *The owner's pieces* have no container. Words sit bare in the rounded face (`.idea-hand`,
+    `design: .rounded`), centred, in one of four sizes (15, 20, 30, 46px), so they read as
+    written rather than typeset. Pictures have 20px corners, a soft shadow, and a tilt of a
+    degree or so that is always the same for the same picture.
+  - *Agents' pieces* are 236px containers with 20px corners in that agent's own quiet tint (its
+    palette's first colour at about a quarter strength over `surface`, with a hairline of the
+    same), so who added what is seen without reading. Inside: the avatar and name in meta type
+    with a one-word kind (riff, found, but, ?), then a line or two at 14.5px, then the source as
+    a quiet link when it was something found. A piece arrives by growing from 70% with `spring`.
+  - *Joins* are soft curves, 1.8px with round ends, each bowed to one side by an amount that
+    never changes for that join, stopping short of the pieces they connect. An agent's join is
+    dotted in `ink3` and may carry two or three words in small italics; the owner's own are solid
+    `accent`. Never straight, never arrowed.
+  - *Gestures.* Double-tap empty space to write there. Drag a piece to move it; drop it on
+    another to say they belong together (it returns home and a join is drawn). Double-tap a
+    piece to keep it, or, on the owner's own words, to change them. Press and hold for more of
+    it. Flick it away to prune it. Each gesture answers at once: a kept piece gains a small
+    accent star at its corner; "more" shows a glass pill under the piece naming who was asked; a
+    pruned piece flies off the way it was thrown, and "Pruned … Bring back" stays for six
+    seconds.
+  - *For those who would rather tap.* Choosing a piece (one tap) shows a small glass bar at the
+    foot with the same things as icon buttons: keep, more, smaller and larger for the owner's
+    words, prune. It is the only toolbar, and it is there only while a piece is chosen.
+  - What is new since the owner last looked carries a small accent dot that breathes (still,
+    under reduced motion). An empty canvas says how to begin in two lines of `ink3`.
+- **The mark** (`Mark.tsx`; `Design/SubspaceMark.swift` in the app; `scripts/mark.swift` for the
+  icons): Subspace's logo is particles in a latent space. A sparse sphere of small neutral
+  particles is the space; through it, tilted, runs a sheet of larger coloured ones, the subspace,
+  coloured round the six brand hues. Nearer particles are larger and more solid, so it has depth,
+  and it turns once a minute (still, under reduced motion). It answers to the mode: on light,
+  deep colours with `ink` for the neutral particles; on dark, the pastel hues with a soft glow and
+  white for the neutral ones. It is drawn, never a picture, at 140px on the sign-in screens. The
+  browser icon (`public/icon.svg`) is the same mark, still and with fewer, larger particles, and
+  switches with the mode by itself; the iOS app icon has light, dark and tinted versions. The
+  geometry lives in three places that must be changed together. Two other directions drawn with
+  it, "cloud" and "clusters", are kept as `variant` on the web component and are pictured in
+  `design/mark-directions.png` (left to right: the sheet, the cloud, the clusters).
+- **Current** (`CurrentShelf` and the end-day row in `context/page.tsx`; `ContextCurrent.swift` in
+  the app): what is true for now, between the rail and long-term context. At the top of Context,
+  under a small capitals heading "Current", the notes under the Current section sit two across
+  (one on a phone) as 20px glass cards: title, two lines of summary, and a meta line with the
+  avatar and name of whoever set it and "until 30 Nov". A note past its day stays, at 60%
+  opacity, reading "ended 12 Nov", until its writer renews or archives it. Opened, a note that
+  has an end day, and any note under Current, shows it beneath the "Updated by" line as a date
+  pill ("Until 30 Nov"; the system date picker in the app) with a small x to take the day off.
+  The group is absent when there is nothing current. Agents write these unasked, so who set each
+  one is always shown.
+- **House rules and proposals** (`Proposals` in `context/page.tsx`; `ContextProposals.swift` in the
+  app): System is an ordinary top-level section of Context that holds the house rules. The owner
+  edits it like any note. An agent's change to it does not happen: it waits as a proposal, asked
+  in the rail (a module with "Approve" and "Decline", which send the answer) and shown at the top
+  of Context and of System as a glass card, 22px. The card says who proposes what in secondary
+  type with the agent's avatar ("Scout proposes a change to “Quiet hours”"), then the agent's one
+  sentence of why in 15.5px medium, then the change in a `fill` box, then "Read the rule as it
+  would be" to see the whole note, then Approve (accent-soft) and Decline (fill). Answering in
+  either place does the same thing and clears both. Nothing shows when nothing is waiting: there
+  is no empty state and no count.
+- **Routines** (`Routines` in `agents/page.tsx`; `AgentsRoutines.swift` in the app): in an agent's
+  open panel, after Access, a `fill` list headed "Routines", one row per duty that comes round on
+  a schedule. A row is the routine's name, one line on what it is, and a line in `ink3` on where
+  it stands ("Weekly. Nobody does this yet.", "Weekly. Done by Scout.", "Weekly · next Thu 26
+  Nov"), with a switch at its end: on means this agent does it. A routine has one agent, so
+  turning it on here takes it from whoever had it. Under a routine this agent does, what it
+  reported last time shows in `ink3`. A read-only agent has no switches and a line saying why.
+- **An action sent to an agent** (`Module` in `Rail.tsx`, `FromRail` in `todos/page.tsx`;
+  `RailView.swift` in the app): a module's button may send the owner's answer back to the agent
+  that raised it instead of opening a link. It looks like any other button and carries whatever
+  label the agent gave it ("Approve", "Not this", "Shorter"). On a tap the buttons give way, in
+  the same place, to one line in `accent`: "Sending" for the moment the server takes, then a tick
+  and "Sent to <agent>", which arrives with `spring` and is held 1.6 seconds before the module
+  leaves as any other does. That line is the whole acknowledgement: it says the answer has been
+  taken, not that the agent has acted, since the agent may not be running. If it could not be
+  sent, the buttons come back with one `danger` line, "was not sent. Try again." On the task a
+  module became, the buttons that send give way for good to "“Approve” sent to <agent>", followed
+  in `ink3` by "waiting for it" or "picked up". Never a spinner, and never a second confirmation.
+- **Agent access** (`Access` in `agents/page.tsx`; `AgentsAccess.swift` in the app): in an agent's
+  open panel, after its connected apps, a `fill` box headed "Access". First a sentence and a
+  switch, "Read only". Then two rows of chips under quiet labels, "The app" (Feed, Todos, Journal,
+  Following, Pages, Links, Now) and "Context" (the top-level sections, by title): a chip is
+  `accent-soft` with a tick while that part is allowed and `fill2` with `ink3` text while it is
+  not. Each change saves at once; there is no Save button. A last line in `ink3` says in plain
+  words what the current setting means. An agent with any limit carries a quiet `fill` badge
+  beside its name, "Read only" or "Limited", next to the accent "Realtime" and "Illustrator"
+  ones. Limits live on the agent, not on a connection, and are enforced by the server
+  (`core/access.ts`): what is off does not exist for that agent.
 - **From tag** (`FromTag` in `todos/page.tsx`): an `accent-soft` pill reading "From <name>" on a
   task another person added. Shown on rows outside that person's own list and in the task detail.
 - **A person's list** (todos, "From <name>"): a category, not a place. It holds every unfinished
@@ -278,8 +375,10 @@ Patterns:
   control at the right of the heading: a tag icon and "Tags" in `ink3`, no surface. Tapping it
   drops a menu of that list's tags with counts; each is ticked on and off, and the list shows the
   tasks carrying every ticked one, so each tick narrows it further. While a choice is made the control is `accent-soft` and
-  names it, and "Show all" in the menu takes it off. The choice belongs to the list it was made
-  on and is dropped on leaving it, so no task is hidden by a choice made elsewhere. A task added
+  names it, and "Show all" in the menu takes it off. The choice stays until the owner takes
+  it off: it follows them from list to list and is still there after a visit to another screen
+  (kept for the session, not for good). A list where no task carries the chosen tags still shows
+  the control, lit, and says "Nothing tagged <tags> here.", so a choice is never hidden. A task added
   while the list is narrowed takes the chosen tags. On a list with no tagged tasks the control is
   absent. In the iOS app it is the system menu, which stays open while tags are ticked.
 - **Journal** (`journal/page.tsx`): the owner's own writing, arranged by time. Under small month

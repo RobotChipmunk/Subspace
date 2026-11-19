@@ -8,6 +8,9 @@ import { saveLink } from "../src/lib/core/links";
 import { saveMedia } from "../src/lib/core/media";
 import { createPost, createReply } from "../src/lib/core/posts";
 import { setModule } from "../src/lib/core/rail";
+import { ensureSystem, propose } from "../src/lib/core/rules";
+import { ensureCurrent } from "../src/lib/core/current";
+import { addItem, connect as connectPieces, createIdea, getIdea, grow, updateItem } from "../src/lib/core/ideas";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
 import { createTracker } from "../src/lib/core/trackers";
 import { agentById, newId, ownerAgent } from "../src/lib/core/util";
@@ -69,6 +72,8 @@ const CLIP = "GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAASoEU
 
 async function draw(claude: any, pick: (prompt: string) => string) {
   for (const j of await openJobs(claude, 50)) {
+    // a routine is a duty, not a drawing
+    if (j.kind === "routine") continue;
     const p = (j as any).palette ?? paletteFor(1);
     const key = pick(j.prompt ?? "");
     const svg = j.kind === "icon" ? ICONS[key] ?? ICONS.home : (scenes(p.colors, p.ink) as any)[key] ?? scenes(p.colors, p.ink).compost;
@@ -225,6 +230,16 @@ async function main() {
     blocks: [{ type: "timeline", items: [{ when: "9:00 am", title: "Arrives" }, { when: "10:00 am", title: "Written quote by email" }] }],
     show_until: inAWeek,
   });
+  // a suggestion the agent can carry out itself: each button sends the owner's answer back to it
+  await setModule(scout, {
+    key: "follow-shaders",
+    icon: "question",
+    label: "New topic",
+    title: "Follow creative coding?",
+    subtitle: "Three.js and shader work keeps coming up in your journal; nothing tracks it yet.",
+    actions: [{ label: "Follow it", send: "approve" }, { label: "Not this", send: "decline" }],
+    show_until: inAWeek,
+  });
   // A follow-up: two lines that point at the task. The task carries it once the module has gone.
   await setModule(scout, {
     key: "agility-topup",
@@ -234,6 +249,33 @@ async function main() {
     todo: topUp.id,
     show_until: inAWeek,
   });
+
+  // ---- An idea left to grow: the owner's own words, two branches from agents (one kept), and a join. ----
+  const trailer = await createIdea(owner, { text: "A cargo trailer for the bike" });
+  const seedPiece = (await getIdea(trailer.id)).items[0];
+  const use = await addItem(owner, trailer.id, { kind: "text", text: "School run, or weekends?", x: -270, y: 170, size: 2 });
+  const folded = await grow(scout, trailer.id, { from: seedPiece.id, kind: "riff", text: "What if it folded flat, so it stored against the garage wall?" });
+  await grow(atlas, trailer.id, { from: seedPiece.id, kind: "found", text: "Burley's flatbed trailer carries 45 kg and folds to 15 cm.", source: { name: "Burley", url: "https://example.com/burley-flatbed" } });
+  await updateItem(owner, folded.id, { kept: true });
+  await connectPieces(scout, trailer.id, use.id, folded.id, "decides the size");
+
+  // ---- Current: what is true for now. Agents write these from what they see; each says until when. ----
+  const current = await ensureCurrent();
+  const in3Weeks = new Date(Date.now() + 20 * 86400_000).toISOString().slice(0, 10);
+  await createNode(scout, { parent: current.id, title: "This month's focus", summary: "Deciding the robotics allocation before the 12 December lock-up.", body: "- The Agility top-up is the open decision.\n- From the tasks and the journal, 12 Nov.", until: in3Weeks });
+  await createNode(atlas, { parent: current.id, title: "Portland trip", summary: "Away Friday to Sunday; staying at the Residence Inn, Pearl District.", body: "- No meetings while away.\n- From the booking, 10 Nov.", until: inAWeek });
+
+  // ---- House rules: how agents work here. The owner writes them; an agent's change waits for approval. ----
+  const system = await ensureSystem();
+  const quietHours = await createNode(owner, {
+    parent: system.id,
+    title: "Quiet hours",
+    summary: "Nothing that can wait is raised before 9 am or after 8 pm.",
+    body: "- Nothing that can wait is raised before 9 am or after 8 pm.\n- A deadline inside the next day is never something that can wait.",
+  });
+  await createNode(owner, { parent: system.id, title: "Sources", summary: "Prefer primary sources, and name them.", body: "- Prefer the primary source to a report about it.\n- Name where a number came from, every time." });
+  // one change is waiting (kept out of the rail here, so the seeded rail stays as the checks expect it)
+  await propose(scout, { id: quietHours.id, body_append: "- At weekends nothing is raised before 10 am.", why: "You dismissed every Saturday morning module this month." }, { rail: false });
 
   // ---- Saved links ----
   await saveLink(owner, { url: "https://example.com/slow-interfaces", title: "The case for slow interfaces", site: "Works in Progress", why: "Good argument for calm UI, use it for Subspace", about: "Essay on why interfaces that wait for you age better than ones that chase attention." });

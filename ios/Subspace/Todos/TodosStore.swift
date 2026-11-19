@@ -18,9 +18,11 @@ final class TodosStore {
     var foldersLoaded: Bool = false
     /// Every tag the tasks carry, most used first: offered when a tag is added to a task.
     var knownTags: [TodosTagCount] = []
-    /// The tags the selected list is narrowed to; empty shows every task. It starts afresh on
-    /// every list, so no task is hidden by a choice made elsewhere.
-    var filter: [String] = []
+    /// The tags the lists are narrowed to; empty shows every task. The choice stays until the
+    /// owner takes it off: across lists, and on leaving this screen and coming back.
+    var filter: [String] = TodosStore.keptFilter
+    /// The choice, held for as long as the app runs, so a new screen starts with it.
+    @ObservationIgnored private static var keptFilter: [String] = []
 
     /// The selected folder's key, or `binKey`.
     var view: String = "today"
@@ -163,10 +165,12 @@ final class TodosStore {
                 filter.append(tag)
             }
         }
+        Self.keptFilter = filter
     }
 
     func clearFilter() {
         withAnimation(.ssSoft) { filter = [] }
+        Self.keptFilter = []
     }
 
     var groups: [TodosGroup] {
@@ -298,7 +302,6 @@ final class TodosStore {
             openID = nil
             if changed {
                 view = key
-                filter = []
                 addingSection = nil
                 rows = nil
                 unsaved = []
@@ -331,7 +334,6 @@ final class TodosStore {
         guard folders.contains(where: { $0.key == key }) else { return }
         generation += 1
         view = key
-        filter = []
         rows = nil
         unsaved = []
         await refreshList()
@@ -368,7 +370,6 @@ final class TodosStore {
             generation += 1
             withAnimation(.ssSpring) {
                 view = "today"
-                filter = []
                 rows = nil
                 unsaved = []
             }

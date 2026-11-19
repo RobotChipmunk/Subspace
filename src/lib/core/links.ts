@@ -203,10 +203,11 @@ export type LinkPage = { links: LinkLite[]; next: string | null; total: number }
  * time-ordered, so the page boundary is simply the last id seen. Each page is one index range
  * scan however many links there are.
  */
-export async function listLinks(opts: { limit?: number; before?: string | null; parent?: string | null } = {}): Promise<LinkPage> {
+export async function listLinks(opts: { limit?: number; before?: string | null; parent?: string | null; /** a test over the row "n" that narrows the list to what an agent may see (core/access.ts) */ visible?: string } = {}): Promise<LinkPage> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
   const params: unknown[] = [];
   let where = "n.kind = 'link' AND NOT n.archived";
+  if (opts.visible) where += ` AND ${opts.visible}`;
   if (opts.parent) where += ` AND n.parent_id = $${params.push(opts.parent)}`;
   const total = (await q1<{ n: number }>(`SELECT count(*)::int AS n FROM context_nodes n WHERE ${where}`, params))!.n;
   if (opts.before) where += ` AND n.id < $${params.push(opts.before)}`;
