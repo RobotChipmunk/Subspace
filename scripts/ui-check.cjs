@@ -1094,7 +1094,11 @@ async function run(profile) {
     await page.waitForURL((u) => u.search.includes(ideaId), { timeout: 6000 }).catch(() => fail("ideas: the way back from a near idea did not return"));
     await canvas.locator("[data-piece]").first().waitFor({ timeout: 6000 });
     // put back as it was seeded, for the next screen size
-    if (withTask.task) await send("DELETE", `/api/v1/todos/${withTask.task.id}?forever=1`);
+    // (a task is binned first, and only then removed for good)
+    if (withTask.task) {
+      await send("DELETE", `/api/v1/todos/${withTask.task.id}`);
+      await send("DELETE", `/api/v1/todos/${withTask.task.id}?forever=1`);
+    }
     if (process.env.DATABASE_URL && readyBefore) {
       const { Client } = require("pg");
       const db = new Client({ connectionString: process.env.DATABASE_URL });

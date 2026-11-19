@@ -421,6 +421,7 @@ async function main() {
     if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "idea.task" && i.id === idea.id)) throw new Error("the agent was not told its step became a task");
     const twice = await call(s, "idea_ripe", { idea: idea.id, step: "And another" });
     if (!twice.ERROR || !/already made a task/.test(twice.ERROR)) throw new Error("an idea with a task was called ready again: " + JSON.stringify(twice));
+    await deleteTodo(owner, task.id);
     await deleteTodo(owner, task.id, true);
     await deleteIdea(owner, other.id);
     await deleteIdea(owner, idea.id);
