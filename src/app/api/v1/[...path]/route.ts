@@ -4,7 +4,7 @@ import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
 import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
-import { currentNotes } from "@/lib/core/current";
+import { currentNotes, ensureCurrent } from "@/lib/core/current";
 import { search } from "@/lib/core/discover";
 import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
 import { addItem, createIdea, deleteIdea, getIdea, joinItems, listIdeas, moreOf, pruneItem, seenIdea, unjoin, updateIdea, updateItem } from "@/lib/core/ideas";
@@ -13,7 +13,7 @@ import { saveMedia } from "@/lib/core/media";
 import { registerDevice, removeDevice } from "@/lib/core/push";
 import { activeModules, moduleActed, moduleLater, removeModule } from "@/lib/core/rail";
 import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
-import { decide, pendingProposals } from "@/lib/core/rules";
+import { decide, ensureSystem, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
@@ -68,7 +68,12 @@ const routes: [string, RegExp, Handler][] = [
   ["GET", /^context$/, async ({ url }) => {
     const ref = url.searchParams.get("node");
     // the top of the tree also says what is true for now (the notes under Current), soonest to end first
-    if (!ref) return { node: null, trail: [], children: await children(null), current: await currentNotes() };
+    if (!ref) {
+      // System (the house rules) and Current exist from the first look at Context, so there is somewhere to write them
+      await ensureSystem();
+      await ensureCurrent();
+      return { node: null, trail: [], children: await children(null), current: await currentNotes() };
+    }
     const node = await getNode(ref);
     return { node, trail: await breadcrumb(node), children: await children(node.id) };
   }],

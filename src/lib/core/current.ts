@@ -12,7 +12,7 @@
  * it, fold what lasted into long-term context, or archive it. Nothing is deleted by the clock.
  */
 import { q, q1 } from "../db";
-import { createNode, CURRENT, getNode, type ContextNode } from "./context";
+import { archiveNode, createNode, CURRENT, getNode, type ContextNode } from "./context";
 import { listAgents, logEvent, ownerAgent, timezone, todayIn } from "./util";
 
 export { CURRENT };
@@ -21,11 +21,16 @@ export { CURRENT };
 export async function ensureCurrent(): Promise<ContextNode> {
   const have = await q1<{ id: string }>("SELECT id FROM context_nodes WHERE path = $1 AND NOT archived", [CURRENT]);
   if (have) return getNode(have.id);
-  return createNode(await ownerAgent(), {
+  const owner = await ownerAgent();
+  const made = await createNode(owner, {
     title: "Current",
     summary: "What is true for now: this month's focus, a trip, a temporary preference. Each note says until when.",
     body: "Notes here hold for a while and say until when. Agents add them from what they see; change or remove any of them.",
   });
+  if (made.path === CURRENT) return made;
+  // two requests made it at once and this one came second: keep the first
+  await archiveNode(owner, made.id).catch(() => {});
+  return getNode(CURRENT);
 }
 
 export type CurrentNote = { id: string; path: string; title: string; summary: string; until: string | null; updated_by: string; updated_at: string; lapsed: boolean };
