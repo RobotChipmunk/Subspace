@@ -213,7 +213,7 @@ function readOrder(v: unknown): number {
  * Puts a task at a place in the order of its day or list, counted as the lists count it: 1 is
  * first, and anything past the end is last. The tasks around it keep their order.
  */
-async function placeAt(t: Pick<Todo, "id" | "scope" | "date" | "guest_id">, order: number) {
+async function placeAt(t: { id: string; scope: string; date: string | null; guest_id: string | null }, order: number) {
   // finished tasks that have dropped out of an undated list are not counted, as they are not shown
   const others = await q<{ id: string }>(
     `SELECT id FROM todos
