@@ -15,6 +15,7 @@ struct IdeaCanvas: View {
     var onBack: () -> Void
 
     @Environment(AppModel.self) private var app
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var idea: Idea? = nil
     @State private var items: [IdeaItem] = []
     @State private var links: [IdeaLink] = []
@@ -455,8 +456,11 @@ struct IdeaCanvas: View {
                 .glass(radius: 20)
                 .accessibilityIdentifier("ideas.remove")
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
+            // On an iPad the top-left corner belongs to the window's own controls, and the app bar
+            // runs down the left edge: the way back starts clear of both.
+            .padding(.leading, sizeClass == .regular ? 88 : 12)
+            .padding(.trailing, 12)
+            .padding(.top, sizeClass == .regular ? 14 : 10)
             Spacer(minLength: 0)
         }
     }

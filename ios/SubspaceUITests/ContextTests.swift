@@ -42,7 +42,6 @@ final class ContextTests: SubspaceTestCase {
     func testApproveAProposedHouseRule() {
         launchSignedIn()
         go("context")
-        expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'context.node.' AND label == 'System'")).firstMatch, "the System section, which holds the house rules")
         // An earlier attempt may have answered it already.
         let approve = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'context.proposal.approve.'")).firstMatch
         if approve.waitForExistence(timeout: 8) {
@@ -53,6 +52,10 @@ final class ContextTests: SubspaceTestCase {
             approve.tap()
             waitToVanish(approve, "the proposal, once approved")
         }
+        // The rules live in System, among the areas further down (which are only drawn once scrolled to).
+        let system = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'context.node.' AND label == 'System'")).firstMatch
+        bringIntoView(system)
+        expect(system, "the System section, which holds the house rules")
         shot("24-house-rules")
     }
 
@@ -74,6 +77,8 @@ final class ContextTests: SubspaceTestCase {
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'context.link.' AND NOT identifier BEGINSWITH 'context.link.notes.'"))
         expect(rows.firstMatch, "the seeded links")
         let before = rows.count
+        // An earlier attempt at this test may have saved this address already; saving it again updates that link.
+        let already = textContaining("Saved by the UI test").exists
         shot("23-links")
 
         let url = expect(app.textFields["context.addlink.url"], "the address field")
@@ -84,7 +89,7 @@ final class ContextTests: SubspaceTestCase {
         why.typeText("Saved by the UI test")
         app.buttons["context.addlink.save"].tap()
         expect(textContaining("Saved by the UI test"), "the new link with its reason", timeout: 30)
-        XCTAssertEqual(rows.count, before + 1, "One more link than before")
+        XCTAssertEqual(rows.count, before + (already ? 0 : 1), already ? "The same address saved twice should stay one link" : "One more link than before")
         shot("23-links-added")
 
         // A link opens in the viewer inside the app, not in the browser.

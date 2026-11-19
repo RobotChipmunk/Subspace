@@ -160,7 +160,6 @@ class SubspaceTestCase: XCTestCase {
         return button
     }
 
-    /// Attaches a screenshot named for the report, e.g. "03-todos".
     /// Scrolls the screen a little at a time until an element further down (or, with `down` false,
     /// further up) can be tapped.
     func bringIntoView(_ element: XCUIElement, down: Bool = true) {
@@ -173,6 +172,7 @@ class SubspaceTestCase: XCTestCase {
         }
     }
 
+    /// Attaches a screenshot named for the report, e.g. "03-todos".
     func shot(_ name: String) {
         // let springs settle so the picture shows the resting state
         Thread.sleep(forTimeInterval: 0.7)
