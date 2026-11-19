@@ -5,6 +5,7 @@ import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
 import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
 import { embedPending, meaningOn } from "../src/lib/core/meaning";
+import { createIdea, deleteIdea, getIdea, moreOf, pruneItem, updateIdea, updateItem } from "../src/lib/core/ideas";
 import { archiveNode, createNode, getNode } from "../src/lib/core/context";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
@@ -296,6 +297,53 @@ async function main() {
     const freed = (await agentByToken(await issueToken(made.id)))!;
     if (!(await call(freed, "explore", { path: "/feed" })).children) throw new Error("an agent whose limits were lifted still cannot see the feed");
     await updateAgent(owner, made.id, { archived: true });
+  }
+
+  {
+    // Ideas: the owner seeds a canvas; agents branch from what is there, a line at a time, within a daily budget; the owner's keeping and pruning steer what comes next.
+    const idea = await createIdea(owner, { text: "A smoke test idea " + tag });
+    const root = (await getIdea(idea.id)).items[0];
+    if (!(await call(s, "idea_list")).ideas.some((x: any) => x.id === idea.id && x.state === "growing")) throw new Error("idea_list does not show a new idea");
+    const read = await call(s, "idea_read", { id: idea.id });
+    if (read.pieces?.[0]?.by !== "the owner" || read.may_add_today?.yours !== 3) throw new Error("idea_read: " + JSON.stringify(read).slice(0, 300));
+    const refusals: [string, Record<string, unknown>, RegExp][] = [
+      ["a piece that branches from nothing", { kind: "riff", text: "What if it were smaller?" }, /from/],
+      ["a report", { from: root.id, kind: "riff", text: "x".repeat(300) }, /280/],
+      ["something found with no source", { from: root.id, kind: "found", text: "It exists." }, /source/],
+      ["an unknown kind", { from: root.id, kind: "essay", text: "Long." }, /kind is one of/],
+    ];
+    for (const [what, args, why] of refusals) {
+      const r = await call(s, "idea_grow", { idea: idea.id, ...args });
+      if (!r.ERROR || !why.test(r.ERROR)) throw new Error(`idea_grow accepted ${what}, or did not say why not: ${JSON.stringify(r)}`);
+    }
+    const first = await call(s, "idea_grow", { idea: idea.id, from: root.id, kind: "riff", text: "What if it were half the size?" });
+    if (!first.id || first.may_add_today?.yours !== 2) throw new Error("idea_grow: " + JSON.stringify(first));
+    const after = await getIdea(idea.id);
+    const grown = after.items.find((x) => x.id === first.id)!;
+    if (Math.hypot(grown.x - root.x, grown.y - root.y) < 150 || grown.seen) throw new Error("a grown piece should sit clear of what it grew from, and be new to the owner: " + JSON.stringify(grown));
+    if (!after.links.some((l) => l.a === root.id && l.b === first.id)) throw new Error("a grown piece is not joined to what it grew from");
+    const second = await call(s, "idea_grow", { idea: idea.id, from: first.id, kind: "question", text: "Who is it for?" });
+    await call(s, "idea_grow", { idea: idea.id, from: root.id, kind: "counter", text: "It may be too small to be useful." });
+    const over = await call(s, "idea_grow", { idea: idea.id, from: root.id, kind: "riff", text: "And one more." });
+    if (!over.ERROR || !/your 3 for today/.test(over.ERROR)) throw new Error("an agent could add more than its share in a day: " + JSON.stringify(over));
+    if (!(await call(s, "idea_connect", { idea: idea.id, a: root.id, b: second.id })).ERROR) throw new Error("a join was accepted without saying why");
+    const joined = await call(s, "idea_connect", { idea: idea.id, a: root.id, b: second.id, label: "the real question" });
+    if (joined.label !== "the real question") throw new Error("idea_connect: " + JSON.stringify(joined));
+    // the owner keeps one and prunes another: the next read says so
+    await updateItem(owner, first.id, { kept: true });
+    await pruneItem(owner, second.id);
+    const steered = await call(claude, "idea_read", { id: idea.id });
+    if (!steered.steering.kept.includes("What if it were half the size?") || !steered.steering.pruned.includes("Who is it for?") || steered.pieces.some((x: any) => x.id === second.id)) throw new Error("idea_read does not carry the owner's steering: " + JSON.stringify(steered.steering));
+    // press and hold: the agent that wrote the piece is asked for more
+    await call(s, "changes");
+    const asked = await moreOf(owner, first.id);
+    if (!asked.to.includes(s.name)) throw new Error("asking for more did not go to the piece's agent: " + JSON.stringify(asked));
+    if (!(await call(s, "changes")).for_you.some((i: any) => i.type === "idea.more" && i.id === idea.id)) throw new Error("the agent was not told the owner wants more");
+    await updateIdea(owner, idea.id, { state: "resting" });
+    const resting = await call(claude, "idea_grow", { idea: idea.id, from: root.id, kind: "riff", text: "While it rests." });
+    if (!resting.ERROR || !/resting/.test(resting.ERROR)) throw new Error("a resting idea was grown: " + JSON.stringify(resting));
+    await deleteIdea(owner, idea.id);
+    if ((await call(s, "idea_list")).ideas.some((x: any) => x.id === idea.id)) throw new Error("a removed idea is still listed");
   }
 
   {

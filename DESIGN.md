@@ -139,8 +139,8 @@ Patterns:
 ## Components and patterns
 
 - **App bar** (`Shell.tsx`): icons only, one glass pill; left on wide screens, bottom on phones.
-  Six tabs: Feed, Todos, Journal, Context, Following, Agents. Targets are 48px, 44px on phones so
-  the six and the Now button fit a 390px screen.
+  Seven tabs: Feed, Todos, Journal, Ideas, Context, Following, Agents. Targets are 48px; on
+  phones they are 40px wide and 44px tall, so the seven and the Now button fit a 360px screen.
 - **Rows** (todos, links): no dividers; hover fill; title, one secondary line, one meta line.
   A row that stands for something in another place (a task in a person's list) names that place
   in a word or two at its end, in meta type.
@@ -235,6 +235,43 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **Ideas** (`ideas/page.tsx`; `Ideas/` in the app): a place to let an idea grow, and the one
+  screen that is a canvas rather than a list. It is a visual ideation space, not a tool: calm,
+  nearly empty of controls, and worked with the hands.
+  - *The shelf.* Ideas as 26px glass cards, three across (two on a tablet or phone), each topped
+    by a small picture of its canvas: a dot where every piece sits, the owner's in `ink`, the
+    agents' in `accent`. Beneath, the idea's name and a meta line ("Grew 2h ago · 9 pieces"); an
+    accent dot beside the name when agents have added something not yet looked at. The first
+    cell is the dashed "New idea".
+  - *The canvas.* The whole screen, over a faint field of dots that moves and scales with it.
+    Drag to move about; pinch, or scroll with ctrl, to zoom. Glass pills float at the top: the
+    way back and the idea's name at the left; add a picture, Growing or Resting, and remove at
+    the right. Nothing else is on screen until a piece is touched.
+  - *The owner's pieces* have no container. Words sit bare in the rounded face (`.idea-hand`,
+    `design: .rounded`), centred, in one of four sizes (15, 20, 30, 46px), so they read as
+    written rather than typeset. Pictures have 20px corners, a soft shadow, and a tilt of a
+    degree or so that is always the same for the same picture.
+  - *Agents' pieces* are 236px containers with 20px corners in that agent's own quiet tint (its
+    palette's first colour at about a quarter strength over `surface`, with a hairline of the
+    same), so who added what is seen without reading. Inside: the avatar and name in meta type
+    with a one-word kind (riff, found, but, ?), then a line or two at 14.5px, then the source as
+    a quiet link when it was something found. A piece arrives by growing from 70% with `spring`.
+  - *Joins* are soft curves, 1.8px with round ends, each bowed to one side by an amount that
+    never changes for that join, stopping short of the pieces they connect. An agent's join is
+    dotted in `ink3` and may carry two or three words in small italics; the owner's own are solid
+    `accent`. Never straight, never arrowed.
+  - *Gestures.* Double-tap empty space to write there. Drag a piece to move it; drop it on
+    another to say they belong together (it returns home and a join is drawn). Double-tap a
+    piece to keep it, or, on the owner's own words, to change them. Press and hold for more of
+    it. Flick it away to prune it. Each gesture answers at once: a kept piece gains a small
+    accent star at its corner; "more" shows a glass pill under the piece naming who was asked; a
+    pruned piece flies off the way it was thrown, and "Pruned … Bring back" stays for six
+    seconds.
+  - *For those who would rather tap.* Choosing a piece (one tap) shows a small glass bar at the
+    foot with the same things as icon buttons: keep, more, smaller and larger for the owner's
+    words, prune. It is the only toolbar, and it is there only while a piece is chosen.
+  - What is new since the owner last looked carries a small accent dot that breathes (still,
+    under reduced motion). An empty canvas says how to begin in two lines of `ink3`.
 - **The mark** (`Mark.tsx`; `Design/SubspaceMark.swift` in the app; `scripts/mark.swift` for the
   icons): Subspace's logo is particles in a latent space. A sparse sphere of small neutral
   particles is the space; through it, tilted, runs a sheet of larger coloured ones, the subspace,

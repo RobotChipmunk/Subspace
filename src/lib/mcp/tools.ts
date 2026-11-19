@@ -4,6 +4,7 @@ import { archiveNode, children as contextChildren, createNode, getNode, revision
 import { briefing, changes, explore, gather, read, search } from "../core/discover";
 import { uploadTicket } from "../auth";
 import { categorize, createEntry, getEntry, plainText } from "../core/journal";
+import { connect as ideaConnect, grow as ideaGrow, ideaForAgent, ideasForAgent, GROW_KINDS } from "../core/ideas";
 import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
@@ -42,8 +43,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "guide",
-    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, context, todos, following.",
-    inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | context | todos | following") }),
+    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, ideas, context, todos, following.",
+    inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | ideas | context | todos | following") }),
     readOnly: true,
     run: async (a, { topic }) => {
       if (topic && !TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
@@ -497,6 +498,43 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "idea_list",
+    description: "The owner's ideas: canvases where an idea is left to grow. Each has a state (growing or resting), how many pieces are on it and when it last grew. Start here before growing one.",
+    inputSchema: obj({}),
+    readOnly: true,
+    run: () => ideasForAgent(),
+  },
+  {
+    name: "idea_read",
+    description: "One idea's canvas: every piece on it (the owner's text and pictures, and what agents have branched from them), how the pieces are joined, and the owner's steering: what they kept (more like this) and what they pruned (not this way). Also how much may still be added today.",
+    inputSchema: obj({ id: str("The idea's id, from idea_list.") }, ["id"]),
+    readOnly: true,
+    run: (a, { id }) => ideaForAgent(a, id),
+  },
+  {
+    name: "idea_grow",
+    description: `Add one piece to an idea, branching from a piece that is there. The idea is the owner's thinking space, so a piece is one thought in a line or two, never a report. Kinds: riff (a turn on the idea), found (something real you looked up, with source), counter (the honest objection), question (one that would move it on), image (a real picture you found). The server places the piece near what it branches from and holds a daily budget (a few pieces per idea), so add the one that matters most. Read the idea first (idea_read) and follow its steering.`,
+    inputSchema: obj(
+      {
+        idea: str("The idea's id."),
+        from: str("The id of the piece this grows out of. Required once the canvas has anything on it."),
+        kind: { type: "string", enum: [...GROW_KINDS], description: "What sort of branch this is." },
+        text: str("The thought, in a line or two: at most 280 characters. No preamble."),
+        image: str("For kind image (or to go with a found piece): the https address of a real picture."),
+        source: { type: "object", properties: { name: str('The publication or site, e.g. "The Verge".'), url: str("The https address.") }, description: "Where something found came from. Required for kind found." },
+        connects: { type: "array", items: { type: "string" }, description: "Optional: up to three other pieces this also belongs with, by id." },
+      },
+      ["idea", "kind"],
+    ),
+    run: (a, { idea, ...rest }) => ideaGrow(a, idea, rest as any),
+  },
+  {
+    name: "idea_connect",
+    description: "Join two pieces on an idea's canvas that belong together and are not yet joined, with two or three words on why. A few a day at most; a join should show the owner something they had not put together.",
+    inputSchema: obj({ idea: str("The idea's id."), a: str("One piece's id."), b: str("The other's."), label: str('Why they belong together, in two or three words: "same constraint", "cheaper version".') }, ["idea", "a", "b", "label"]),
+    run: (a, { idea, a: one, b: two, label }) => ideaConnect(a, idea, one, two, label),
+  },
+  {
     name: "routine_done",
     description: "Say that a routine you were given is done for this round. A routine arrives as a job of kind \"routine\" (in changes() and jobs()), with its brief. Do the work with your ordinary tools, then call this once.",
     inputSchema: obj({ job_id: str("The routine job's id, from jobs() or changes()."), note: str("One line on what you found or did, at most 300 characters. The owner sees it beside the routine.") }, ["job_id", "note"]),
@@ -543,6 +581,10 @@ const AREA: Record<string, Section> = {
   tracker_update: "following",
   rail_set: "rail",
   rail_remove: "rail",
+  idea_list: "ideas",
+  idea_read: "ideas",
+  idea_grow: "ideas",
+  idea_connect: "ideas",
 };
 
 /**

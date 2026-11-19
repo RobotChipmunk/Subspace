@@ -13,6 +13,7 @@ import { q, q1 } from "../db";
 import { describeAccess, sightOf, visibleNodes } from "./access";
 import { currentNotes } from "./current";
 import { fuse, meaningOn, nearest, type Near } from "./meaning";
+import { ideaForAgent, ideasForAgent } from "./ideas";
 import { openJobs } from "./art";
 import { breadcrumb, children as contextChildren, getNode, recentPages } from "./context";
 import { listEntries, listMonths, monthLine } from "./journal";
@@ -149,7 +150,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
   // what this agent may see: a part of the app it may not see is not on the map and not at its address
   const sight = sightOf(actor);
   const nowhere = () => notFound(`Nothing at "${rawPath}". Start from explore("/").`);
-  if ((space === "feed" || space === "todos" || space === "rail" || space === "pages" || space === "links" || space === "following" || space === "journal") && !sight.section(space)) throw nowhere();
+  if ((space === "feed" || space === "todos" || space === "rail" || space === "pages" || space === "links" || space === "following" || space === "journal" || space === "ideas") && !sight.section(space)) throw nowhere();
   if (space === "log" && !sight.full) throw nowhere();
 
   if (!space) {
@@ -163,6 +164,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
               (SELECT count(*)::int FROM trackers WHERE NOT archived) AS following,
               (SELECT count(*)::int FROM rail_modules WHERE dismissed_at IS NULL AND show_until > now()) AS rail,
               (SELECT count(*)::int FROM agents WHERE NOT archived AND kind <> 'guest') AS agents,
+              (SELECT count(*)::int FROM ideas WHERE deleted_at IS NULL) AS ideas,
               (SELECT count(*)::int FROM events) AS log`,
     );
     const all: Child[] = [
@@ -174,6 +176,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/journal", title: "Journal", about: "The owner's own thoughts, musings and wishes, by day. Browse it by month: each month says how it felt and what ran through it, each entry has a mood, themes and a one-line gist. Read it to understand them.", count: n!.journal },
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
         { path: "/rail", title: "Rail", about: "Timely modules shown beside the owner's screen right now (bookings, deadlines, today's details).", count: n!.rail },
+        { path: "/ideas", title: "Ideas", about: "Canvases where the owner leaves an idea to grow. Agents add to them a little at a time, following what the owner kept and pruned.", count: n!.ideas },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
         { path: "/routines", title: "Routines", about: "Duties that come round on a schedule, and which agent does each.", count: ROUTINES.length },
         { path: "/log", title: "Log", about: "Every change ever made, oldest to newest.", count: n!.log },
@@ -425,6 +428,21 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     };
   }
 
+  if (space === "ideas") {
+    if (a) {
+      const idea = await ideaForAgent(actor, a);
+      return { path: `/ideas/${idea.id}`, title: idea.title, about: `${idea.state}; ${idea.pieces.length} pieces.`, items: [idea as unknown as Item], hint: "This is the same as idea_read. idea_grow adds a piece; idea_connect joins two." };
+    }
+    const all = await ideasForAgent();
+    return {
+      path: "/ideas",
+      title: "Ideas",
+      about: "Each idea is a canvas the owner is thinking on. They put down text and pictures; agents branch from those, a few pieces a day; the owner keeps what they like and prunes what they do not.",
+      children: all.ideas.map((i) => ({ path: `/ideas/${i.id}`, title: i.title, about: `${i.state}; ${i.pieces} pieces${i.last_grown ? "" : "; not grown yet"}.`, latest: i.touched })),
+      hint: all.how,
+    };
+  }
+
   if (space === "routines") {
     const agents = await listAgents(true);
     const who = (id: string | null) => (id ? "@" + (agents.find((x) => x.id === id)?.handle ?? id) : null);
@@ -559,6 +577,7 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
     if (e.entity_type === "todo") return sight.section("todos");
     if (e.entity_type === "tracker") return sight.section("following");
     if (e.entity_type === "rail") return sight.section("rail");
+    if (e.entity_type === "idea") return sight.section("ideas");
     if (e.entity_type === "context") return nodesSeen!.has(e.entity_id);
     return e.entity_type === "agent" || e.entity_type === "job";
   };

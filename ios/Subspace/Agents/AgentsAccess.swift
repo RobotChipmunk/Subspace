@@ -3,7 +3,7 @@ import SwiftUI
 /// The parts of the app an agent can be allowed to see, as the server names them, with the words shown for each.
 private let agentsAccessSections: [(key: String, label: String)] = [
     ("feed", "Feed"), ("todos", "Todos"), ("journal", "Journal"), ("following", "Following"),
-    ("pages", "Pages"), ("links", "Links"), ("rail", "Now"),
+    ("pages", "Pages"), ("links", "Links"), ("rail", "Now"), ("ideas", "Ideas"),
 ]
 /// Top levels of context that are a part of the app, and so are chosen under "The app".
 private let agentsAccessAppOwned: Set<String> = ["journal", "links"]

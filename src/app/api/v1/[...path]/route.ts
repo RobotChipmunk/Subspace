@@ -7,6 +7,7 @@ import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, up
 import { currentNotes } from "@/lib/core/current";
 import { search } from "@/lib/core/discover";
 import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
+import { addItem, createIdea, deleteIdea, getIdea, joinItems, listIdeas, moreOf, pruneItem, seenIdea, unjoin, updateIdea, updateItem } from "@/lib/core/ideas";
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { registerDevice, removeDevice } from "@/lib/core/push";
@@ -120,6 +121,25 @@ const routes: [string, RegExp, Handler][] = [
   // Routines: duties that come round on a schedule. The owner gives each to one agent ({ agent: id }) or to nobody ({ agent: null }).
   ["GET", /^routines$/, async () => ({ routines: await listRoutines() })],
   ["PATCH", /^routines\/([^/]+)$/, ({ actor, body }, key) => ownerOnly(actor, () => assignRoutine(actor, key, body?.agent ?? null))],
+
+  // Ideas: a canvas per idea. The owner puts text and pictures on it, moves, keeps, prunes and joins pieces;
+  // agents add to it through their own tools.
+  ["GET", /^ideas$/, async () => ({ ideas: await listIdeas() })],
+  ["POST", /^ideas$/, ({ actor, body }) => createIdea(actor, body)],
+  ["GET", /^ideas\/([^/]+)$/, (_c, id) => getIdea(id)],
+  ["PATCH", /^ideas\/([^/]+)$/, ({ actor, body }, id) => updateIdea(actor, id, body)],
+  ["DELETE", /^ideas\/([^/]+)$/, ({ actor }, id) => deleteIdea(actor, id)],
+  // the owner has looked: nothing on the canvas is new any more
+  ["POST", /^ideas\/([^/]+)\/seen$/, (_c, id) => seenIdea(id)],
+  ["POST", /^ideas\/([^/]+)\/items$/, ({ actor, body }, id) => addItem(actor, id, body)],
+  ["PATCH", /^idea-items\/([^/]+)$/, ({ actor, body }, id) => updateItem(actor, id, body)],
+  // pruned (not this way), and brought back
+  ["DELETE", /^idea-items\/([^/]+)$/, ({ actor }, id) => pruneItem(actor, id)],
+  ["POST", /^idea-items\/([^/]+)\/restore$/, ({ actor }, id) => pruneItem(actor, id, true)],
+  // "more of this": the agents that grow ideas are asked to branch from this piece
+  ["POST", /^idea-items\/([^/]+)\/more$/, ({ actor }, id) => moreOf(actor, id)],
+  ["POST", /^ideas\/([^/]+)\/joins$/, ({ actor, body }, id) => joinItems(actor, id, body?.a, body?.b)],
+  ["DELETE", /^idea-joins\/([^/]+)$/, ({ actor }, id) => unjoin(actor, id)],
 
   // House rules: changes agents have proposed to the notes under /context/system, waiting for the owner. { approve: true | false } answers one.
   ["GET", /^rules\/proposals$/, ({ actor }) => ownerOnly(actor, async () => ({ proposals: await pendingProposals() }))],

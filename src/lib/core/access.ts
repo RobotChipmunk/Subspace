@@ -3,7 +3,7 @@
  * every connection that agent makes, however it signs in.
  *
  *  read_only  it can look, and nothing else: every tool that adds or changes something is withheld.
- *  sections   the parts of the app it can see (feed, todos, journal, ...). null means all of them.
+ *  sections   the parts of the app it can see (feed, todos, journal, ideas, ...). null means all of them.
  *  context    the top-level sections of context it can see, by slug ("work", "me"). null means all.
  *
  * An agent with no rules sees everything, as agents always have. For an agent with rules, a thing
@@ -13,7 +13,7 @@
 import { q } from "../db";
 import { ApiError, bad, notFound, type Agent } from "./util";
 
-export const SECTIONS = ["feed", "todos", "journal", "following", "pages", "links", "rail"] as const;
+export const SECTIONS = ["feed", "todos", "journal", "following", "pages", "links", "rail", "ideas"] as const;
 export type Section = (typeof SECTIONS)[number];
 export type AccessRules = { read_only: boolean; sections: Section[] | null; context: string[] | null };
 

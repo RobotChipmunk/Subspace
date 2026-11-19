@@ -124,7 +124,7 @@ async function run(profile) {
   }
 
   // Navigation is reachable everywhere.
-  for (const label of ["Feed", "Todos", "Journal", "Context", "Following", "Agents"]) await reachable(page.getByRole("link", { name: label, exact: true }), `nav ${label}`);
+  for (const label of ["Feed", "Todos", "Journal", "Ideas", "Context", "Following", "Agents"]) await reachable(page.getByRole("link", { name: label, exact: true }), `nav ${label}`);
 
   // ---------- The rail ----------
   const wide = profile.viewport.width >= 1100;
@@ -993,6 +993,75 @@ async function run(profile) {
     await settle(1100);
     await noSidewaysScroll("context note");
   });
+  await step("ideas", async () => {
+    // Ideas: each idea is a canvas. The owner's words sit bare on it; what agents add are rounded pieces joined to what they grew from.
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const send = (method, url, body) => page.evaluate(([m, u, b]) => fetch(u, { method: m, headers: b ? { "Content-Type": "application/json" } : undefined, body: b ? JSON.stringify(b) : undefined }).then((r) => r.status), [method, url, body]);
+    await press(page.getByRole("link", { name: "Ideas", exact: true }));
+    await page.waitForURL("**/ideas");
+    await settle(1200);
+    const card = page.locator("[data-idea]", { hasText: "A cargo trailer for the bike" });
+    await reachable(card, "ideas: the seeded idea");
+    await reachable(page.getByRole("button", { name: "New idea" }), "ideas: New idea");
+    await noSidewaysScroll("ideas");
+    await shot("ideas");
+    await press(card);
+    const canvas = page.locator("[data-canvas]");
+    await canvas.waitFor({ timeout: 8000 });
+    await settle(1500);
+    const pieces = canvas.locator("[data-piece]");
+    if ((await pieces.count()) !== 4) fail(`ideas: ${await pieces.count()} pieces on the seeded canvas, expected 4`);
+    const mine = canvas.locator('[data-piece][data-by="owner"]', { hasText: "A cargo trailer for the bike" });
+    const riff = canvas.locator('[data-piece][data-by="agent"]', { hasText: "folded flat" });
+    const found = canvas.locator('[data-piece][data-by="agent"]', { hasText: "Burley" });
+    await reachable(mine, "ideas: the owner's own words on the canvas");
+    await reachable(riff, "ideas: an agent's piece");
+    await reachable(found, "ideas: a second agent's piece");
+    if (!/Scout/.test(await riff.innerText())) fail("ideas: an agent's piece does not say whose it is");
+    if ((await riff.getAttribute("data-kept")) !== "true") fail("ideas: a kept piece is not marked as kept");
+    if ((await canvas.locator("[data-join]").count()) !== 3) fail(`ideas: ${await canvas.locator("[data-join]").count()} joins drawn, expected 3`);
+    // nothing on the canvas overlaps anything else when it is first shown
+    const boxes = await pieces.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })));
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (boxes[i].l < boxes[j].r - 4 && boxes[j].l < boxes[i].r - 4 && boxes[i].t < boxes[j].b - 4 && boxes[j].t < boxes[i].b - 4) fail("ideas: two pieces overlap on the seeded canvas");
+    await noSidewaysScroll("idea canvas");
+    await shot("idea-canvas");
+    // double-tap empty space and write: the words go down where the tap was
+    const area = await canvas.boundingBox();
+    await page.mouse.dblclick(area.x + area.width / 2, area.y + area.height - 96);
+    const writing = page.getByLabel("Write on the canvas");
+    await writing.waitFor({ timeout: 4000 }).catch(() => fail("ideas: double-tapping the canvas did not open a place to write"));
+    if (await writing.count()) {
+      await settle(200);
+      await page.keyboard.type("Ride it to the beach", { delay: 12 });
+      await page.keyboard.press("Enter");
+      await canvas.locator('[data-piece][data-by="owner"]', { hasText: "Ride it to the beach" }).waitFor({ timeout: 6000 }).catch(() => fail("ideas: what was written did not appear on the canvas"));
+    }
+    // a chosen piece offers keep, more and prune; keeping marks it, pruning takes it away and can be undone
+    await found.click();
+    const acts = page.locator("[data-piece-actions]");
+    await reachable(acts.getByRole("button", { name: /^Keep/ }), "ideas: Keep, on a chosen piece");
+    await reachable(acts.getByRole("button", { name: "More of this" }), "ideas: More of this");
+    await reachable(acts.getByRole("button", { name: /^Prune/ }), "ideas: Prune");
+    await acts.getByRole("button", { name: /^Keep/ }).click();
+    await settle(900);
+    if ((await found.getAttribute("data-kept")) !== "true") fail("ideas: Keep did not mark the piece");
+    await shot("idea-piece-chosen");
+    await acts.getByRole("button", { name: /^Kept/ }).click();
+    await settle(700);
+    await acts.getByRole("button", { name: /^Prune/ }).click();
+    await found.waitFor({ state: "detached", timeout: 5000 }).catch(() => fail("ideas: a pruned piece is still on the canvas"));
+    await reachable(page.getByRole("button", { name: "Bring back" }), "ideas: Bring back, after pruning");
+    await page.getByRole("button", { name: "Bring back" }).click();
+    await found.waitFor({ timeout: 6000 }).catch(() => fail("ideas: Bring back did not return the pruned piece"));
+    // put back as it was seeded, for the next screen size
+    const now = await get(`/api/v1/ideas/${await canvas.getAttribute("data-canvas")}`);
+    for (const it of now.items.filter((x) => x.text === "Ride it to the beach")) await send("DELETE", `/api/v1/idea-items/${it.id}`);
+    for (const it of now.items.filter((x) => /Burley/.test(x.text) && x.kept)) await send("PATCH", `/api/v1/idea-items/${it.id}`, { kept: false });
+    await press(page.getByRole("button", { name: "All ideas" }));
+    await page.waitForURL((u) => !u.search.includes("idea="));
+    await settle(600);
+  });
+
   await step("current", async () => {
     // What is true for now sits at the top of Context: each note with who set it and until when.
     await page.goto(`${BASE}/context`);
@@ -1485,7 +1554,7 @@ async function run(profile) {
     await settle(900);
     if ((await probeId()).access?.read_only !== true) fail("agents access: Read only was not saved");
     if (!(await page.locator("[data-access-badge]", { hasText: "Read only" }).count())) fail("agents access: a read-only agent does not say so beside its name");
-    for (const name of ["Feed", "Todos", "Journal", "Following", "Pages", "Links", "Now"]) await reachable(access.getByRole("checkbox", { name, exact: true }), `access choice "${name}"`);
+    for (const name of ["Feed", "Todos", "Journal", "Following", "Pages", "Links", "Now", "Ideas"]) await reachable(access.getByRole("checkbox", { name, exact: true }), `access choice "${name}"`);
     await press(access.getByRole("checkbox", { name: "Journal", exact: true }));
     await settle(900);
     const limited = (await probeId()).access;

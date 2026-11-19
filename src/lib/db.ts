@@ -506,6 +506,44 @@ const MIGRATIONS: string[] = [
   // the text it was made from, so a changed thing is embedded again.
   `ALTER TABLE search_docs ADD COLUMN IF NOT EXISTS embedding real[];
    ALTER TABLE search_docs ADD COLUMN IF NOT EXISTS embedded_md5 text`,
+  // Ideas (core/ideas.ts): a canvas per idea, the pieces on it (the owner's text and pictures, the
+  // agents' branches) with where each sits, and the joins between pieces.
+  `CREATE TABLE IF NOT EXISTS ideas (
+     id text PRIMARY KEY,
+     title text NOT NULL DEFAULT '',
+     state text NOT NULL DEFAULT 'growing',
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     deleted_at timestamptz
+   );
+   CREATE TABLE IF NOT EXISTS idea_items (
+     id text PRIMARY KEY,
+     idea_id text NOT NULL,
+     author text NOT NULL,
+     kind text NOT NULL DEFAULT 'text',
+     text text NOT NULL DEFAULT '',
+     image text,
+     source jsonb,
+     x double precision NOT NULL DEFAULT 0,
+     y double precision NOT NULL DEFAULT 0,
+     size int NOT NULL DEFAULT 2,
+     kept boolean NOT NULL DEFAULT false,
+     seen boolean NOT NULL DEFAULT true,
+     pruned_at timestamptz,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now()
+   );
+   CREATE INDEX IF NOT EXISTS idea_items_idea ON idea_items (idea_id, created_at);
+   CREATE TABLE IF NOT EXISTS idea_links (
+     id text PRIMARY KEY,
+     idea_id text NOT NULL,
+     a text NOT NULL,
+     b text NOT NULL,
+     label text NOT NULL DEFAULT '',
+     author text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now()
+   );
+   CREATE INDEX IF NOT EXISTS idea_links_idea ON idea_links (idea_id)`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

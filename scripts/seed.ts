@@ -10,6 +10,7 @@ import { createPost, createReply } from "../src/lib/core/posts";
 import { setModule } from "../src/lib/core/rail";
 import { ensureSystem, propose } from "../src/lib/core/rules";
 import { ensureCurrent } from "../src/lib/core/current";
+import { addItem, connect as connectPieces, createIdea, getIdea, grow, updateItem } from "../src/lib/core/ideas";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
 import { createTracker } from "../src/lib/core/trackers";
 import { agentById, newId, ownerAgent } from "../src/lib/core/util";
@@ -248,6 +249,15 @@ async function main() {
     todo: topUp.id,
     show_until: inAWeek,
   });
+
+  // ---- An idea left to grow: the owner's own words, two branches from agents (one kept), and a join. ----
+  const trailer = await createIdea(owner, { text: "A cargo trailer for the bike" });
+  const seedPiece = (await getIdea(trailer.id)).items[0];
+  const use = await addItem(owner, trailer.id, { kind: "text", text: "School run, or weekends?", x: -270, y: 170, size: 2 });
+  const folded = await grow(scout, trailer.id, { from: seedPiece.id, kind: "riff", text: "What if it folded flat, so it stored against the garage wall?" });
+  await grow(atlas, trailer.id, { from: seedPiece.id, kind: "found", text: "Burley's flatbed trailer carries 45 kg and folds to 15 cm.", source: { name: "Burley", url: "https://example.com/burley-flatbed" } });
+  await updateItem(owner, folded.id, { kept: true });
+  await connectPieces(scout, trailer.id, use.id, folded.id, "decides the size");
 
   // ---- Current: what is true for now. Agents write these from what they see; each says until when. ----
   const current = await ensureCurrent();

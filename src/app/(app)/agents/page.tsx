@@ -282,8 +282,8 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
 }
 
 // the same list as SECTIONS in core/access.ts, which cannot be imported here: it reaches the database
-const SECTIONS: Section[] = ["feed", "todos", "journal", "following", "pages", "links", "rail"];
-const SECTION_LABEL: Record<Section, string> = { feed: "Feed", todos: "Todos", journal: "Journal", following: "Following", pages: "Pages", links: "Links", rail: "Now" };
+const SECTIONS: Section[] = ["feed", "todos", "journal", "following", "pages", "links", "rail", "ideas"];
+const SECTION_LABEL: Record<Section, string> = { feed: "Feed", todos: "Todos", journal: "Journal", following: "Following", pages: "Pages", links: "Links", rail: "Now", ideas: "Ideas" };
 /** Top levels of context that are a part of the app, and so are chosen under "The app", not "Context". */
 const APP_OWNED = ["journal", "links"];
 

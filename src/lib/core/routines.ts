@@ -51,6 +51,27 @@ export const ROUTINES: BuiltIn[] = [
   },
 ];
 
+ROUTINES.push({
+  key: "idea-growth",
+  title: "Idea growth",
+  about: "Each day: add a little to the ideas that are growing, following what the owner kept and pruned.",
+  every: "daily",
+  brief: `Grow the owner's ideas, a little.
+
+1. idea_list shows the ideas. Take the ones that are growing, least recently grown first, at most three in a run.
+2. idea_read(id) for each. Read what the owner put down in their own words and pictures. Then read the steering: kept is what they want more of, pruned is where not to go. Grow towards the first and away from the second. If may_add_today is used up, move on.
+3. Add one to three pieces with idea_grow, each branching from the piece it answers (from). Choose the kind that the idea needs next, not the same kind each time:
+   - riff: a turn on the idea, a what-if, a way it could go.
+   - found: something real you looked up that bears on it, with its source.
+   - counter: the honest objection, said kindly and plainly.
+   - question: the one question that would move it on.
+   - image: a real picture you found that shows what words cannot (https address). Never a made-up one.
+4. A piece is a line or two (280 characters at most). It is a thought on a canvas, not a report: no preamble, no summary, no "here are some ideas". One thing per piece.
+5. Where two pieces that are already there belong together and nobody has joined them, idea_connect them, with two or three words on why.
+6. Leave an idea alone when nothing on it has been kept and the owner has added nothing for two weeks: it is resting whether or not it says so.
+7. Finish with routine_done and one line on what you added.`,
+});
+
 export type Routine = {
   key: string;
   title: string;

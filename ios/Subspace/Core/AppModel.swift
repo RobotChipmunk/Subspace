@@ -2,7 +2,7 @@ import SwiftUI
 import Observation
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case feed, todos, journal, context, following, agents
+    case feed, todos, journal, ideas, context, following, agents
     var id: String { rawValue }
 
     var label: String {
@@ -10,6 +10,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .feed: return "Feed"
         case .todos: return "Todos"
         case .journal: return "Journal"
+        case .ideas: return "Ideas"
         case .context: return "Context"
         case .following: return "Following"
         case .agents: return "Agents"
@@ -22,6 +23,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .feed: return "sparkle"
         case .todos: return "checkmark.circle"
         case .journal: return "square.and.pencil"
+        case .ideas: return "lightbulb"
         case .context: return "book"
         case .following: return "dot.radiowaves.left.and.right"
         case .agents: return "person.2"
