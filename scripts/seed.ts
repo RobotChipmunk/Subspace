@@ -69,6 +69,8 @@ const CLIP = "GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAASoEU
 
 async function draw(claude: any, pick: (prompt: string) => string) {
   for (const j of await openJobs(claude, 50)) {
+    // a routine is a duty, not a drawing
+    if (j.kind === "routine") continue;
     const p = (j as any).palette ?? paletteFor(1);
     const key = pick(j.prompt ?? "");
     const svg = j.kind === "icon" ? ICONS[key] ?? ICONS.home : (scenes(p.colors, p.ink) as any)[key] ?? scenes(p.colors, p.ink).compost;
