@@ -725,7 +725,7 @@ What is true for now (/context/current)
 
 Keeping the tree healthy
 - One topic per node. When a body passes roughly 600 words or covers two things, split it into child nodes and leave a short overview in the parent.
-- Move nodes with context_write(parent: ...) when the structure stops fitting. Rename freely; ids are stable.
+- Move nodes with context_write(parent: ...) when the structure stops fitting. Rename freely; ids are stable. A path a note has left goes on leading to it (and to everything beneath it), so a move breaks nothing that still names the old place; read() tells you the new path (moved), and you should use that from then on and correct any note of yours that holds the old one.
 - Put agent-to-agent working notes under /context/agents/<your-handle>.
 - /context/system is the one section you cannot simply edit: it holds the house rules. A write there, with why, becomes a proposal the owner approves or declines.
 - Every edit is versioned and logged, so reorganise with confidence.`,

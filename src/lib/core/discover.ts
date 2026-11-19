@@ -876,6 +876,8 @@ export async function read(ids: string[], opts: { after?: string; /** the agent 
           ...(n.kind === "page" ? { link: `/page/${n.id}` } : {}),
           ...(n.kind === "link" ? { url: n.url, site: n.site, about: n.blurb || undefined } : {}),
           path: "/context/" + n.path,
+          // asked for by a path it has since left: say where it is now, so the old path can be retired
+          ...(id.includes("/") && id.replace(/^\/?(context\/)?/, "").replace(/\/$/, "") !== n.path ? { moved: `This was moved. Its path is now /context/${n.path}; use that from here on.` } : {}),
           trail: crumbs.map((c) => c.title).join(" › "),
           title: n.title,
           summary: n.summary,

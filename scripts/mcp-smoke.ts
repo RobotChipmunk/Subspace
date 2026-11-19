@@ -300,6 +300,22 @@ async function main() {
   }
 
   {
+    // Moving a note breaks nothing that names its old place: the old path goes on answering, for it and for what is beneath it.
+    const area = await call(claude, "context_write", { parent: "home", title: "Moving test " + tag, summary: "A note that will be moved." });
+    const inside = await call(claude, "context_write", { parent: area.id, title: "Inside it", summary: "A note beneath the one that moves.", body: "- Still here." });
+    const moved = await call(claude, "context_write", { id: area.id, parent: "/" });
+    if (moved.path === area.path || moved.path.startsWith("/context/home/")) throw new Error("the note did not move to the top level: " + JSON.stringify(moved));
+    const byOld = await call(s, "read", { ids: [area.path, inside.path] });
+    if (byOld[0]?.id !== area.id || byOld[1]?.id !== inside.id || !/moved/i.test(byOld[1]?.moved ?? "") || !byOld[1].path.startsWith(moved.path + "/")) throw new Error("a moved note is not found by its old path: " + JSON.stringify(byOld).slice(0, 400));
+    if ((await call(s, "explore", { path: area.path })).path !== moved.path) throw new Error("explore() does not follow a moved path");
+    const added = await call(s, "context_write", { parent: area.path, title: "Added by the old path", summary: "Written under where it used to be." });
+    if (!added.path?.startsWith(moved.path + "/")) throw new Error("writing under an old path did not land in the new place: " + JSON.stringify(added));
+    if (!(await call(s, "read", { ids: ["/context/home/never-was-" + tag] }))[0]?.error) throw new Error("a path that never existed was found");
+    await call(claude, "context_archive", { id: area.id });
+    if (!(await call(s, "read", { ids: [area.path] }))[0]?.error) throw new Error("an archived note still answers at its old path");
+  }
+
+  {
     // Ideas: the owner seeds a canvas; agents branch from what is there, a line at a time, within a daily budget; the owner's keeping and pruning steer what comes next.
     const idea = await createIdea(owner, { text: "A smoke test idea " + tag });
     const root = (await getIdea(idea.id)).items[0];
