@@ -291,6 +291,17 @@ beyond the session and which direct messages have been read.
   browser. Send every link through `AppModel.open`.
 - Plain `http://` works only for local addresses (`localhost`, `192.168.…`, `*.local`); anything
   else must be `https://`.
+- **Notifications.** On first launch the app asks to send notifications. A new or changed rail
+  module then arrives as a system notification, pushed by the server through Apple
+  (`src/lib/core/push.ts`; the app registers its device with `POST /api/v1/devices`, see
+  `Core/Notifier.swift`). The server needs an Apple push key: at developer.apple.com, under
+  Certificates, IDs & Profiles, Keys, make a key with "Apple Push Notifications service (APNs)"
+  ticked, download the `.p8` file once, and set `APNS_KEY` (the file's contents), `APNS_KEY_ID`
+  (shown beside the key) and `APNS_TEAM_ID` (your team id) on the deployment. A build run from
+  Xcode registers as `sandbox` and TestFlight or App Store builds as `production`; one key serves
+  both. Without the key nothing is pushed, and the app falls back to notifying about modules it
+  finds itself: while open, and when iOS wakes it in the background, which can be hours apart.
+  A module that waits for `show_from` is not pushed when its time comes; the app notices it.
 
 ### Testing it end to end
 

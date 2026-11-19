@@ -22,6 +22,7 @@ struct RootView: View {
         })
         .onChange(of: phase) { _, now in
             if now == .active, app.signedIn { Task { await app.refresh() } }
+            if now == .background, app.signedIn { Notifier.scheduleRefresh() }
         }
     }
 }

@@ -40,7 +40,9 @@ struct RailView: View {
                 }
                 if app.rail.isEmpty { EmptyNote("Nothing timely right now.") }
             }
-            .padding(.horizontal, 12)
+            // 16 from the right edge, the same as the nav bar's gap from the left edge
+            .padding(.leading, 12)
+            .padding(.trailing, 16)
             .padding(.top, 12)
             .padding(.bottom, 40)
         }

@@ -7,6 +7,7 @@ import { search } from "@/lib/core/discover";
 import { categorize, createEntry, getEntry, listEntries, listMonths } from "@/lib/core/journal";
 import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
+import { registerDevice, removeDevice } from "@/lib/core/push";
 import { activeModules, moduleActed, moduleLater, removeModule } from "@/lib/core/rail";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
@@ -103,6 +104,9 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^rail\/([^/]+)\/action$/, ({ actor, body }, id) => moduleActed(actor, id, body?.label)],
   // "Later": the module becomes a task on { view } (today, tomorrow, week, ...) and leaves the rail; returns { todo }
   ["POST", /^rail\/([^/]+)\/later$/, ({ actor, body }, id) => moduleLater(actor, id, body?.view)],
+  // the owner's iPhone or iPad asks for push notifications about the rail: { token, env: "sandbox" | "production" }
+  ["POST", /^devices$/, ({ actor, body }) => ownerOnly(actor, () => registerDevice(body?.token, body?.env))],
+  ["DELETE", /^devices\/([^/]+)$/, ({ actor }, token) => ownerOnly(actor, () => removeDevice(token))],
 
   ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean), limit: 20 })],
 
