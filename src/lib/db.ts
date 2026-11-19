@@ -544,6 +544,13 @@ const MIGRATIONS: string[] = [
      created_at timestamptz NOT NULL DEFAULT now()
    );
    CREATE INDEX IF NOT EXISTS idea_links_idea ON idea_links (idea_id)`,
+  // Where a context node used to be, so anything that still names its old path finds it
+  // (core/context.ts, getNode). One row for each path a node has left.
+  `CREATE TABLE IF NOT EXISTS context_moves (
+     old_path text PRIMARY KEY,
+     node_id text NOT NULL,
+     moved_at timestamptz NOT NULL DEFAULT now()
+   )`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

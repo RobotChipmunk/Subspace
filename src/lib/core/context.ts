@@ -62,8 +62,31 @@ function guardSystem(actor: Agent, opts: Opts, ...paths: (string | null | undefi
 export async function getNode(ref: string): Promise<ContextNode> {
   const key = ref.replace(/^\/?(context\/)?/, "").replace(/\/$/, "");
   const n = await q1<ContextNode>("SELECT * FROM context_nodes WHERE (id = $1 OR path = $2) AND NOT archived", [ref, key]);
-  if (!n) throw notFound(`No context node "${ref}"`);
-  return n;
+  if (n) return n;
+  // Not at that path now: it, or a note above it, may have been moved. A path a node has left
+  // goes on answering for the node (and for everything beneath it), so agents and notes that
+  // still name the old place are not broken by a tidy-up.
+  const now = await movedPath(key);
+  const moved = now ? await q1<ContextNode>("SELECT * FROM context_nodes WHERE path = $1 AND NOT archived", [now]) : null;
+  if (!moved) throw notFound(`No context node "${ref}"`);
+  return moved;
+}
+
+/** Where a path that no longer exists leads now, following up to three moves; null when it was never a node's path. */
+export async function movedPath(key: string): Promise<string | null> {
+  let path = key;
+  for (let hop = 0; hop < 3; hop++) {
+    const m = await q1<{ old_path: string; path: string }>(
+      `SELECT m.old_path, n.path FROM context_moves m JOIN context_nodes n ON n.id = m.node_id AND NOT n.archived
+       WHERE m.old_path = $1 OR left($1, length(m.old_path) + 1) = m.old_path || '/'
+       ORDER BY length(m.old_path) DESC LIMIT 1`,
+      [path],
+    );
+    if (!m) return hop ? path : null;
+    path = m.path + path.slice(m.old_path.length);
+    if (await q1("SELECT 1 FROM context_nodes WHERE path = $1 AND NOT archived", [path])) return path;
+  }
+  return null;
 }
 
 /**
@@ -210,6 +233,9 @@ export async function updateNode(
       isEntry && patch.mood === null && before.mood_by === "owner"],
   );
   if (path !== before.path) {
+    // The path it leaves goes on answering for it (see getNode); a path it comes back to is its own again.
+    await q("INSERT INTO context_moves (old_path, node_id) VALUES ($1, $2) ON CONFLICT (old_path) DO UPDATE SET node_id = EXCLUDED.node_id, moved_at = now()", [before.path, before.id]);
+    await q("DELETE FROM context_moves WHERE old_path = $1 OR left(old_path, length($1) + 1) = $1 || '/'", [path]);
     // Keep every descendant's address in step with its ancestor.
     await q("UPDATE context_nodes SET path = $2 || substr(path, $3) WHERE path LIKE $1", [before.path.replace(/[%_\\]/g, "\\$&") + "/%", path, before.path.length + 1]);
   }
