@@ -24,10 +24,17 @@ rm -rf "$OUT/$NAME.xcresult"
 # The whole suite takes about 28 minutes on a slow runner (25 tests, some run twice), so the
 # limit leaves room above that; the job's own timeout in ios.yml is longer still.
 LIMIT="${TEST_LIMIT_SECONDS:-2400}"
+# To chase one failure without paying for the whole suite, commit ios/only-testing with one test a
+# line ("SubspaceUITests/IdeasTests/testOpenAnIdeaAndKeepAPiece"). Remove the file before merging.
+ONLY=()
+if [ -f ios/only-testing ]; then
+  while IFS= read -r t; do [ -n "$t" ] && ONLY+=("-only-testing:$t"); done < ios/only-testing
+  echo "::warning::[$NAME] running only the tests named in ios/only-testing: ${ONLY[*]}"
+fi
 xcodebuild test-without-building -project ios/Subspace.xcodeproj -scheme Subspace \
   -destination "id=$SIM" -derivedDataPath "$DERIVED" -resultBundlePath "$OUT/$NAME.xcresult" \
   -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 240 \
-  -retry-tests-on-failure -test-iterations 2 \
+  -retry-tests-on-failure -test-iterations 2 ${ONLY[@]+"${ONLY[@]}"} \
   > "$OUT/test-$NAME.log" 2>&1 &
 XCB=$!
 ( sleep "$LIMIT"; echo "Stopped: the tests ran longer than $LIMIT seconds." >> "$OUT/test-$NAME.log"; kill "$XCB" 2>/dev/null ) &
@@ -91,6 +98,14 @@ if [ "$STATUS" -ne 0 ] || grep -qE "error: -\[" "$OUT/test-$NAME.log"; then
     echo "::error::[$NAME] $line"
   done
   [ "$STATUS" -eq 0 ] && echo "::notice::[$NAME] the failures above passed when run again"
+  # and what the app was showing at each failed expectation: the names of what was on screen
+  n=0
+  for f in "$SHOTS"/hierarchy*; do
+    [ -f "$f" ] || continue
+    n=$((n + 1)); [ "$n" -gt 4 ] && break
+    seen=$(grep -oE "identifier: '[^']+'" "$f" | sed -E "s/identifier: '([^']+)'/\\1/" | awk '!s[$0]++' | tr '\n' ' ' | cut -c1-1500)
+    echo "::notice::[$NAME] on screen at $(basename "$f"): $seen"
+  done
 fi
 
 ios/scripts/e2e-server.sh stop
