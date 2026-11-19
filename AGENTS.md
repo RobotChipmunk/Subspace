@@ -53,6 +53,9 @@ dismissed rail modules between sizes. It takes more than ten minutes: start it i
 read the screenshots in `<outDir>` as they appear, and wait for the summary line. When you change
 behaviour, change the matching assertions in it in the same commit.
 
+The `Web` workflow runs the same check, with `typecheck` and `mcp-smoke`, on every push that
+touches `src/` or `scripts/`; its screenshots are the `ui-check` artifact.
+
 ## The iOS app
 
 `ios/` is the native SwiftUI app for iPhone and iPad (see "The iOS app" in `README.md`). It is the
@@ -165,3 +168,9 @@ being true. Read this list before starting work.
   actual subject and what happened to it. Keep `guide("illustration")`, "The picture brief" in
   `guide("posting")` and the seeded scenes in `scripts/seed.ts` literal; do not steer them back
   towards mood or metaphor.
+- On the owner's Mac (Nov 2026) `npm ci` fails: npm there is pointed at a company package feed
+  that lacks some packages (`motion-dom`), and there is no Postgres or Docker. Do not switch
+  registry to get round it, and do not print `~/.npmrc`: ask the owner. Only the iOS app can be
+  compiled there (`xcodebuild build-for-testing`). For the server, push the branch: the `Web`
+  workflow (`.github/workflows/web.yml`) runs `typecheck`, `mcp-smoke` and `ui-check`, each on its
+  own seeded database, and names its failures as annotations on the run.

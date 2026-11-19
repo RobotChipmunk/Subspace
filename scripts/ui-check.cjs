@@ -839,7 +839,7 @@ async function run(profile) {
     await press(tagMenu.getByRole("menuitem", { name: "Show all" }));
     await settle(800);
     if ((await titles()).length !== shownAll.length) fail("todos tags: Show all did not bring every task back");
-    // a choice belongs to the list it was made on
+    // a choice stays until it is taken off: on another list, and after a visit to another screen
     await press(filter);
     await press(tagMenu.getByRole("menuitemcheckbox", { name: /^house/ }));
     await page.keyboard.press("Escape");
@@ -847,7 +847,18 @@ async function run(profile) {
     await todayBtn.scrollIntoViewIfNeeded();
     await press(todayBtn);
     await settle(1000);
-    if ((await filter.getAttribute("aria-label")) !== "Filter by tag") fail("todos tags: a choice of tags followed to another list");
+    if ((await filter.getAttribute("aria-label")) !== "Tags: house") fail("todos tags: the chosen tag did not follow to another list");
+    await page.goto(BASE + "/feed");
+    await settle(1200);
+    await page.goto(BASE + "/todos");
+    await filter.waitFor({ timeout: 8000 }).catch(() => {});
+    await settle(800);
+    if ((await filter.getAttribute("aria-label").catch(() => null)) !== "Tags: house") fail("todos tags: the chosen tag was lost on leaving Todos and coming back");
+    await shot("todos-tag-kept");
+    await press(filter);
+    await press(tagMenu.getByRole("menuitem", { name: "Show all" }));
+    await settle(600);
+    if ((await filter.count()) && (await filter.getAttribute("aria-label")) !== "Filter by tag") fail("todos tags: Show all did not take the kept choice off");
     // and a list with no tagged tasks offers no filter
     for (const f of (await get("/api/v1/todos/folders")).folders) {
       if (f.key === "all" || f.guest) continue;

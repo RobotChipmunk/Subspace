@@ -49,7 +49,17 @@ final class TodosTests: SubspaceTestCase {
         expect(row("Replace the hallway light"), "the task carrying both chosen tags")
         shot("16-todos-all-house-diy")
 
+        // The choice stays until it is taken off: on another list, and after a visit to another screen.
+        folder("backlog").tap()
+        expect(row("Replace the hallway light"), "the task carrying both tags, on Backlog")
+        XCTAssertEqual(expect(element("todos.tags.filter"), "the tag filter on Backlog").label, "Tags: house, diy", "The chosen tags should follow to another list")
+        go("feed")
+        go("todos")
+        XCTAssertEqual(expect(element("todos.tags.filter"), "the tag filter, back on Todos").label, "Tags: house, diy", "The chosen tags should still be on after leaving Todos and coming back")
+        shot("16-todos-tags-kept")
+
         // "Show all" takes the choice off again.
+        folder("all").tap()
         element("todos.tags.filter").tap()
         expect(app.buttons["Show all"], "Show all in the tag menu").tap()
         expect(row("Review robotics allocation"), "every task again, once the choice is off")

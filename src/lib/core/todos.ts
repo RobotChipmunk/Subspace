@@ -59,6 +59,8 @@ export type BinnedTodo = { id: string; title: string; done: boolean; has_notes: 
 
 const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const NEXT_DATE = "(SELECT n.date FROM todos n WHERE n.id = todos.next_id AND n.deleted_at IS NULL) AS next_date";
+/** What makes two tasks neighbours in one ordered list: the same day, week or list (and, while waiting on a guest's list, the same guest). */
+const PLACE = "scope, date, (CASE WHEN scope = 'guest' THEN guest_id END)";
 const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, tags, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}`;
 
 /** Unfinished tasks never get left behind: past days roll to today, past weeks roll to this week. */
@@ -167,8 +169,13 @@ export async function listTodos(view: string, opts: { tags?: string[] } = {}) {
   // narrowed to tasks carrying every one of these tags, whatever their capitals
   const wanted = cleanTags(opts.tags).map((t) => t.toLowerCase());
   const tagClause = wanted.length ? `AND $${spec.params.length + 1}::text[] <@ ARRAY(SELECT lower(x) FROM unnest(tags) AS x)` : "";
-  const todos = await q<Todo & { has_notes: boolean }>(
-    `SELECT ${LIST_COLS} FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause} ${tagClause} ORDER BY ${order}`,
+  // ord is where a task stands among those on its day or list, 1 first, as the owner arranged them.
+  // It is counted before the tags narrow the list, so it is the same number however the list is asked for.
+  const todos = await q<Todo & { has_notes: boolean; ord: number }>(
+    `SELECT * FROM (
+       SELECT ${LIST_COLS}, (row_number() OVER (PARTITION BY ${PLACE} ORDER BY position, id))::int AS ord
+       FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause}
+     ) t WHERE true ${tagClause} ORDER BY ${order}`,
     wanted.length ? [...spec.params, wanted] : spec.params,
   );
   return { view, today: cal.today, todos };
@@ -193,6 +200,32 @@ export async function openTodo(actor: Agent, id: string): Promise<Todo> {
 async function nextPosition(scope: string, date: string | null) {
   const r = await q1<{ p: number }>("SELECT COALESCE(max(position), 0) + 1 AS p FROM todos WHERE scope = $1 AND date IS NOT DISTINCT FROM $2", [scope, date]);
   return r!.p;
+}
+
+/** An order as an agent gives it: a whole number, 1 for first. */
+function readOrder(v: unknown): number {
+  const n = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 1) throw bad("order is a whole number, 1 for first in the task's day or list.");
+  return n;
+}
+
+/**
+ * Puts a task at a place in the order of its day or list, counted as the lists count it: 1 is
+ * first, and anything past the end is last. The tasks around it keep their order.
+ */
+async function placeAt(t: Pick<Todo, "id" | "scope" | "date" | "guest_id">, order: number) {
+  // finished tasks that have dropped out of an undated list are not counted, as they are not shown
+  const others = await q<{ id: string }>(
+    `SELECT id FROM todos
+     WHERE deleted_at IS NULL AND id <> $1 AND scope = $2 AND date IS NOT DISTINCT FROM $3
+       AND ($2 <> 'guest' OR guest_id IS NOT DISTINCT FROM $4)
+       AND (scope IN ('day', 'week') OR NOT done OR done_at > now() - interval '1 day')
+     ORDER BY position, id`,
+    [t.id, t.scope, t.date, t.guest_id],
+  );
+  const ids = others.map((o) => o.id);
+  ids.splice(Math.min(order - 1, ids.length), 0, t.id);
+  await q("UPDATE todos t SET position = o.ord FROM unnest($1::text[]) WITH ORDINALITY AS o(id, ord) WHERE t.id = o.id", [ids]);
 }
 
 function guardBlocks(actor: Agent, md: string) {
@@ -246,7 +279,7 @@ async function createNext(actor: Agent, t: Todo, today: string): Promise<string>
   return id;
 }
 
-export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null; tags?: string[] | string }) {
+export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null; tags?: string[] | string; /** where it goes among the tasks of its day or list, 1 first; left out, it goes last */ order?: number }) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Todo needs a title.");
   const cal = await calendar();
@@ -257,9 +290,11 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   const notes = input.notes ? (actor.kind === "agent" ? markAgentText(input.notes, actor.handle) : input.notes) : "";
   const repeat = input.repeat === undefined ? null : readRepeat(input.repeat);
   const tags = input.tags === undefined ? [] : await readTags(input.tags);
+  const order = input.order === undefined || input.order === null ? null : readOrder(input.order);
   await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat, tags) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", [
     id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat, tags,
   ]);
+  if (order !== null) await placeAt({ id, scope: add.scope, date: add.date, guest_id: add.guest_id ?? null }, order);
   const t = await getTodo(id);
   await afterWrite(actor, t, "todo.created", title, await findMentions(notes));
   return t;
@@ -280,9 +315,12 @@ export async function updateTodo(
     repeat?: string | null;
     /** the whole set of tags, replacing what is there; an empty list takes them all off */
     tags?: string[] | string;
+    /** where it goes among the tasks of its day or list (after any move in the same change), 1 first */
+    order?: number;
   },
 ) {
   const before = await getTodo(id);
+  const order = patch.order === undefined || patch.order === null ? null : readOrder(patch.order);
   const sets: string[] = ["updated_at = now()"];
   const params: unknown[] = [id];
   const set = (col: string, v: unknown) => {
@@ -360,8 +398,10 @@ export async function updateTodo(
   }
   if (patch.seen) set("ai_unseen", false);
 
-  if (sets.length === 1) return before;
+  if (sets.length === 1 && order === null) return before;
+  if (sets.length === 1) summary = `${before.title}: moved to place ${order} in its list`;
   await q(`UPDATE todos SET ${sets.join(", ")} WHERE id = $1`, params);
+  if (order !== null) await placeAt(await getTodo(id), order);
   // a finished task has nothing left to follow up: whatever the rail says about it goes
   if (patch.done === true && !before.done) await taskChanged(actor, id, "todo_done");
   let t = await getTodo(id);

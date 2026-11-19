@@ -1,0 +1,106 @@
+name: Web
+
+# Checks the server and the web app where no Mac is needed: the types, the agents' tools end to end
+# (mcp-smoke), and every screen in a real browser at each size (ui-check). Each job has its own
+# freshly seeded database, because both checks expect one and both change it.
+on:
+  push:
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/web.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgres://postgres:postgres@localhost:5432/subspace
+
+jobs:
+  server:
+    name: Types and agent tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: subspace
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Types
+        run: npm run typecheck
+      - name: Seed
+        run: npm run seed
+      - name: Agent tools (mcp-smoke)
+        run: |
+          set -o pipefail
+          npm run test:mcp 2>&1 | tee smoke.log | tail -60 || {
+            # the reason, where it can be read without opening the log
+            grep -E "Error|error:" smoke.log | head -5 | sed 's/^/::error::/'
+            exit 1
+          }
+
+  screens:
+    name: Every screen (ui-check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: subspace
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Browser
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Seed
+        run: npm run seed
+      - name: Dev server
+        run: |
+          npm run dev > dev.log 2>&1 &
+          for _ in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3000/login && break; sleep 2; done
+          curl -sf -o /dev/null http://localhost:3000/login || { tail -40 dev.log; exit 1; }
+      - name: ui-check
+        run: |
+          set -o pipefail
+          node scripts/ui-check.cjs ui-out 2>&1 | tee ui-check.log | tail -80 || {
+            grep -E "^ - " ui-check.log | head -10 | sed 's/^ - /::error::/'
+            exit 1
+          }
+      - name: Server log when something failed
+        if: failure()
+        run: tail -40 dev.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-check
+          path: |
+            ui-out/**
+            ui-check.log
+          retention-days: 14

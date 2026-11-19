@@ -140,6 +140,17 @@ async function main() {
   await call(s, "search", { query: "robot", types: ["context"] });
   await call(s, "read", { ids: [p.id, t.id, c.id, tr.slug] });
   await call(s, "todo_list", {});
+  {
+    // order: each task says where it stands on its day; an agent can put one first, and the rest keep their order
+    const before: { id: string; order: number }[] = (await call(s, "todo_list", { view: "today" })).todos;
+    if (before.find((x) => x.id === t.id)?.order !== before.length) throw new Error("a task added without an order is not last on its day: " + JSON.stringify(before));
+    await call(s, "todo_update", { id: t.id, order: 1 });
+    const after: { id: string; order: number }[] = (await call(s, "todo_list", { view: "today" })).todos;
+    if (after[0]?.id !== t.id || after[0].order !== 1) throw new Error("todo_update(order: 1) did not put the task first: " + JSON.stringify(after.slice(0, 3)));
+    const rest = (l: { id: string }[]) => l.map((x) => x.id).filter((x) => x !== t.id).join();
+    if (rest(after) !== rest(before)) throw new Error("placing one task changed the order of the others");
+    if (after.map((x) => x.order).join() !== after.map((_, i) => i + 1).join()) throw new Error("orders on one day are not 1, 2, 3: " + JSON.stringify(after.map((x) => x.order)));
+  }
   // a follow-up: a tagged task, and a rail module that points at it
   const followUp = await call(s, "todo_add", { title: "Decide on the smoke test " + tag, view: "week", tags: ["smoke"], notes: "Two options, pick one." });
   const onSubject = await call(s, "todo_list", { view: "all", tag: "smoke" });

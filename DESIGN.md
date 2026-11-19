@@ -278,8 +278,10 @@ Patterns:
   control at the right of the heading: a tag icon and "Tags" in `ink3`, no surface. Tapping it
   drops a menu of that list's tags with counts; each is ticked on and off, and the list shows the
   tasks carrying every ticked one, so each tick narrows it further. While a choice is made the control is `accent-soft` and
-  names it, and "Show all" in the menu takes it off. The choice belongs to the list it was made
-  on and is dropped on leaving it, so no task is hidden by a choice made elsewhere. A task added
+  names it, and "Show all" in the menu takes it off. The choice stays until the owner takes
+  it off: it follows them from list to list and is still there after a visit to another screen
+  (kept for the session, not for good). A list where no task carries the chosen tags still shows
+  the control, lit, and says "Nothing tagged <tags> here.", so a choice is never hidden. A task added
   while the list is narrowed takes the chosen tags. On a list with no tagged tasks the control is
   absent. In the iOS app it is the system menu, which stays open while tags are ticked.
 - **Journal** (`journal/page.tsx`): the owner's own writing, arranged by time. Under small month

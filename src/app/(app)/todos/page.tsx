@@ -97,6 +97,9 @@ function FromTag({ id }: { id: string | null }) {
   return <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-accent-soft px-2 py-[1px] align-middle text-[11.5px] font-medium text-accent">From {g.name}</span>;
 }
 
+/** Where the chosen tags are kept while the owner is elsewhere in the app. */
+const FILTER_KEY = "ss_todo_tags";
+
 export default function TodosPage() {
   // the address is read (?open=), which needs a boundary above it
   return (
@@ -113,9 +116,26 @@ function Todos() {
   const [openId, setOpenId] = useState<string | null>(null);
   // the list a carried task is being held over, lit as the place it will land
   const [carry, setCarry] = useState<string | null>(null);
-  // the tags the list is narrowed to; it starts afresh on every list, so no task is hidden by a choice made elsewhere
-  const [filter, setFilter] = useState<string[]>([]);
-  const show = (key: string) => (key !== view && setFilter([]), setView(key), setOpenId(null));
+  // the tags the lists are narrowed to. The choice stays until the owner takes it off: across lists, and
+  // on leaving this screen and coming back (it is kept for as long as the browser tab is).
+  const [filter, setFilterNow] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const kept: unknown = JSON.parse(sessionStorage.getItem(FILTER_KEY) ?? "[]");
+      if (Array.isArray(kept) && kept.length) setFilterNow(kept.filter((t): t is string => typeof t === "string"));
+    } catch {
+      // no storage, or something else's value under the key: start with no choice
+    }
+  }, []);
+  const setFilter = (tags: string[]) => {
+    setFilterNow(tags);
+    try {
+      sessionStorage.setItem(FILTER_KEY, JSON.stringify(tags));
+    } catch {
+      // private windows may refuse; the choice then lasts only while this screen is up
+    }
+  };
+  const show = (key: string) => (setView(key), setOpenId(null));
 
   // The rail links here with ?open=<task id> to show one task, also while this screen is already up.
   useEffect(() => {

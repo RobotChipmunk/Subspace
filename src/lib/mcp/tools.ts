@@ -71,7 +71,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "search",
-    description: "Full-text search across posts, todos, context, saved links and followed topics. Returns ids with one-line snippets, best match first. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
+    description: "Word search across posts, todos, context, saved links and followed topics. It matches the words you give (and their plain English forms: run, runs, running), not their meaning: every word must appear, so \"car\" does not find \"vehicle\" and a long query finds less. Only when nothing has every word does it fall back to any of them. So one search is never proof that something is absent: search several times with different words (the name, a synonym, the broader term), one or two words at a time, and follow next_offset when there is more. Returns ids with one-line snippets, best match first, 12 at a time. Follow with read for full content. Saved links come back with their address, so no read is needed to open one; pass a web address as the query to check whether that page is already saved.",
     inputSchema: obj(
       {
         query: str('Words to find. Supports "quoted phrases", OR, and -exclusions.'),
@@ -195,19 +195,19 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_list",
-    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Pass tag to see only the tasks carrying it (several, separated by commas, for tasks carrying all of them).",
+    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Tasks come in the order the owner keeps them, and each carries order: its place among the tasks of its own day or list, 1 first. Pass tag to see only the tasks carrying it (several, separated by commas, for tasks carrying all of them).",
     inputSchema: obj({ view: str("Default today."), tag: str('Optional. Only tasks carrying this tag, e.g. "finance". With view "all" this is every open task on that subject.') }),
     readOnly: true,
     run: async (_a, { view, tag }) => {
       const l = await listTodos(view || "today", { tags: tag ? String(tag).split(",") : undefined });
       const share = await sharingFor(l.todos.map((t) => t.guest_id));
-      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
+      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, order: t.ord, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
     },
   },
   {
     name: "todo_add",
     description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions). This is also how you ask the owner for anything: when you need them to do, decide or answer something, add the task here with what they need in its notes, then point a rail module at it with rail_set(todo: id). Never ask in the feed.",
-    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished.") }, ["title"]),
+    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished."), order: { type: "integer", description: "Optional: where it goes among the tasks of that day or list, 1 for first. Left out, it goes last, which is usually right." } }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
       return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, label, title, show_until, todo: this id)." };
@@ -224,6 +224,7 @@ export const TOOLS: Tool[] = [
         view: str("Move to: today, week, weekend, next_week, backlog or YYYY-MM-DD."),
         repeat: str("daily, every_3_days, weekly, biweekly, monthly, yearly, or none to stop. Finishing a repeating task creates the next one that long after the day it was finished; the result then names it under next."),
         tags: { type: "array", items: { type: "string" }, description: "The task's whole set of tags, replacing what it has; [] takes them all off. Leave out to keep them. Do not remove tags the owner chose." },
+        order: { type: "integer", description: "Its place among the tasks of its day or list (the one it is moved to, when view is given too): 1 for first, a number past the end for last. The other tasks keep their order around it. The order is the owner's: change it only when they ask." },
         notes_append: str("Markdown to add at the end of the notes. May contain blocks: fenced code blocks whose language is the block type and whose body is JSON."),
         notes_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement markdown.") }, required: ["find", "replace"] },
       },
