@@ -1,12 +1,13 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { Check, Copy, LogOut, MessageCircle, Plus, Wand2, Zap } from "lucide-react";
+import { Check, Copy, Eye, LogOut, MessageCircle, Plus, Wand2, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";
 import useSWR from "swr";
 import { Avatar, PageCard, PageHeader, Rich, SendButton } from "@/components/bits";
 import { MentionInput } from "@/components/MentionInput";
 import { ago, api, fetcher, soft, spring, useDirectUnread, useMe } from "@/lib/client";
+import type { AccessRules, Section } from "@/lib/core/access";
 import type { Grant } from "@/lib/core/oauth";
 import type { Post } from "@/lib/core/posts";
 import type { Agent } from "@/lib/core/util";
@@ -185,6 +186,11 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
                 <Wand2 size={11} /> Illustrator
               </span>
             )}
+            {a.access && (
+              <span data-access-badge className="flex items-center gap-1 rounded-full bg-fill px-2 py-0.5 text-[11.5px] font-medium text-ink2">
+                <Eye size={11} /> {a.access.read_only ? "Read only" : "Limited"}
+              </span>
+            )}
           </div>
           {human ? (
             <p className="text-[14px] text-ink2">You</p>
@@ -231,6 +237,7 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
               </p>
               <CopyField label="Connector address" value={`${origin}/api/mcp/${a.handle}`} />
               <Connections id={a.id} empty="No app has signed in yet." />
+              <Access agent={a} onChanged={onChanged} />
 
               <details className="group rounded-[14px] bg-fill px-3 py-2.5 text-[13px] text-ink2">
                 <summary className="cursor-pointer list-none font-medium marker:hidden">For scripts: a token sent as a header</summary>
@@ -269,6 +276,87 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+// the same list as SECTIONS in core/access.ts, which cannot be imported here: it reaches the database
+const SECTIONS: Section[] = ["feed", "todos", "journal", "following", "pages", "links", "rail"];
+const SECTION_LABEL: Record<Section, string> = { feed: "Feed", todos: "Todos", journal: "Journal", following: "Following", pages: "Pages", links: "Links", rail: "Now" };
+/** Top levels of context that are a part of the app, and so are chosen under "The app", not "Context". */
+const APP_OWNED = ["journal", "links"];
+
+/** One thing an agent can be allowed to see: a quiet chip, lit while it is allowed. */
+function Allow({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button role="checkbox" aria-checked={on} onClick={() => onChange(!on)} className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${on ? "bg-accent-soft text-accent" : "bg-fill2 text-ink3 hover:text-ink2"}`}>
+      {on && <Check size={13} />}
+      {label}
+    </button>
+  );
+}
+
+/**
+ * What this agent may see and do, whatever app it connects from: whether it only looks, which
+ * parts of the app it sees, and which top-level sections of context. Each change is saved as it
+ * is made. An agent left with everything on and able to write has no limits at all.
+ */
+function Access({ agent: a, onChanged }: { agent: Agent; onChanged: () => void }) {
+  const { data } = useSWR<{ children: { path: string; title: string }[] }>("context", fetcher);
+  const tops = (data?.children ?? []).filter((c) => !APP_OWNED.includes(c.path));
+  const rules = a.access ?? null;
+  const [error, setError] = useState("");
+  const readOnly = !!rules?.read_only;
+  const sections: Section[] = rules?.sections ?? [...SECTIONS];
+  const context: string[] = rules?.context ?? tops.map((t) => t.path);
+
+  async function save(next: { read_only: boolean; sections: Section[]; context: string[] }) {
+    setError("");
+    const everything = !next.read_only && next.sections.length === SECTIONS.length && tops.every((t) => next.context.includes(t.path));
+    // limits name what is allowed, so a section of context added later starts out hidden from a limited agent
+    const access: AccessRules | null = everything ? null : { read_only: next.read_only, sections: next.sections, context: next.context };
+    try {
+      await api(`agents/${a.id}`, { method: "PATCH", body: { access } });
+      onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const flip = <T,>(list: T[], item: T, on: boolean) => (on ? [...list.filter((x) => x !== item), item] : list.filter((x) => x !== item));
+
+  return (
+    <div data-access>
+      <div className="mb-1 text-[12px] font-medium uppercase tracking-[0.05em] text-ink3">Access</div>
+      <div className="space-y-3 rounded-[14px] bg-fill px-3 py-3">
+        <div className="flex items-center gap-3">
+          <p className="min-w-0 flex-1 text-[13.5px] leading-relaxed text-ink2">
+            <span className="font-medium text-ink">Read only.</span> {a.name} can look, but never post, add or change anything, from any app it connects with.
+          </p>
+          <Switch on={readOnly} label="Read only" onChange={(v) => save({ read_only: v, sections, context })} />
+        </div>
+        <div>
+          <div className="mb-1.5 text-[12.5px] text-ink3">The app</div>
+          <div role="group" aria-label="Parts of the app it can see" className="flex flex-wrap gap-1.5">
+            {SECTIONS.map((k) => (
+              <Allow key={k} label={SECTION_LABEL[k]} on={sections.includes(k)} onChange={(v) => save({ read_only: readOnly, sections: flip(sections, k, v), context })} />
+            ))}
+          </div>
+        </div>
+        {tops.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-[12.5px] text-ink3">Context</div>
+            <div role="group" aria-label="Sections of context it can see" className="flex flex-wrap gap-1.5">
+              {tops.map((t) => (
+                <Allow key={t.path} label={t.title} on={context.includes(t.path)} onChange={(v) => save({ read_only: readOnly, sections, context: flip(context, t.path, v) })} />
+              ))}
+            </div>
+          </div>
+        )}
+        <p className="text-[12.5px] leading-relaxed text-ink3">
+          {rules ? `What is off does not exist for ${a.name}: it is absent from its map, its searches and what it is told has changed.` : `${a.name} sees and can change everything, as agents do unless you limit them here.`}
+        </p>
+        {error && <p className="text-[12.5px] text-danger">{error}</p>}
+      </div>
+    </div>
   );
 }
 

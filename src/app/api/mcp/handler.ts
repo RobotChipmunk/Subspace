@@ -22,7 +22,7 @@ export async function mcpPost(req: Request, at: { target?: Target } = {}) {
   } catch {
     return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, { status: 400, headers: CORS });
   }
-  const out = await handleMcp(who.agent, body, { readOnly: who.grant?.read_only, origin: originOf(req), client: who.grant ? who.grant.client_name || who.grant.client_host || "app" : "token", grantId: who.grant?.id });
+  const out = await handleMcp(who.agent, body, { readOnly: who.grant?.read_only || !!who.agent.access?.read_only, origin: originOf(req), client: who.grant ? who.grant.client_name || who.grant.client_host || "app" : "token", grantId: who.grant?.id });
   if (out.json === undefined) return new Response(null, { status: out.status, headers: CORS });
   return Response.json(out.json, { status: out.status, headers: CORS });
 }

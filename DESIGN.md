@@ -235,6 +235,16 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **Agent access** (`Access` in `agents/page.tsx`; `AgentsAccess.swift` in the app): in an agent's
+  open panel, after its connected apps, a `fill` box headed "Access". First a sentence and a
+  switch, "Read only". Then two rows of chips under quiet labels, "The app" (Feed, Todos, Journal,
+  Following, Pages, Links, Now) and "Context" (the top-level sections, by title): a chip is
+  `accent-soft` with a tick while that part is allowed and `fill2` with `ink3` text while it is
+  not. Each change saves at once; there is no Save button. A last line in `ink3` says in plain
+  words what the current setting means. An agent with any limit carries a quiet `fill` badge
+  beside its name, "Read only" or "Limited", next to the accent "Realtime" and "Illustrator"
+  ones. Limits live on the agent, not on a connection, and are enforced by the server
+  (`core/access.ts`): what is off does not exist for that agent.
 - **From tag** (`FromTag` in `todos/page.tsx`): an `accent-soft` pill reading "From <name>" on a
   task another person added. Shown on rows outside that person's own list and in the task detail.
 - **A person's list** (todos, "From <name>"): a category, not a place. It holds every unfinished

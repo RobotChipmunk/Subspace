@@ -1392,6 +1392,39 @@ async function run(profile) {
     await reachable(page.getByRole("button", { name: "Make a token" }), "make a token");
     await noSidewaysScroll("agents connect panel");
     await shot("agents-connect");
+    // access: what this agent may see and do is set here and saved as it is changed
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const access = page.locator("[data-access]");
+    await access.scrollIntoViewIfNeeded();
+    const probeId = async () => (await get("/api/v1/me")).agents.find((x) => /^probe/.test(x.handle));
+    if ((await probeId()).access) fail("agents access: a new agent should start with no limits");
+    await reachable(access.getByRole("switch", { name: "Read only" }), "the Read only switch");
+    await press(access.getByRole("switch", { name: "Read only" }));
+    await settle(900);
+    if ((await probeId()).access?.read_only !== true) fail("agents access: Read only was not saved");
+    if (!(await page.locator("[data-access-badge]", { hasText: "Read only" }).count())) fail("agents access: a read-only agent does not say so beside its name");
+    for (const name of ["Feed", "Todos", "Journal", "Following", "Pages", "Links", "Now"]) await reachable(access.getByRole("checkbox", { name, exact: true }), `access choice "${name}"`);
+    await press(access.getByRole("checkbox", { name: "Journal", exact: true }));
+    await settle(900);
+    const limited = (await probeId()).access;
+    if (!limited || limited.sections?.includes("journal") || !limited.sections?.includes("todos")) fail(`agents access: turning Journal off saved ${JSON.stringify(limited)}`);
+    // the top levels of context are offered by name, and one can be turned off
+    const work = access.getByRole("checkbox", { name: "Work", exact: true });
+    await reachable(work, 'access choice "Work" (context)');
+    await press(work);
+    await settle(900);
+    const narrowed = (await probeId()).access;
+    if (!narrowed?.context || narrowed.context.includes("work") || !narrowed.context.includes("me")) fail(`agents access: turning Work off saved ${JSON.stringify(narrowed)}`);
+    await noSidewaysScroll("agents access");
+    await shot("agents-access");
+    // everything back on and able to write is no limit at all
+    await press(work);
+    await settle(700);
+    await press(access.getByRole("checkbox", { name: "Journal", exact: true }));
+    await settle(700);
+    await press(access.getByRole("switch", { name: "Read only" }));
+    await settle(900);
+    if ((await probeId()).access) fail("agents access: with everything on again the agent should have no limits");
     // removing asks once more
     await press(page.getByRole("button", { name: "Remove agent", exact: true }));
     await settle(500);

@@ -461,6 +461,9 @@ const MIGRATIONS: string[] = [
      created_at timestamptz NOT NULL DEFAULT now(),
      last_seen timestamptz NOT NULL DEFAULT now()
    )`,
+  // What the owner lets an agent see and do: read-only, which parts of the app, which top-level
+  // sections of context (core/access.ts). Null is everything, as before.
+  `ALTER TABLE agents ADD COLUMN IF NOT EXISTS access jsonb`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

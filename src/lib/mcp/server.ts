@@ -3,7 +3,9 @@ import { ApiError, type Agent } from "../core/util";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 import { sharingInstructions } from "../core/guests";
 import { GUEST_GUIDE, guestServerInfo, guestTools } from "./guest";
-import { TOOLS, type Tool } from "./tools";
+import { describeAccess } from "../core/access";
+import { children as contextChildren } from "../core/context";
+import { guardCall, toolsFor, type Tool } from "./tools";
 
 /**
  * A stateless MCP server over Streamable HTTP. Each POST carries one JSON-RPC message (or a
@@ -22,7 +24,8 @@ export type Access = { readOnly?: boolean; origin?: string; /** The app that is 
 async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | null> {
   if (m.id === undefined) return null; // notifications need no reply
   const guest = agent.kind === "guest";
-  const tools: (Tool & { aliases?: string[] })[] = (guest ? await guestTools() : TOOLS).filter((t) => !access.readOnly || t.readOnly);
+  // a guest has its own few tools; an agent has those its settings and this connection allow
+  const tools: (Tool & { aliases?: string[] })[] = guest ? (await guestTools()).filter((t) => !access.readOnly || t.readOnly) : toolsFor(agent, access.readOnly);
   if (guest) {
     // A guest's server has tasks and nothing else: no guide topics, resources or prompts from the owner's side.
     if (m.method === "resources/list") return ok(m.id, { resources: [] });
@@ -40,7 +43,7 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
         serverInfo: { ...(guest ? await guestServerInfo() : { name: "subspace", title: "Subspace" }), version: GUIDE_VERSION },
         instructions: guest
           ? await GUEST_GUIDE(agent, !!access.readOnly)
-          : `You are connected as @${agent.handle} (${agent.name}).${access.readOnly ? " This connection is read-only: you can look, but not post or change anything." : ""}\n\n${CORE}${await sharingSection()}`,
+          : `You are connected as @${agent.handle} (${agent.name}).${await accessLine(agent, access)}\n\n${CORE}${await sharingSection()}`,
       });
     }
     case "ping":
@@ -65,7 +68,10 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
       }
       try {
         const args = m.params?.arguments ?? {};
-        const out = await logged(agent, tool.name, args, ctx, () => tool.run(agent, args, { origin: access.origin }));
+        const out = await logged(agent, tool.name, args, ctx, async () => {
+          if (!guest) await guardCall(agent, tool.name, args);
+          return tool.run(agent, args, { origin: access.origin });
+        });
         return ok(m.id, { content: [{ type: "text", text: JSON.stringify(out) }] });
       } catch (e) {
         // Tool errors go back as content so the model can read them and correct itself.
@@ -109,6 +115,13 @@ async function handle(agent: Agent, m: Rpc, access: Access): Promise<unknown | n
     default:
       return err(m.id, -32601, `Method not found: ${m.method}`);
   }
+}
+
+/** What the agent is told about its own access when it connects, so it does not go looking for what it cannot have. */
+async function accessLine(agent: Agent, access: Access): Promise<string> {
+  const mine = describeAccess(agent, await contextChildren(null));
+  if (mine) return ` ${mine} Where the guide below describes posting, adding or changing something you have no tool for, or a part of the system you cannot see, it does not apply to you.`;
+  return access.readOnly ? " This connection is read-only: you can look, but not post or change anything." : "";
 }
 
 const sharingSection = async () => {

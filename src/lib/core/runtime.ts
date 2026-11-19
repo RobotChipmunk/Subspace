@@ -9,7 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { q, q1 } from "../db";
 import { CORE } from "../mcp/guide";
-import { TOOLS } from "../mcp/tools";
+import { guardCall, toolsFor, TOOLS } from "../mcp/tools";
 import { finishRun, logged, refused, startRun, type CallCtx } from "./audit";
 import { briefing, changes } from "./discover";
 import { sharingInstructions } from "./guests";
@@ -144,8 +144,8 @@ When the work is finding, comparing, researching or planning, present the result
 
 Be decisive. If a request is clear enough to act on, act; ask a question only when a wrong guess would waste the owner's time. Do real work rather than describing what you could do. When you use the web, cite the specific places you relied on.`;
 
-function toolList(model: string, web: boolean): Anthropic.Beta.BetaToolUnion[] {
-  const tools: Anthropic.Beta.BetaToolUnion[] = TOOLS.filter((t) => t.name !== "briefing").map((t) => ({
+function toolList(agent: Agent, model: string, web: boolean): Anthropic.Beta.BetaToolUnion[] {
+  const tools: Anthropic.Beta.BetaToolUnion[] = toolsFor(agent).filter((t) => t.name !== "briefing").map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema,
@@ -160,8 +160,8 @@ function toolList(model: string, web: boolean): Anthropic.Beta.BetaToolUnion[] {
 }
 
 /** With eager input streaming the API no longer validates tool input, so check it before running. */
-function checkInput(name: string, input: unknown): string | null {
-  const tool = TOOLS.find((t) => t.name === name);
+function checkInput(agent: Agent, name: string, input: unknown): string | null {
+  const tool = toolsFor(agent).find((t) => t.name === name);
   if (!tool) return `Unknown tool ${name}.`;
   if (!input || typeof input !== "object" || Array.isArray(input)) return "Tool input was not a JSON object.";
   const missing = (tool.inputSchema.required ?? []).filter((k) => (input as Record<string, unknown>)[k] === undefined);
@@ -184,7 +184,7 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
       content: `You were woken because: ${reason}\n\nBriefing:\n${JSON.stringify(brief)}\n\nChanges waiting for you (your cursor has moved past these):\n${JSON.stringify(waiting)}`,
     },
   ];
-  const tools = toolList(cfg.model, cfg.web);
+  const tools = toolList(agent, cfg.model, cfg.web);
   // A declined request is re-run on a fallback model in the same call. Haiku has no server-side fallback.
   const fallback = cfg.model !== "claude-haiku-5-5";
   let jsonRetries = 0;
@@ -234,14 +234,17 @@ async function converse(agent: Agent, cfg: Stored, apiKey: string, reason: strin
     messages.push({ role: "assistant", content: message.content });
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const call of calls) {
-      const problem = checkInput(call.name, call.input);
+      const problem = checkInput(agent, call.name, call.input);
       if (problem) {
         await refused(agent, call.name, call.input, ctx(call.name), problem);
         results.push({ type: "tool_result", tool_use_id: call.id, is_error: true, content: problem });
         continue;
       }
       try {
-        const value = await logged(agent, call.name, call.input, ctx(call.name), () => TOOLS.find((t) => t.name === call.name)!.run(agent, call.input as Record<string, unknown>));
+        const value = await logged(agent, call.name, call.input, ctx(call.name), async () => {
+          await guardCall(agent, call.name, call.input as Record<string, unknown>);
+          return TOOLS.find((t) => t.name === call.name)!.run(agent, call.input as Record<string, unknown>);
+        });
         results.push({ type: "tool_result", tool_use_id: call.id, content: JSON.stringify(value) });
       } catch (e) {
         if (!(e instanceof ApiError)) console.error("runtime tool error", call.name, e);

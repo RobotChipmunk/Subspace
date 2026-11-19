@@ -1,5 +1,5 @@
 /** End-to-end check of the MCP surface against the database in DATABASE_URL. */
-import { createAgent, issueToken } from "../src/lib/core/agents";
+import { createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
 import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
@@ -229,6 +229,50 @@ async function main() {
   const jread = await call(s, "read", { ids: [je.id] });
   if (jread.items?.[0]?.type !== "journal" && jread[0]?.type !== "journal") console.log("note: read() shape for a journal entry:", JSON.stringify(jread).slice(0, 200));
   await call(s, "context_archive", { id: je.id });
+
+  {
+    // Access: an agent the owner has limited sees only its part, as if the rest did not exist, and a read-only one has no tools that change things.
+    const made = await createAgent(owner, { name: "Viewer " + tag, handle: "viewer" + tag, bio: "Looks, from elsewhere." });
+    await updateAgent(owner, made.id, { access: { read_only: true, sections: ["todos"], context: ["work"] } });
+    const viewer = (await agentByToken(await issueToken(made.id)))!;
+    const offered: string[] = ((await handleMcp(viewer, { jsonrpc: "2.0", id: ++n, method: "tools/list" })) as any).json.result.tools.map((x: any) => x.name);
+    for (const name of ["post", "reply", "todo_add", "todo_update", "context_write", "page_write", "rail_set", "journal_write", "link_save"]) if (offered.includes(name)) throw new Error(`a read-only agent was offered ${name}`);
+    for (const name of ["briefing", "explore", "search", "read", "todo_list", "changes"]) if (!offered.includes(name)) throw new Error(`a read-only agent that sees todos was not offered ${name}`);
+    const refusedWrite: any = await handleMcp(viewer, { jsonrpc: "2.0", id: ++n, method: "tools/call", params: { name: "todo_add", arguments: { title: "Should not exist " + tag } } });
+    if (!refusedWrite.json.error) throw new Error("a read-only agent could call todo_add: " + JSON.stringify(refusedWrite.json));
+    const vBrief = await call(viewer, "briefing");
+    if (!/read-only/.test(vBrief.your_access ?? "") || vBrief.rail || vBrief.recent_pages) throw new Error("the briefing of a limited agent does not say so, or shows what it may not see: " + JSON.stringify(vBrief).slice(0, 400));
+    const vMap: string[] = vBrief.map.map((x: any) => x.path);
+    if (vMap.join() !== "/todos,/context,/agents") throw new Error("a limited agent's map shows " + vMap.join());
+    const vCtx: string[] = (await call(viewer, "explore", { path: "/context" })).children.map((x: any) => x.path);
+    if (vCtx.join() !== "/context/work") throw new Error("a limited agent sees these sections of context: " + vCtx.join());
+    for (const path of ["/context/home", "/feed", "/feed/recent", "/journal", "/pages", "/links", "/rail", "/following", "/log"]) {
+      const r = await call(viewer, "explore", { path });
+      if (!r.ERROR) throw new Error(`a limited agent could explore ${path}`);
+    }
+    const homeNote = (await call(claude, "explore", { path: "/context/home/weekly-rhythm" })).items[0].id;
+    const vRead = await call(viewer, "read", { ids: [homeNote, p.id, je.id, t.id, c.id] });
+    const byId = (id: string) => vRead.find((x: any) => x.id === id);
+    for (const id of [homeNote, p.id, je.id]) if (byId(id)?.error !== "Nothing by that id.") throw new Error("a limited agent read something outside its access: " + JSON.stringify(byId(id)).slice(0, 200));
+    if (byId(t.id)?.type !== "todo" || byId(c.id)?.type !== "context") throw new Error("a limited agent could not read what it may see: " + JSON.stringify(vRead).slice(0, 300));
+    const vHome = await call(viewer, "search", { query: "compost recycling" });
+    if (vHome.results.some((x: any) => x.type !== "todo" && !(x.path ?? "").startsWith("/context/work"))) throw new Error("search found something in a hidden part: " + JSON.stringify(vHome.results));
+    if (!(await call(claude, "search", { query: "compost recycling" })).results.some((x: any) => (x.path ?? "").startsWith("/context/home"))) throw new Error("the note the access test looks for is not in the seed any more");
+    const vFound = await call(viewer, "search", { query: "robotics" });
+    if (!vFound.results.length || vFound.results.some((x: any) => x.type === "post" || (x.path && !x.path.startsWith("/context/work")))) throw new Error("search for a limited agent returned the wrong things: " + JSON.stringify(vFound.results).slice(0, 400));
+    // it hears only of changes to its part: a post is not news to it, a task is
+    await call(viewer, "changes");
+    await call(s, "post", { body: "Nothing a viewer should hear of " + tag + ".", art: { prompt: "a closed door at the end of a quiet corridor" } });
+    const vTask = await call(s, "todo_add", { title: "Something a viewer may see " + tag, view: "backlog" });
+    const vNews = await call(viewer, "changes");
+    const heard = [...vNews.for_you, ...vNews.other];
+    if (heard.some((x: any) => String(x.type).startsWith("post.")) || !heard.some((x: any) => x.id === vTask.id)) throw new Error("changes() for a limited agent: " + JSON.stringify(heard).slice(0, 400));
+    // limits lifted: it is an ordinary agent again
+    await updateAgent(owner, made.id, { access: null });
+    const freed = (await agentByToken(await issueToken(made.id)))!;
+    if (!(await call(freed, "explore", { path: "/feed" })).children) throw new Error("an agent whose limits were lifted still cannot see the feed");
+    await updateAgent(owner, made.id, { archived: true });
+  }
 
   // What agents did is on record: every call above, with what it asked for and what it was shown.
   await call(s, "search", { query: "zzzqqq" + tag + "xk" });

@@ -18,8 +18,19 @@ struct Agent: Codable, Identifiable, Hashable {
     var has_token: Bool?
     var has_passcode: Bool?
     var runtime: JSONValue?
+    /// What the owner lets this agent see and do; nil is everything.
+    var access: AgentAccess?
 
     var isHuman: Bool { kind == "human" }
+}
+
+/// An agent's limits, as the server keeps them. A nil list means all of them.
+struct AgentAccess: Codable, Hashable {
+    var read_only: Bool?
+    /// Parts of the app it can see: feed, todos, journal, following, pages, links, rail.
+    var sections: [String]?
+    /// Top-level sections of context it can see, by the first part of their path.
+    var context: [String]?
 }
 
 struct Tracker: Codable, Identifiable, Hashable {

@@ -1,4 +1,5 @@
 import { actorFromRequest, SESSION_COOKIE, signIn } from "@/lib/auth";
+import { restAllowed } from "@/lib/core/access";
 import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
 import { listGrants, revokeGrant } from "@/lib/core/oauth";
@@ -158,6 +159,8 @@ async function handle(req: Request, ctx: { params: Promise<{ path: string[] }> }
     }
     const actor = await actorFromRequest(req);
     if (!actor) throw new ApiError(401, "Sign in first.");
+    // this API knows nothing of what a limited agent may see, so such an agent is kept to its MCP address
+    restAllowed(actor);
     for (const [method, re, fn] of routes) {
       if (method !== req.method) continue;
       const m = path.match(re);

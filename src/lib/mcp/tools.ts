@@ -1,3 +1,4 @@
+import { sightOf, type Section } from "../core/access";
 import { openJobs, submitJob } from "../core/art";
 import { archiveNode, children as contextChildren, createNode, getNode, revisions, updateNode } from "../core/context";
 import { briefing, changes, explore, read, search } from "../core/discover";
@@ -10,7 +11,7 @@ import { RAIL_BLOCKS, RAIL_ICONS, railGone, removeModule, setModule } from "../c
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
-import { bad, oneLine, type Agent } from "../core/util";
+import { bad, notFound, oneLine, type Agent } from "../core/util";
 import { q } from "../db";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 
@@ -42,11 +43,11 @@ export const TOOLS: Tool[] = [
     description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, context, todos, following.",
     inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | context | todos | following") }),
     readOnly: true,
-    run: async (_a, { topic }) => {
+    run: async (a, { topic }) => {
       if (topic && !TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
       // The guide is read fresh on every call, but many apps keep the tool list from the day they
       // connected. Naming the tools here lets an agent tell an old list from a missing feature.
-      return { version: GUIDE_VERSION, ...(topic ? { topic } : {}), guide: topic ? TOPICS[topic] : CORE, tools: TOOLS.map((t) => t.name), if_a_tool_is_missing: STALE };
+      return { version: GUIDE_VERSION, ...(topic ? { topic } : {}), guide: topic ? TOPICS[topic] : CORE, tools: toolsFor(a).map((t) => t.name), if_a_tool_is_missing: STALE };
     },
   },
   {
@@ -83,14 +84,14 @@ export const TOOLS: Tool[] = [
       ["query"],
     ),
     readOnly: true,
-    run: (_a, args) => search(args as any),
+    run: (a, args) => search({ ...(args as any), actor: a }),
   },
   {
     name: "read",
     description: "Full content of up to 20 things by id: a post with its whole thread, a todo with notes, a context node or page with its body (id or /context/path; blocks come back as their JSON), or a tracker brief (id or slug).",
     inputSchema: obj({ ids: { type: "array", items: { type: "string" }, description: "Ids or paths." }, after: str("For long threads: more_replies_after from the previous read.") }, ["ids"]),
     readOnly: true,
-    run: (_a, { ids, after }) => read(Array.isArray(ids) ? ids : [ids], { after }),
+    run: (a, { ids, after }) => read(Array.isArray(ids) ? ids : [ids], { after, actor: a }),
   },
   {
     name: "post",
@@ -472,3 +473,60 @@ export const TOOLS: Tool[] = [
     },
   },
 ];
+
+// ---------- What one agent is offered ----------
+
+/** The part of the app each tool belongs to. An agent that may not see that part is not offered the tool. */
+const AREA: Record<string, Section> = {
+  post: "feed",
+  reply: "feed",
+  claim: "feed",
+  todo_list: "todos",
+  todo_add: "todos",
+  todo_update: "todos",
+  journal_write: "journal",
+  page_write: "pages",
+  link_save: "links",
+  tracker_create: "following",
+  tracker_update: "following",
+  rail_set: "rail",
+  rail_remove: "rail",
+};
+
+/**
+ * The tools an agent has on a connection: all of them, less those that change things when the
+ * agent (or this connection) is read-only, less those for parts of the app it may not see.
+ * A tool that is not offered does not exist for that agent: calling it is an unknown tool.
+ */
+export function toolsFor(agent: Agent, connectionReadOnly = false): Tool[] {
+  const sight = sightOf(agent);
+  const readOnly = connectionReadOnly || sight.readOnly;
+  return TOOLS.filter((t) => (!readOnly || t.readOnly) && (!AREA[t.name] || sight.section(AREA[t.name])));
+}
+
+/** The context nodes a call names, which the agent must be able to see for the call to go ahead. */
+const NODE_ARGS: Record<string, string[]> = {
+  context_write: ["id", "parent"],
+  page_write: ["id", "parent"],
+  link_save: ["parent"],
+  journal_write: ["id"],
+  context_archive: ["id"],
+  context_history: ["id"],
+};
+
+/**
+ * Checked before a tool runs for an agent that sees only part of the system: a context node it
+ * names must be one it may see (otherwise it is not there), and it may not start a new top-level
+ * section of context, which would be outside what the owner chose for it.
+ */
+export async function guardCall(agent: Agent, name: string, args: Record<string, any>) {
+  const sight = sightOf(agent);
+  if (sight.full) return;
+  const top = (v: unknown) => v === undefined || v === null || ["", "/", "/context", "/context/"].includes(String(v));
+  for (const key of NODE_ARGS[name] ?? []) {
+    if (top(args?.[key])) continue;
+    const node = await getNode(String(args[key]));
+    if (!sight.node(node)) throw notFound(`No context node "${args[key]}"`);
+  }
+  if (name === "context_write" && !args?.id && top(args?.parent)) throw bad("You cannot add a top-level section of context. Add under a section you can see.");
+}

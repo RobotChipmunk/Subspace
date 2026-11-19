@@ -161,6 +161,18 @@ class SubspaceTestCase: XCTestCase {
     }
 
     /// Attaches a screenshot named for the report, e.g. "03-todos".
+    /// Scrolls the screen a little at a time until an element further down (or, with `down` false,
+    /// further up) can be tapped.
+    func bringIntoView(_ element: XCUIElement, down: Bool = true) {
+        var tries = 0
+        while !(element.exists && element.isHittable) && tries < 12 {
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.68 : 0.36))
+            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.36 : 0.68))
+            from.press(forDuration: 0.05, thenDragTo: to)
+            tries += 1
+        }
+    }
+
     func shot(_ name: String) {
         // let springs settle so the picture shows the resting state
         Thread.sleep(forTimeInterval: 0.7)
