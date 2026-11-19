@@ -65,6 +65,13 @@ final class FollowingAgentsTests: SubspaceTestCase {
         wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: journal)], timeout: 8)
         readOnly.tap()
         waitToVanish(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.access.badge.'")).firstMatch, "the badge once the limits are off")
+
+        // Routines are given to an agent here: turned on, the routine is this agent's and says when it is next due.
+        let routine = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.routine.news-gaps.'")).firstMatch
+        bringIntoView(routine)
+        expect(routine, "the switch that gives this agent the news-gap check")
+        expect(text("News-gap check"), "the routine, by name")
+        shot("40-agents-routines")
         bringIntoView(connect, down: false)
         connect.tap()
 

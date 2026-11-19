@@ -32,13 +32,16 @@ export async function updateAgent(actor: Agent, id: string, patch: { name?: stri
   if (patch.illustrator === true) {
     // One illustrator at a time keeps the visual style consistent.
     await q("UPDATE agents SET roles = array_remove(roles, 'illustrator')");
-    await q("UPDATE jobs SET assigned_to = $1 WHERE status = 'open'", [id]);
+    await q("UPDATE jobs SET assigned_to = $1 WHERE status = 'open' AND kind <> 'routine'", [id]);
     roles = [...roles.filter((r) => r !== "illustrator"), "illustrator"];
   } else if (patch.illustrator === false) roles = roles.filter((r) => r !== "illustrator");
   await q("UPDATE agents SET name = $2, bio = $3, roles = $4, archived = $5, token_hash = CASE WHEN $5 THEN NULL ELSE token_hash END WHERE id = $1", [
     id, patch.name?.trim() || a.name, patch.bio ?? a.bio, roles, patch.archived ?? a.archived,
   ]);
   if (patch.archived) {
+    // its routines are left for the owner to give to someone else, and any round it had not finished is closed
+    await q("UPDATE routines SET agent_id = NULL, next_at = NULL WHERE agent_id = $1", [id]);
+    await q("UPDATE jobs SET status = 'cancelled', done_at = now() WHERE kind = 'routine' AND status = 'open' AND assigned_to = $1", [id]);
     await q("UPDATE trackers SET agents = array_remove(agents, $1)", [id]);
     await revokeAllFor(id);
   }

@@ -17,6 +17,7 @@ import { listEntries, listMonths, monthLine } from "./journal";
 import { findByUrl, listLinks } from "./links";
 import { getThread, type Post } from "./posts";
 import { allModules, getModule, railGone } from "./rail";
+import { listRoutines, ROUTINES } from "./routines";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
@@ -167,12 +168,13 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
         { path: "/following", title: "Following", about: "Topics agents track over time, each with a timeline.", count: n!.following },
         { path: "/rail", title: "Rail", about: "Timely modules shown beside the owner's screen right now (bookings, deadlines, today's details).", count: n!.rail },
         { path: "/agents", title: "Agents", about: "Who is here and what each one does.", count: n!.agents },
+        { path: "/routines", title: "Routines", about: "Duties that come round on a schedule, and which agent does each.", count: ROUTINES.length },
         { path: "/log", title: "Log", about: "Every change ever made, oldest to newest.", count: n!.log },
     ];
     const open = (c: Child) => {
       const key = c.path.slice(1);
       if (key === "log") return sight.full;
-      return key === "context" || key === "agents" || sight.section(key as Parameters<typeof sight.section>[0]);
+      return key === "context" || key === "agents" || key === "routines" || sight.section(key as Parameters<typeof sight.section>[0]);
     };
     return {
       path: "/",
@@ -402,6 +404,30 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       about: x.bio,
       children: [{ path: `/feed/by-agent/${x.handle}`, title: "Posts" }, ...tracked.map((t) => ({ path: `/following/${t.slug}`, title: `Tracks: ${t.title}` }))],
       items: [{ id: x.id, kind: x.kind, roles: x.roles, last_seen: x.last_seen_at }],
+    };
+  }
+
+  if (space === "routines") {
+    const agents = await listAgents(true);
+    const who = (id: string | null) => (id ? "@" + (agents.find((x) => x.id === id)?.handle ?? id) : null);
+    const all = await listRoutines();
+    if (a) {
+      const r = all.find((x) => x.key === a);
+      if (!r) throw notFound(`No routine "${a}". explore("/routines") lists them.`);
+      return {
+        path: `/routines/${r.key}`,
+        title: r.title,
+        about: r.about,
+        items: [{ key: r.key, every: r.every, done_by: who(r.agent_id) ?? "nobody yet", next_due: r.next_at, last_handed_over: r.last_at, last_done: r.last_done_at, ...(r.last_note ? { last_note: r.last_note } : {}), brief: ROUTINES.find((x) => x.key === r.key)!.brief }],
+        hint: "The brief is what the agent that does this routine follows. It is handed to that agent as a job when it comes due.",
+      };
+    }
+    return {
+      path: "/routines",
+      title: "Routines",
+      about: "Duties that come round on a schedule. The owner gives each to one agent (Agents screen). When a routine is due, that agent is handed a job of kind \"routine\" with its brief, and finishes it with routine_done.",
+      children: all.map((r) => ({ path: `/routines/${r.key}`, title: r.title, about: `${r.about} ${r.every === "weekly" ? "Weekly" : "Daily"}; done by ${who(r.agent_id) ?? "nobody yet"}.`, latest: r.last_done_at })),
+      hint: "If a routine is yours it reaches you by itself; you do not need to check here. If it is another agent's, leave it to them.",
     };
   }
 
@@ -761,6 +787,7 @@ export async function briefing(agent: Agent) {
   await q("UPDATE agents SET last_seen_at = now() WHERE id = $1", [agent.id]);
   const sight = sightOf(agent);
   const access = sight.full ? null : describeAccess(agent, await contextChildren(null));
+  const mine = (await listRoutines()).filter((r) => r.agent_id === agent.id);
   return {
     you: { handle: "@" + agent.handle, name: agent.name, roles: agent.roles, bio: agent.bio },
     ...(access ? { your_access: access } : {}),
@@ -787,6 +814,7 @@ export async function briefing(agent: Agent) {
       : {}),
     ...(sight.section("following") ? { your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })) } : {}),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),
+    ...(mine.length ? { your_routines: mine.map((r) => ({ path: `/routines/${r.key}`, title: r.title, every: r.every, next_due: r.next_at })) } : {}),
     ...(sight.section("todos") && !sight.readOnly ? await sharedListsNote() : {}),
     map: (await explore(agent, "/")).children,
   };

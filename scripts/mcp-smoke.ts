@@ -1,6 +1,7 @@
 /** End-to-end check of the MCP surface against the database in DATABASE_URL. */
 import { createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
 import { moduleActed, moduleLater, removeModule } from "../src/lib/core/rail";
+import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
 import { agentByToken, ownerAgent } from "../src/lib/core/util";
 import { handleMcp } from "../src/lib/mcp/server";
@@ -262,7 +263,7 @@ async function main() {
     const vBrief = await call(viewer, "briefing");
     if (!/read-only/.test(vBrief.your_access ?? "") || vBrief.rail || vBrief.recent_pages) throw new Error("the briefing of a limited agent does not say so, or shows what it may not see: " + JSON.stringify(vBrief).slice(0, 400));
     const vMap: string[] = vBrief.map.map((x: any) => x.path);
-    if (vMap.join() !== "/todos,/context,/agents") throw new Error("a limited agent's map shows " + vMap.join());
+    if (vMap.join() !== "/todos,/context,/agents,/routines") throw new Error("a limited agent's map shows " + vMap.join());
     const vCtx: string[] = (await call(viewer, "explore", { path: "/context" })).children.map((x: any) => x.path);
     if (vCtx.join() !== "/context/work") throw new Error("a limited agent sees these sections of context: " + vCtx.join());
     for (const path of ["/context/home", "/feed", "/feed/recent", "/journal", "/pages", "/links", "/rail", "/following", "/log"]) {
@@ -291,6 +292,33 @@ async function main() {
     const freed = (await agentByToken(await issueToken(made.id)))!;
     if (!(await call(freed, "explore", { path: "/feed" })).children) throw new Error("an agent whose limits were lifted still cannot see the feed");
     await updateAgent(owner, made.id, { archived: true });
+  }
+
+  {
+    // Routines: given to an agent, a routine comes due at once, reaches the agent as a job with its brief, and is finished with routine_done.
+    if ((await tick()).due.length) throw new Error("a routine came due with nobody assigned to it");
+    await call(s, "changes");
+    await assignRoutine(owner, "news-gaps", s.id);
+    const first = await tick();
+    if (first.due.join() !== "news-gaps") throw new Error("the assigned routine did not come due: " + JSON.stringify(first));
+    if ((await tick()).due.length) throw new Error("a routine was handed over twice");
+    const told = await call(s, "changes");
+    const duty = told.open_jobs?.find((j: any) => j.kind === "routine" && j.routine === "news-gaps");
+    if (!duty?.brief || !told.for_you.some((i: any) => i.type === "job.created")) throw new Error("the agent was not handed the routine: " + JSON.stringify(told).slice(0, 400));
+    const waitingJobs = await call(s, "jobs");
+    if (!waitingJobs.routines || !waitingJobs.jobs.some((j: any) => j.job_id === duty.job_id)) throw new Error("jobs() does not list the routine");
+    if (!(await call(claude, "routine_done", { job_id: duty.job_id, note: "Not mine." })).ERROR) throw new Error("another agent could finish a routine that is not its own");
+    const finished = await call(s, "routine_done", { job_id: duty.job_id, note: "No gaps this week." });
+    if (!finished.ok || !finished.next_due) throw new Error("routine_done: " + JSON.stringify(finished));
+    const kept = (await listRoutines()).find((r) => r.key === "news-gaps")!;
+    if (kept.last_note !== "No gaps this week." || !kept.last_done_at || new Date(kept.next_at!).getTime() - Date.now() < 6 * 86400_000) throw new Error("the routine did not keep its last round or its next day: " + JSON.stringify(kept));
+    const seenAs = await call(claude, "explore", { path: "/routines" });
+    if (!seenAs.children.some((x: any) => x.path === "/routines/news-gaps" && x.about.includes("@" + s.handle))) throw new Error("explore(/routines) does not say who does the routine");
+    if (!(await call(s, "briefing")).your_routines?.length) throw new Error("the briefing does not name the agent's routines");
+    await assignRoutine(owner, "news-gaps", null);
+    // the review's numbers
+    const week = await call(s, "usage", { days: 7 });
+    if (!week.agents?.some((x: any) => x.agent === "@" + s.handle && x.calls > 10) || !week.tools?.length || !week.rail?.length || week.tasks?.added_by_agents === undefined) throw new Error("usage() is missing its numbers: " + JSON.stringify(week).slice(0, 400));
   }
 
   // What agents did is on record: every call above, with what it asked for and what it was shown.

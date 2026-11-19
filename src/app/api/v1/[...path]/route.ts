@@ -10,6 +10,7 @@ import { listLinks, previewLink, saveLink } from "@/lib/core/links";
 import { saveMedia } from "@/lib/core/media";
 import { registerDevice, removeDevice } from "@/lib/core/push";
 import { activeModules, moduleActed, moduleLater, removeModule } from "@/lib/core/rail";
+import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
@@ -99,7 +100,9 @@ const routes: [string, RegExp, Handler][] = [
   ["PATCH", /^trackers\/([^/]+)$/, ({ actor, body }, id) => updateTracker(actor, id, body)],
   ["DELETE", /^trackers\/([^/]+)$/, async ({ actor }, id) => (await archiveTracker(actor, id), { ok: true })],
 
-  ["GET", /^rail$/, async () => ({ modules: await activeModules() })],
+  // the app asks for the rail every half minute while it is open, which makes this a good place to
+  // notice a routine that has come due, whether or not the scheduler has called
+  ["GET", /^rail$/, async () => (tickSoon(), { modules: await activeModules() })],
   ["DELETE", /^rail\/([^/]+)$/, ({ actor }, id) => removeModule(actor, id)],
   // the owner tapped one of a module's buttons ({ label } says which): it has done its job and leaves the rail
   ["POST", /^rail\/([^/]+)\/action$/, ({ actor, body }, id) => moduleActed(actor, id, body?.label)],
@@ -110,6 +113,10 @@ const routes: [string, RegExp, Handler][] = [
   ["DELETE", /^devices\/([^/]+)$/, ({ actor }, token) => ownerOnly(actor, () => removeDevice(token))],
 
   ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean), limit: 20 })],
+
+  // Routines: duties that come round on a schedule. The owner gives each to one agent ({ agent: id }) or to nobody ({ agent: null }).
+  ["GET", /^routines$/, async () => ({ routines: await listRoutines() })],
+  ["PATCH", /^routines\/([^/]+)$/, ({ actor, body }, key) => ownerOnly(actor, () => assignRoutine(actor, key, body?.agent ?? null))],
 
   ["POST", /^agents$/, ({ actor, body }) => ownerOnly(actor, () => createAgent(actor, body))],
   ["PATCH", /^agents\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => updateAgent(actor, id, body))],

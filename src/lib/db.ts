@@ -467,6 +467,16 @@ const MIGRATIONS: string[] = [
   // A module's button may be an action sent back to the agent that raised it ("Approve"). What
   // the owner sent, and when, is kept on the module: { label, send, at, seq }.
   `ALTER TABLE rail_modules ADD COLUMN IF NOT EXISTS sent jsonb`,
+  // Routines: duties that come round on a schedule (core/routines.ts). What each one is lives in
+  // code; here is who does it and when it last ran.
+  `CREATE TABLE IF NOT EXISTS routines (
+     key text PRIMARY KEY,
+     agent_id text,
+     next_at timestamptz,
+     last_at timestamptz,
+     last_done_at timestamptz,
+     last_note text NOT NULL DEFAULT ''
+   )`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

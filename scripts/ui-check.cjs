@@ -1439,6 +1439,22 @@ async function run(profile) {
     await press(access.getByRole("switch", { name: "Read only" }));
     await settle(900);
     if ((await probeId()).access) fail("agents access: with everything on again the agent should have no limits");
+    // routines: a duty that comes round is given to an agent with a switch, and says when it is next due
+    const routines = page.locator("[data-routines]");
+    await routines.scrollIntoViewIfNeeded();
+    const gaps = routines.locator('[data-routine="news-gaps"]');
+    await reachable(gaps.getByText("News-gap check"), "routines: the news-gap check");
+    if (!(await gaps.getByText("Nobody does this yet.").count())) fail("routines: an unassigned routine does not say nobody does it");
+    await press(gaps.getByRole("switch"));
+    await settle(1200);
+    const given = (await get("/api/v1/routines")).routines.find((r) => r.key === "news-gaps");
+    if (given?.agent_id !== (await probeId()).id) fail(`routines: turning the switch on did not give the routine to the agent (${JSON.stringify(given)})`);
+    if (await gaps.getByText("Nobody does this yet.").count()) fail("routines: an assigned routine still says nobody does it");
+    await noSidewaysScroll("agents routines");
+    await shot("agents-routines");
+    await press(gaps.getByRole("switch"));
+    await settle(900);
+    if ((await get("/api/v1/routines")).routines.find((r) => r.key === "news-gaps")?.agent_id) fail("routines: turning the switch off did not take the routine back");
     // removing asks once more
     await press(page.getByRole("button", { name: "Remove agent", exact: true }));
     await settle(500);

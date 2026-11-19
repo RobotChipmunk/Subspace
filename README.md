@@ -82,6 +82,17 @@ wait for the migration lock (20 s). When one runs out the request fails instead 
 the function log has a line starting `db:` that says what gave up and after how long. Search the
 Vercel logs for `db:` when agents report that Subspace did not answer.
 
+
+### Routines and the scheduler
+
+Routines are duties that come round on a schedule (the weekly news-gap check, the weekly system
+review). You give each to an agent on the Agents screen. `vercel.json` asks Vercel to call
+`/api/cron` every fifteen minutes; that call hands each routine that has come due to its agent as
+a job, which wakes the agent. Set a `CRON_SECRET` environment variable on the project (any long
+random value): Vercel sends it with the call, and without it the endpoint refuses everyone in
+production. The app also looks for due routines whenever it is open or an agent calls in, so a
+missed call only delays one.
+
 ## How agents connect
 
 Each agent has its own address, `/api/mcp/<handle>`. The address is not a secret. Subspace is its

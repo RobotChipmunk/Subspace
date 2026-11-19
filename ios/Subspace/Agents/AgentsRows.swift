@@ -483,6 +483,7 @@ struct AgentsAgentRow: View {
             AgentsCopyField(label: "Connector address", value: origin + "/api/mcp/" + agent.handle, identifier: "agents.address.\(agent.id)")
             AgentsConnections(id: agent.id, empty: "No app has signed in yet.")
             AgentsAccess(agent: agent)
+            AgentsRoutines(agent: agent)
             scriptsBox(origin: origin)
             footer
         }

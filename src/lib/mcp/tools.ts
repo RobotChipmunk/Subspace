@@ -8,6 +8,7 @@ import { saveLink } from "../core/links";
 import { saveMedia } from "../core/media";
 import { claimPost, createPost, createReply, IMAGES_MAX } from "../core/posts";
 import { RAIL_BLOCKS, RAIL_ICONS, railGone, removeModule, setModule } from "../core/rail";
+import { routineDone, usage } from "../core/routines";
 import { sharingFor } from "../core/guests";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
@@ -457,13 +458,32 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "jobs",
-    description: "Open illustration and icon jobs waiting for you. An illustration job carries the poster's brief (prompt, when they gave one), the post's headline, its source and followed topic, and the palette to draw in. For the illustrator agent.",
+    description: "Jobs waiting for you: illustrations and icons to draw, and routines the owner assigned to you that have come due (kind \"routine\", each with its brief). An illustration job carries the poster's brief (prompt, when they gave one), the post's headline, its source and followed topic, and the palette to draw in. For the illustrator agent.",
     inputSchema: obj({}),
     readOnly: true,
     run: async (a) => {
       const jobs = await openJobs(a, 20);
-      return { jobs, ...(jobs.length ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art. An illustration shows what its headline is about: the actual subject and what happened to it, recognisable at a glance, never an abstract shape or a stock metaphor.' } : {}) };
+      const drawings = jobs.some((j) => j.kind !== "routine");
+      const routines = jobs.some((j) => j.kind === "routine");
+      return {
+        jobs,
+        ...(drawings ? { next: 'Draw each one following guide("illustration") or guide("icons"), then submit_art. An illustration shows what its headline is about: the actual subject and what happened to it, recognisable at a glance, never an abstract shape or a stock metaphor.' } : {}),
+        ...(routines ? { routines: "A job of kind routine is a duty the owner gave you. Its brief says what to do; do it now with your ordinary tools, then call routine_done with its job_id and one line on what you found." } : {}),
+      };
     },
+  },
+  {
+    name: "routine_done",
+    description: "Say that a routine you were given is done for this round. A routine arrives as a job of kind \"routine\" (in changes() and jobs()), with its brief. Do the work with your ordinary tools, then call this once.",
+    inputSchema: obj({ job_id: str("The routine job's id, from jobs() or changes()."), note: str("One line on what you found or did, at most 300 characters. The owner sees it beside the routine.") }, ["job_id", "note"]),
+    run: (a, { job_id, note }) => routineDone(a, job_id, note),
+  },
+  {
+    name: "usage",
+    description: "How Subspace was used over the last days, in numbers: tool calls and failures by agent and by tool, searches that found nothing, what became of rail modules (acted on, sent, kept, dismissed), tasks added and finished, and the built-in agents' runs. For reviewing how well the system is working; not needed for ordinary tasks.",
+    inputSchema: obj({ days: { type: "integer", description: "How far back, 1 to 60. Default 7." } }),
+    readOnly: true,
+    run: (_a, { days }) => usage(days),
   },
   {
     name: "submit_art",

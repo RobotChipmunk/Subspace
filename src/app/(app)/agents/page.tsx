@@ -10,6 +10,7 @@ import { ago, api, fetcher, soft, spring, useDirectUnread, useMe } from "@/lib/c
 import type { AccessRules, Section } from "@/lib/core/access";
 import type { Grant } from "@/lib/core/oauth";
 import type { Post } from "@/lib/core/posts";
+import type { Routine } from "@/lib/core/routines";
 import type { Agent } from "@/lib/core/util";
 
 export default function AgentsPage() {
@@ -238,6 +239,7 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
               <CopyField label="Connector address" value={`${origin}/api/mcp/${a.handle}`} />
               <Connections id={a.id} empty="No app has signed in yet." />
               <Access agent={a} onChanged={onChanged} />
+              <Routines agent={a} />
 
               <details className="group rounded-[14px] bg-fill px-3 py-2.5 text-[13px] text-ink2">
                 <summary className="cursor-pointer list-none font-medium marker:hidden">For scripts: a token sent as a header</summary>
@@ -356,6 +358,66 @@ function Access({ agent: a, onChanged }: { agent: Agent; onChanged: () => void }
         </p>
         {error && <p className="text-[12.5px] text-danger">{error}</p>}
       </div>
+    </div>
+  );
+}
+
+/** When a routine next comes due, or how its last round went, in a few words. */
+function routineLine(r: Routine, mine: boolean, doer?: Agent) {
+  const every = r.every === "weekly" ? "Weekly" : "Daily";
+  if (!r.agent_id) return `${every}. Nobody does this yet.`;
+  if (!mine) return `${every}. Done by ${doer?.name ?? "another agent"}.`;
+  const next = r.next_at ? new Date(r.next_at) : null;
+  const when = next ? (next.getTime() <= Date.now() + 60_000 ? "due now" : `next ${next.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}`) : "";
+  return [every, when].filter(Boolean).join(" · ");
+}
+
+/**
+ * The duties that come round on a schedule, and whether this agent does each. A routine has one
+ * agent: turning it on here takes it from whoever had it. When one is due the agent is pinged
+ * with a job, and what it reported last time shows beneath.
+ */
+function Routines({ agent: a }: { agent: Agent }) {
+  const { agent } = useMe();
+  const { data, mutate } = useSWR<{ routines: Routine[] }>("routines", fetcher, { refreshInterval: 60_000 });
+  const [error, setError] = useState("");
+  const list = data?.routines ?? [];
+  if (!list.length) return null;
+  const readOnly = !!a.access?.read_only;
+  async function give(key: string, on: boolean) {
+    setError("");
+    try {
+      await api(`routines/${key}`, { method: "PATCH", body: { agent: on ? a.id : null } });
+      await mutate();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  return (
+    <div data-routines>
+      <div className="mb-1 text-[12px] font-medium uppercase tracking-[0.05em] text-ink3">Routines</div>
+      <ul className="divide-y divide-[var(--line)] rounded-[14px] bg-fill">
+        {list.map((r) => {
+          const mine = r.agent_id === a.id;
+          return (
+            <li key={r.key} data-routine={r.key} className="flex items-center gap-3 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13.5px] font-medium">{r.title}</div>
+                <p className="text-[13px] leading-snug text-ink2">{r.about}</p>
+                <p className="mt-0.5 text-[12.5px] text-ink3">{routineLine(r, mine, agent(r.agent_id))}</p>
+                {mine && r.last_note && r.last_done_at && (
+                  <p className="mt-0.5 text-[12.5px] leading-snug text-ink3 [overflow-wrap:anywhere]">
+                    Last time, {ago(r.last_done_at)}{ago(r.last_done_at) === "now" ? "" : " ago"}: {r.last_note}
+                  </p>
+                )}
+              </div>
+              {!readOnly && <Switch on={mine} label={`${a.name} does the ${r.title.toLowerCase()}`} onChange={(v) => give(r.key, v)} />}
+            </li>
+          );
+        })}
+      </ul>
+      {readOnly && <p className="mt-1.5 text-[12.5px] text-ink3">A read-only agent cannot do routines.</p>}
+      {error && <p className="mt-1.5 text-[12.5px] text-danger">{error}</p>}
     </div>
   );
 }

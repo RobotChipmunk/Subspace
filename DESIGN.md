@@ -235,6 +235,13 @@ Patterns:
   cannot be taken back (replacing a token or passcode). The button
   turns red and names the consequence; a second tap does it; it calms after three seconds.
   Removing an agent or person, or disconnecting an app, is a deletion and uses Confirm delete.
+- **Routines** (`Routines` in `agents/page.tsx`; `AgentsRoutines.swift` in the app): in an agent's
+  open panel, after Access, a `fill` list headed "Routines", one row per duty that comes round on
+  a schedule. A row is the routine's name, one line on what it is, and a line in `ink3` on where
+  it stands ("Weekly. Nobody does this yet.", "Weekly. Done by Scout.", "Weekly · next Thu 26
+  Nov"), with a switch at its end: on means this agent does it. A routine has one agent, so
+  turning it on here takes it from whoever had it. Under a routine this agent does, what it
+  reported last time shows in `ink3`. A read-only agent has no switches and a line saying why.
 - **An action sent to an agent** (`Module` in `Rail.tsx`, `FromRail` in `todos/page.tsx`;
   `RailView.swift` in the app): a module's button may send the owner's answer back to the agent
   that raised it instead of opening a link. It looks like any other button and carries whatever

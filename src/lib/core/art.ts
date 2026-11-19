@@ -2,6 +2,7 @@ import { q, q1 } from "../db";
 import { bad, hashSeed, logEvent, newId, notFound, type Agent } from "./util";
 
 import { paletteFor } from "../palettes";
+import { routineJob } from "./routines";
 export { PALETTES, paletteFor } from "../palettes";
 
 export type Art = { seed: number; palette: string; status: "pending" | "ready" | "none"; prompt?: string; svg?: string; by?: string };
@@ -31,7 +32,7 @@ export function cleanSvg(input: string, kind: "illustration" | "icon"): string {
 
 export type Job = {
   id: string;
-  kind: "illustration" | "icon";
+  kind: "illustration" | "icon" | "routine";
   status: string;
   target_type: string;
   target_id: string;
@@ -46,7 +47,7 @@ async function illustrator(): Promise<string | null> {
   return r?.id ?? null;
 }
 
-export async function createJob(actor: Agent, kind: Job["kind"], target_type: string, target_id: string, prompt: string) {
+export async function createJob(actor: Agent, kind: "illustration" | "icon", target_type: string, target_id: string, prompt: string) {
   const id = newId("j");
   const assigned = await illustrator();
   await q("INSERT INTO jobs (id, kind, target_type, target_id, prompt, requested_by, assigned_to) VALUES ($1,$2,$3,$4,$5,$6,$7)", [
@@ -66,10 +67,12 @@ export async function openJobs(agent: Agent, limit = 10) {
   const rows = await q<Job & { seed: number | null; headline: string | null; source: string | null; topic: string | null; topic_about: string | null }>(
     `SELECT j.*, (p.art->>'seed')::bigint AS seed, p.body AS headline, p.source->>'name' AS source, t.title AS topic, t.description AS topic_about
      FROM jobs j LEFT JOIN posts p ON j.target_type = 'post' AND p.id = j.target_id LEFT JOIN trackers t ON t.id = p.tracker_id
-     WHERE j.status = 'open' AND (j.assigned_to = $1 OR j.assigned_to IS NULL) ORDER BY j.created_at LIMIT $2`,
+     WHERE j.status = 'open' AND (j.assigned_to = $1 OR (j.assigned_to IS NULL AND j.kind <> 'routine')) ORDER BY (j.kind = 'routine') DESC, j.created_at LIMIT $2`,
     [agent.id, limit],
   );
   return rows.map((j) => {
+    // a routine is only ever its own agent's, and is shown as the duty it is rather than as a drawing
+    if (j.kind === "routine") return routineJob(j);
     if (j.kind !== "illustration") return { job_id: j.id, kind: j.kind, for: j.target_id, prompt: j.prompt };
     const asked = j.headline && j.prompt.trim() === j.headline.trim().slice(0, 400) ? null : j.prompt;
     return {
@@ -88,6 +91,7 @@ export async function openJobs(agent: Agent, limit = 10) {
 export async function submitJob(agent: Agent, jobId: string, svgInput: string) {
   const job = await q1<Job>("SELECT * FROM jobs WHERE id = $1", [jobId]);
   if (!job) throw notFound("No such job");
+  if (job.kind === "routine") throw bad("That job is a routine, not a drawing. Finish it with routine_done.");
   const svg = cleanSvg(svgInput, job.kind);
   if (job.target_type === "post") {
     await q(`UPDATE posts SET art = art || $2::jsonb WHERE id = $1`, [job.target_id, JSON.stringify({ svg, status: "ready", by: agent.id })]);
