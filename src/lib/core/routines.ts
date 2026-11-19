@@ -243,6 +243,8 @@ export async function usage(days: unknown) {
     tasks,
     built_in_runs: runs.map((r) => ({ ...r, agent: "@" + r.agent })),
     // notes other agents cannot judge from far away (no summary) or should not have to read whole (long)
+    // search by meaning: whether it is on, how much it covers, and what last went wrong with it
+    search_by_meaning: await import("./meaning").then((m) => m.meaningStatus()).catch(() => ({ on: false })),
     context_to_tidy: notes.map((n) => ({ path: "/context/" + n.path, title: n.title, ...(n.no_summary ? { problem: "no summary" } : { problem: `long (${n.chars} characters): split it into child notes` }) })),
     reading: "calls are tool calls. chars_read is how much text each agent was given. In rail, acted is a tap on one of the module's buttons, sent a button that sent its answer to the agent, and dismissed is closed without acting: many dismissals for one agent is noise.",
   };

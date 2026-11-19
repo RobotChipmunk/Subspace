@@ -16,13 +16,19 @@
  *   extension is needed. That is quick enough for some thousands of things; with far more, the
  *   pgvector extension and an index would be the next step.
  */
-import { q } from "../db";
+import { q, q1 } from "../db";
 
 const MODEL = "text-embedding-3-small";
 const DIMS = 256;
 const TEXT_CHARS = 6000;
-/** Below this likeness two texts are not about the same thing, and the match is left out. */
-const FLOOR = 0.3;
+/**
+ * Below this likeness two texts are not about the same thing, and the match is left out. A short
+ * query set against a long note scores low even when the note is the right one, so the bar is
+ * modest, and a second test keeps only what comes close to the best match (see `nearest`).
+ */
+const FLOOR = 0.25;
+/** How far below the best match another may fall and still be kept. */
+const NEAR_BEST = 0.1;
 
 /** A stand-in embedder for tests, never for production: it knows words, and a handful of words that mean the same. */
 const fake = () => process.env.SUBSPACE_EMBED_FAKE === "1" && process.env.NODE_ENV !== "production";
@@ -80,6 +86,34 @@ const DOC_TEXT = `title || E'\\n' || left(body, ${TEXT_CHARS})`;
  */
 export async function embedPending(batches = 2, size = 48): Promise<number> {
   if (!meaningOn()) return 0;
+  try {
+    const done = await embedSome(batches, size);
+    if (done) await q("DELETE FROM settings WHERE key = $1", [ERROR_KEY]);
+    return done;
+  } catch (e) {
+    await noteError(e);
+    throw e;
+  }
+}
+
+const ERROR_KEY = "meaning:error";
+/** Keeps the last thing that went wrong, so it can be seen without the server's log (usage() shows it). */
+async function noteError(e: unknown) {
+  const value = JSON.stringify({ at: new Date().toISOString(), message: (e as Error).message.slice(0, 300) });
+  await q("INSERT INTO settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [ERROR_KEY, value]).catch(() => {});
+}
+
+/** Whether search by meaning is on, how much has an embedding and how much is waiting for one, and the last failure if there was one. */
+export async function meaningStatus() {
+  const n = await q1<{ embedded: number; waiting: number }>(
+    `SELECT (count(*) FILTER (WHERE embedding IS NOT NULL))::int AS embedded,
+            (count(*) FILTER (WHERE embedded_md5 IS DISTINCT FROM md5(${DOC_TEXT})))::int AS waiting FROM search_docs`,
+  );
+  const failed = await q1<{ value: { at: string; message: string } }>("SELECT value FROM settings WHERE key = $1", [ERROR_KEY]);
+  return { on: meaningOn(), embedded: n?.embedded ?? 0, waiting: n?.waiting ?? 0, ...(failed ? { last_error: failed.value } : {}) };
+}
+
+async function embedSome(batches: number, size: number): Promise<number> {
   let done = 0;
   for (let i = 0; i < batches; i++) {
     const rows = await q<{ entity_type: string; entity_id: string; text: string; sum: string }>(
@@ -117,9 +151,12 @@ export async function nearest(text: string, opts: { where?: string; params?: unk
        ) s WHERE s.score >= ${FLOOR} ORDER BY s.score DESC, s.ts DESC LIMIT ${Math.min(Math.max(opts.limit ?? 12, 1), 60)}`,
       [vector, ...(opts.params ?? [])],
     );
-    return rows;
+    // only what comes close to the best: a weak match beside a strong one is noise
+    const best = rows[0]?.score ?? 0;
+    return rows.filter((r) => r.score >= best - NEAR_BEST);
   } catch (e) {
     console.error("meaning: search by meaning failed, falling back to words", (e as Error).message);
+    await noteError(e);
     return [];
   }
 }
