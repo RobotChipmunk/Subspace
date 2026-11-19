@@ -1069,7 +1069,7 @@ async function run(profile) {
     const shelf = page.locator("[data-current]");
     await reachable(shelf.getByRole("button", { name: /This month's focus/ }), "current: a note that holds for now");
     const labels = await shelf.locator("[data-current-note]").allInnerTexts();
-    if (labels.length !== 2 || !labels.every((t) => /until \d/.test(t))) fail(`current: each note should say until when (${labels.map((t) => t.replace(/\s+/g, " ")).join(" | ")})`);
+    if (labels.length !== 2 || !labels.every((t) => /until (\d+ \w+|\w+ \d+)/.test(t))) fail(`current: each note should say until when (${labels.map((t) => t.replace(/\s+/g, " ")).join(" | ")})`);
     if (!/Scout/.test(labels.find((t) => t.includes("This month's focus")) ?? "")) fail("current: a note does not say who set it");
     await noSidewaysScroll("current");
     await shot("context-current");
