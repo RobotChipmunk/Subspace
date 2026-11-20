@@ -74,7 +74,7 @@ struct TodosDetail: View {
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
-                    Text(store.folder?.label ?? "Back").font(.system(size: 15)).lineLimit(1)
+                    Text(store.folder?.label ?? (store.isPlan ? "Plan" : "Back")).font(.system(size: 15)).lineLimit(1)
                 }
                 .foregroundStyle(Theme.accent)
                 .padding(.trailing, 12)
@@ -160,6 +160,13 @@ struct TodosDetail: View {
 
                 TodosRepeatMenu(rule: rule) { value in
                     Task { await setRepeat(value) }
+                }
+
+                // the line of the plan it is part of; only once there is a plan
+                if !store.plan.isEmpty {
+                    TodosPartOfMenu(lines: store.plan, chosen: todo.plan_id) { value in
+                        Task { await setPlan(value) }
+                    }
                 }
 
                 tagPills(todo.tags ?? [])
@@ -544,9 +551,7 @@ struct TodosDetail: View {
 
     /// The same choices as the web's "Move to" picker.
     private func moveOptions(_ todo: Todo) -> [TodosFolder] {
-        store.folders.filter { folder in
-            folder.key != "week" && folder.key != "later" && folder.key != TodosStore.allKey && (folder.guest == nil || folder.guest == todo.guest_id)
-        }
+        store.moveOptions(guest: todo.guest_id)
     }
 
     // MARK: Loading and saving
@@ -718,6 +723,10 @@ struct TodosDetail: View {
         _ = await patch(["repeat": value ?? "none"])
     }
 
+    private func setPlan(_ value: String?) async {
+        _ = await patch(["plan": value ?? "none"])
+    }
+
     /// Goes to the task that was added to follow this one, where its date can be changed.
     private func openNext(_ next: String) async {
         titleFocused = false
@@ -773,6 +782,48 @@ private struct TodosMoveMenu: View {
         }
         .accessibilityLabel("Move to. Now: \(place)")
         .accessibilityIdentifier("todos.detail.move")
+    }
+}
+
+/// The line of the plan the task is part of. Accent while it is part of one.
+private struct TodosPartOfMenu: View {
+    var lines: [TodosPlanItem]
+    var chosen: String?
+    var pick: (String?) -> Void
+
+    var body: some View {
+        let current = lines.first { $0.id == chosen }
+        let on = current != nil
+        let title = current?.title ?? "Part of"
+        Menu {
+            Button {
+                pick(nil)
+            } label: {
+                if on { Text("Not in the plan") } else { Label("Not in the plan", systemImage: "checkmark") }
+            }
+            ForEach(lines) { line in
+                // a part is set in a little under its priority
+                let name = line.parent_id == nil ? line.title : "   " + line.title
+                Button {
+                    pick(line.id)
+                } label: {
+                    if line.id == chosen { Label(name, systemImage: "checkmark") } else { Text(name) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "flag")
+                Text(title.count > 28 ? String(title.prefix(27)) + "…" : title).lineLimit(1)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(on ? Theme.accent : Theme.ink2)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 36)
+            .background(on ? Theme.accentSoft : Theme.fill, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Part of. Now: \(on ? title : "Not in the plan")")
+        .accessibilityIdentifier("todos.detail.partOf")
     }
 }
 

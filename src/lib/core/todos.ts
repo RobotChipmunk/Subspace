@@ -1,5 +1,6 @@
 import { checkBlocks } from "../blocks";
 import { q, q1 } from "../db";
+import { listPlan, planScope, readPlan, type PlanItem } from "./plan";
 import { TODO_RAIL, taskChanged, type TodoRail } from "./rail";
 import { addDays, bad, cleanTags, findMentions, indexDoc, listGuests, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
 
@@ -28,6 +29,10 @@ export type Todo = {
   next_date?: string | null;
   /** Short labels the lists can be narrowed to ("finance", "house"). At most six. */
   tags: string[];
+  /** The line of the plan the task is part of (a priority, or a part of one), if any. */
+  plan_id: string | null;
+  /** That line's name, as the lists show it. */
+  plan?: string | null;
   /** The rail module this task is tied to, while that module exists: the one pointing at it, or the one it was kept from with "Later". */
   rail?: TodoRail | null;
   created_at: string;
@@ -58,10 +63,11 @@ export const BIN_DAYS = 15;
 export type BinnedTodo = { id: string; title: string; done: boolean; has_notes: boolean; deleted_at: string; days_left: number };
 
 const DAY_NAMES = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const PLAN_NAME = "(SELECT p.title FROM plan_items p WHERE p.id = todos.plan_id) AS plan";
 const NEXT_DATE = "(SELECT n.date FROM todos n WHERE n.id = todos.next_id AND n.deleted_at IS NULL) AS next_date";
 /** What makes two tasks neighbours in one ordered list: the same day, week or list (and, while waiting on a guest's list, the same guest). */
 const PLACE = "scope, date, (CASE WHEN scope = 'guest' THEN guest_id END)";
-const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, tags, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}`;
+const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, tags, plan_id, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}, ${PLAN_NAME}`;
 
 /** Unfinished tasks never get left behind: past days roll to today, past weeks roll to this week. */
 async function rollover(today: string) {
@@ -108,7 +114,7 @@ function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec
   throw bad(`Unknown view "${view}". Use today, tomorrow, week, weekend, next_week, later, backlog, all or a YYYY-MM-DD date.`);
 }
 
-export async function folders(): Promise<{ today: string; folders: Folder[]; bin: number; tags: TagCount[] }> {
+export async function folders(): Promise<{ today: string; folders: Folder[]; bin: number; tags: TagCount[]; plan: PlanItem[] }> {
   const cal = await calendar();
   await rollover(cal.today);
   await emptyOldBin();
@@ -132,7 +138,7 @@ export async function folders(): Promise<{ today: string; folders: Folder[]; bin
     out.push({ ...f, count: r?.n ?? 0 });
   }
   const bin = (await q1<{ n: number }>("SELECT count(*)::int AS n FROM todos WHERE deleted_at IS NOT NULL"))!.n;
-  return { today: cal.today, folders: out, bin, tags: await tagCounts() };
+  return { today: cal.today, folders: out, bin, tags: await tagCounts(), plan: await listPlan() };
 }
 
 /** Every tag in use, most used first. The count is of unfinished tasks, so a tag stays known after its tasks are done. */
@@ -151,7 +157,7 @@ async function readTags(raw: unknown): Promise<string[]> {
 /** A task as search finds it: its title, then its notes and tags. */
 const indexTodo = (t: Pick<Todo, "id" | "title" | "notes" | "tags">) => indexDoc("todo", t.id, t.title, t.tags?.length ? `${t.notes}\n${t.tags.join(", ")}` : t.notes);
 
-export async function listTodos(view: string, opts: { tags?: string[] } = {}) {
+export async function listTodos(view: string, opts: { tags?: string[]; /** a line of the plan (a priority brings its parts with it), or "none" for the tasks that are part of nothing */ plan?: string } = {}) {
   const cal = await calendar();
   await rollover(cal.today);
   const spec = viewSpec(view, cal);
@@ -168,7 +174,17 @@ export async function listTodos(view: string, opts: { tags?: string[] } = {}) {
       : "date NULLS FIRST, scope DESC, position, id";
   // narrowed to tasks carrying every one of these tags, whatever their capitals
   const wanted = cleanTags(opts.tags).map((t) => t.toLowerCase());
-  const tagClause = wanted.length ? `AND $${spec.params.length + 1}::text[] <@ ARRAY(SELECT lower(x) FROM unnest(tags) AS x)` : "";
+  const params = [...spec.params];
+  let tagClause = "";
+  if (wanted.length) {
+    params.push(wanted);
+    tagClause = `AND $${params.length}::text[] <@ ARRAY(SELECT lower(x) FROM unnest(tags) AS x)`;
+  }
+  if (opts.plan === "none") tagClause += " AND plan_id IS NULL";
+  else if (opts.plan) {
+    params.push(await planScope(opts.plan));
+    tagClause += ` AND plan_id = ANY($${params.length})`;
+  }
   // ord is where a task stands among those on its day or list, 1 first, as the owner arranged them.
   // It is counted before the tags narrow the list, so it is the same number however the list is asked for.
   const todos = await q<Todo & { has_notes: boolean; ord: number }>(
@@ -176,13 +192,13 @@ export async function listTodos(view: string, opts: { tags?: string[] } = {}) {
        SELECT ${LIST_COLS}, (row_number() OVER (PARTITION BY ${PLACE} ORDER BY position, id))::int AS ord
        FROM todos WHERE deleted_at IS NULL AND ${spec.where} ${doneClause}
      ) t WHERE true ${tagClause} ORDER BY ${order}`,
-    wanted.length ? [...spec.params, wanted] : spec.params,
+    params,
   );
   return { view, today: cal.today, todos };
 }
 
 export async function getTodo(id: string): Promise<Todo> {
-  const t = await q1<Todo>(`SELECT *, ${NEXT_DATE}, ${TODO_RAIL} FROM todos WHERE id = $1`, [id]);
+  const t = await q1<Todo>(`SELECT *, ${NEXT_DATE}, ${PLAN_NAME}, ${TODO_RAIL} FROM todos WHERE id = $1`, [id]);
   if (!t) throw notFound("No such todo");
   return t;
 }
@@ -270,8 +286,8 @@ function readRepeat(v: unknown): Repeat | null {
 async function createNext(actor: Agent, t: Todo, today: string): Promise<string> {
   const id = newId("t");
   const date = nextDate(today, t.repeat!);
-  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, guest_id, repeat, tags) VALUES ($1,$2,$3,'day',$4,$5,$6,$7,$8,$9)", [
-    id, t.title, t.notes, date, await nextPosition("day", date), t.created_by, t.guest_id, t.repeat, t.tags ?? [],
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, guest_id, repeat, tags, plan_id) VALUES ($1,$2,$3,'day',$4,$5,$6,$7,$8,$9,$10)", [
+    id, t.title, t.notes, date, await nextPosition("day", date), t.created_by, t.guest_id, t.repeat, t.tags ?? [], t.plan_id ?? null,
   ]);
   const next = await getTodo(id);
   await indexTodo(next);
@@ -279,7 +295,7 @@ async function createNext(actor: Agent, t: Todo, today: string): Promise<string>
   return id;
 }
 
-export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null; tags?: string[] | string; /** where it goes among the tasks of its day or list, 1 first; left out, it goes last */ order?: number }) {
+export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null; tags?: string[] | string; /** the line of the plan it is part of */ plan?: string | null; /** where it goes among the tasks of its day or list, 1 first; left out, it goes last */ order?: number }) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Todo needs a title.");
   const cal = await calendar();
@@ -291,8 +307,9 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   const repeat = input.repeat === undefined ? null : readRepeat(input.repeat);
   const tags = input.tags === undefined ? [] : await readTags(input.tags);
   const order = input.order === undefined || input.order === null ? null : readOrder(input.order);
-  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat, tags) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", [
-    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat, tags,
+  const plan = input.plan === undefined ? null : await readPlan(input.plan);
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat, tags, plan_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", [
+    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat, tags, plan,
   ]);
   if (order !== null) await placeAt({ id, scope: add.scope, date: add.date, guest_id: add.guest_id ?? null }, order);
   const t = await getTodo(id);
@@ -315,6 +332,8 @@ export async function updateTodo(
     repeat?: string | null;
     /** the whole set of tags, replacing what is there; an empty list takes them all off */
     tags?: string[] | string;
+    /** the line of the plan it is part of; null, "" or "none" takes it out of the plan */
+    plan?: string | null;
     /** where it goes among the tasks of its day or list (after any move in the same change), 1 first */
     order?: number;
   },
@@ -340,6 +359,10 @@ export async function updateTodo(
   if (patch.tags !== undefined) {
     const tags = await readTags(patch.tags);
     if (tags.join("\n") !== (before.tags ?? []).join("\n")) set("tags", tags);
+  }
+  if (patch.plan !== undefined) {
+    const plan = await readPlan(patch.plan);
+    if (plan !== (before.plan_id ?? null)) set("plan_id", plan);
   }
   // made after the update, so the next round carries any new title or notes from the same change
   let makeNext = false;

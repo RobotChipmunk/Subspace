@@ -398,6 +398,33 @@ Patterns:
   after (named as a date pill names them: "Tomorrow", "Thursday", "Next week"), then Backlog and
   "Waiting for a day". Each section that is a place adds and takes carried tasks like the list it
   stands for; nothing can be carried onto "All" itself.
+- **Plan** (`Plan` in `todos/page.tsx`; `TodosPlan.swift` in the app): the owner's priorities as
+  a short outline, with the tasks under each. It is a view across the lists, listed with "All",
+  and it is where the owner steps back and looks at everything; the day lists stay as they are.
+  A priority is a line in 17px semibold; its parts sit under it, set in a little, one level and
+  no further. No numbers anywhere: a line shows nothing at its end unless no unfinished task is
+  part of it (for a priority, of it or any of its parts), where it says "Nothing yet" in `ink2`,
+  because a gap is the one thing planning needs to see. Tapping a line opens its tasks in place,
+  soonest first. A task there shows where it sits ("Today" in accent, "This week", "Backlog") and
+  that word moves it to another list; tapping the task opens it. A task typed under a line goes
+  to the backlog: planning is not scheduling. Carrying a task onto another line makes it part of
+  that line (the line lights as a list does); let go anywhere else it returns, since the order
+  here is the lists' own. In the app the same word also offers the lines, as the system menu.
+  An opened line ends with "Rename" and the bin (`ConfirmDelete`, "Remove"); removing a line
+  leaves its tasks in their lists. "Add a part" is a quiet line at the end of each priority's
+  parts and "Add a priority" a field at the end of the outline; both are always there. Last, set
+  apart, "Not in the plan" holds the tasks that are part of nothing, which is where chores live
+  and is never a fault. Do not add counts, progress, colours or a third level.
+- **Part of** (todos): a task can be part of one line of the plan. In a list its row names that
+  line as the first of its chips, in the same quiet style as a tag, and then shows one tag fewer
+  (two chips at most). In the task it is a pill after the repeat pill, with a flag: "Part of"
+  in `fill` while it is part of nothing, the line's name in `accent-soft` once it is. It opens the
+  system menu of lines, parts set in under their priorities, and is absent while there is no plan.
+- **Priority filter** (`PlanFilter` in `todos/page.tsx`): beside the tag filter and built the same
+  way, on any list with tasks that are part of the plan: a flag and "Priority" in `ink3`, which
+  turn `accent-soft` and name the line once one is chosen. One line at a time; a priority brings
+  its parts' tasks with it. The choice follows from list to list like the tags, a task added while
+  it is on becomes part of that line, and an empty result says "Nothing for <line> here.".
 - **Tags on a task** (`TagPills.tsx`, shared with the journal): in a task they follow the date and
   repeat pills in the same row, as quiet chips with a remove button each, then "Add tag", which
   opens into a field offering the tags tasks already carry (at most six). In a list a task shows

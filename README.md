@@ -198,6 +198,20 @@ is every unfinished task under the day or list it is on, which is where narrowin
 everything on a subject. `GET /todos/folders` returns the tags in use; `GET /todos?view=…&tags=a,b`
 narrows on the server to tasks carrying both, for agents (`todo_list(view, tag)`).
 
+## The plan
+
+The owner's priorities for now, as a short outline: a priority, and parts one level down
+(`plan_items`; `src/lib/core/plan.ts`). A task can be part of one line (`plan` on `POST /todos`
+and `PATCH /todos/<id>`: a line's id, or `null`), and most tasks are part of none. "Plan" in Todos
+shows the outline with the tasks under each line; a line with no unfinished task says "Nothing
+yet". `GET /todos/folders` and `GET /plan` return the lines in order with `open`, the unfinished
+tasks on each; `POST /plan` (`title`, optional `parent`), `PATCH /plan/<id>` (`title`, `order`) and
+`DELETE /plan/<id>` change it, and removing a line leaves its tasks in their lists.
+`GET /todos?view=…&plan=<id>` narrows a list to a line (a priority includes its parts) and
+`plan=none` to the tasks that are part of nothing. Agents get the outline in their briefing, put a
+task on a line with `todo_add(plan)`, read a line with `todo_list(view, plan)` and change the
+outline with `plan_write` when the owner asks.
+
 ## Saved links
 
 A link the owner wants to keep is a context node of kind `link`: the address, a title, the

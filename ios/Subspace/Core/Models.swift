@@ -149,6 +149,9 @@ struct Todo: Codable, Identifiable, Hashable {
     var next_date: String?
     /// Short labels the lists can be narrowed to ("finance", "house"). At most six.
     var tags: [String]?
+    /// The line of the plan the task is part of (a priority, or a part of one), and that line's name.
+    var plan_id: String?
+    var plan: String?
     /// The rail module this task is tied to, while that module exists: the one pointing at it, or
     /// the one it was kept from with "Later". Sent when one task is read.
     var rail: TodoRail?

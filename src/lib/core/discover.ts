@@ -22,6 +22,7 @@ import { getThread, type Post } from "./posts";
 import { allModules, getModule, railGone } from "./rail";
 import { doersOf, listRoutines, ROUTINES } from "./routines";
 import { ensureSystem, houseRules, SYSTEM } from "./rules";
+import { listPlan, type PlanItem } from "./plan";
 import { calendar, folders, getTodo, listTodos } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
@@ -266,6 +267,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
           ...f.folders.map((x) => ({ path: `/todos/${x.key}`, title: x.label + (x.hint ? ` (${x.hint})` : ""), ...(x.key === "all" ? { about: "Every unfinished task, wherever it is." } : {}), count: x.count })),
           { path: "/todos/done", title: "Done", about: "Completed tasks, by time." },
         ],
+        ...(f.plan.length ? { plan: planOutline(f.plan) } : {}),
         ...(f.tags.length ? { tags: f.tags.map((t) => ({ tag: t.tag, open: t.count })), hint: "tags are the labels the owner's tasks carry. Reuse one of these on a task you add rather than inventing a near-duplicate; todo_list(view, tag) narrows a list to one." } : {}),
       };
     }
@@ -283,7 +285,7 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
       path: `/todos/${a}`,
       title: `Todos · ${a}`,
       count: l.todos.length,
-      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope, ...(a === "all" && t.date ? { date: t.date } : {}) }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...share.tag(t.guest_id) })),
+      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope, ...(a === "all" && t.date ? { date: t.date } : {}) }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan ? { part_of: t.plan } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...share.tag(t.guest_id) })),
       hint: "read([id]) returns a todo's notes. A task marked shared_with is seen by that person: write nothing into it that is not meant for them.",
     };
   }
@@ -574,7 +576,7 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
   const seen = (e: (typeof rows)[number]) => {
     if (sight.full) return true;
     if (e.entity_type === "post") return sight.section("feed") || (typeof e.data?.tracker === "string" && sight.section("following"));
-    if (e.entity_type === "todo") return sight.section("todos");
+    if (e.entity_type === "todo" || e.entity_type === "plan") return sight.section("todos");
     if (e.entity_type === "tracker") return sight.section("following");
     if (e.entity_type === "rail") return sight.section("rail");
     if (e.entity_type === "idea") return sight.section("ideas");
@@ -854,7 +856,7 @@ export async function read(ids: string[], opts: { after?: string; /** the agent 
       } else if (id.startsWith("t_")) {
         if (!sight.section("todos")) throw gone();
         const t = await getTodo(id);
-        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.tags?.length ? { tags: t.tags } : {}), ...(await sharingFor([t.guest_id])).warning(t.guest_id), notes: t.notes, updated_at: t.updated_at });
+        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(await sharingFor([t.guest_id])).warning(t.guest_id), notes: t.notes, updated_at: t.updated_at });
       } else if (id.startsWith("f_") || (!id.startsWith("c_") && !id.includes("/") && (await q1("SELECT 1 FROM trackers WHERE slug = $1", [id])))) {
         if (!sight.section("following")) throw gone();
         const t = await getTracker(id);
@@ -921,6 +923,15 @@ async function sharedListsNote() {
   };
 }
 
+/** The plan as agents read it: each priority with its parts beneath it, and how many unfinished tasks each line has. */
+function planOutline(items: PlanItem[]) {
+  const line = (i: PlanItem) => ({ id: i.id, title: i.title, open_tasks: i.open });
+  return items.filter((i) => !i.parent_id).map((top) => {
+    const parts = items.filter((i) => i.parent_id === top.id).map(line);
+    return { ...line(top), ...(parts.length ? { parts } : {}) };
+  });
+}
+
 export async function briefing(agent: Agent) {
   const cal = await calendar();
   const tz = await timezone();
@@ -943,6 +954,7 @@ export async function briefing(agent: Agent) {
   // what is true for now, so every session starts knowing it; a note past its day is left out, and its writer is reminded of it
   const now = (await currentNotes().catch(() => [])).filter(sight.node);
   const handleOf = (id: string) => "@" + (agents.find((a) => a.id === id)?.handle ?? id);
+  const plan = sight.section("todos") ? await listPlan().catch(() => []) : [];
   const mineLapsed = now.filter((c) => c.lapsed && c.updated_by === agent.id);
   return {
     you: { handle: "@" + agent.handle, name: agent.name, roles: agent.roles, bio: agent.bio },
@@ -954,6 +966,8 @@ export async function briefing(agent: Agent) {
       ? { lapsed_notes_of_yours: mineLapsed.map((c) => ({ path: "/context/" + c.path, title: c.title, until: c.until })), lapsed_hint: "These notes of yours under /context/current have passed their day. Renew each with a new until, fold what lasted into long-term context, or archive it." }
       : {}),
     ...(rules ? { house_rules: rules.length > 3500 ? rules.slice(0, 3500).trimEnd() + '… (cut short: read the rest under explore("/context/system"))' : rules } : {}),
+    // what the owner is working towards for now, in their order: the frame for which tasks matter
+    ...(plan.length ? { plan: planOutline(plan), plan_hint: "The owner's priorities for now, first one first. A task you add that serves one carries its id (todo_add plan); todo_list(view: \"all\", plan: id) shows what is open towards it. A line with no open tasks is a gap worth mentioning when they ask what to do next." } : {}),
     owner: "@" + agents.find((a) => a.kind === "human")?.handle,
     now: { today: cal.today, timezone: tz },
     waiting_for_you: {

@@ -157,6 +157,25 @@ async function main() {
     if (rest(after) !== rest(before)) throw new Error("placing one task changed the order of the others");
     if (after.map((x) => x.order).join() !== after.map((_, i) => i + 1).join()) throw new Error("orders on one day are not 1, 2, 3: " + JSON.stringify(after.map((x) => x.order)));
   }
+  // the plan: a priority with a part, a task under the part, and the list narrowed to the priority
+  {
+    const top = await call(s, "plan_write", { title: "Ship the smoke test " + tag });
+    const part = await call(s, "plan_write", { title: "Write it " + tag, parent: top.id });
+    if (part.part_of !== top.id) throw new Error("plan_write(parent) did not make a part: " + JSON.stringify(part));
+    const nested = await call(s, "plan_write", { title: "Too deep", parent: part.id });
+    if (!nested.ERROR) throw new Error("a part was given a part of its own: " + JSON.stringify(nested));
+    const planned = await call(s, "todo_add", { title: "Plan the smoke test " + tag, view: "backlog", plan: part.id });
+    if (planned.plan !== part.id) throw new Error("todo_add(plan) did not put the task on the line: " + JSON.stringify(planned));
+    const under = await call(s, "todo_list", { view: "all", plan: top.id });
+    if (under.todos.length !== 1 || under.todos[0].id !== planned.id) throw new Error("todo_list(plan: a priority) did not return exactly the task under its part: " + JSON.stringify(under.todos));
+    const outline = (await call(s, "briefing", {})).plan?.find((p: { id: string }) => p.id === top.id);
+    if (outline?.parts?.[0]?.id !== part.id || outline.parts[0].open_tasks !== 1) throw new Error("the briefing does not carry the plan with its parts and open tasks: " + JSON.stringify(outline));
+    await call(s, "todo_update", { id: planned.id, plan: "none" });
+    if ((await call(s, "todo_list", { view: "all", plan: top.id })).todos.length) throw new Error('todo_update(plan: "none") left the task on its line');
+    await call(s, "todo_update", { id: planned.id, plan: part.id, done: true });
+    await call(s, "plan_write", { id: top.id, remove: true });
+    if ((await call(s, "briefing", {})).plan?.some((p: { id: string }) => p.id === top.id)) throw new Error("plan_write(remove) left the priority in the plan");
+  }
   // a follow-up: a tagged task, and a rail module that points at it
   const followUp = await call(s, "todo_add", { title: "Decide on the smoke test " + tag, view: "week", tags: ["smoke"], notes: "Two options, pick one." });
   const onSubject = await call(s, "todo_list", { view: "all", tag: "smoke" });

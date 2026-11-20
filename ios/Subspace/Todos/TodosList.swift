@@ -9,11 +9,20 @@ struct TodosListView: View {
         let loaded = store.rows != nil
         let empty = store.shownRows?.isEmpty ?? false
         let chosen = store.filter
+        let line: String? = store.focusedLine?.title
+        // what an empty list says, naming whatever it is narrowed to
+        let nothing: String = !chosen.isEmpty ? "Nothing tagged " + chosen.joined(separator: " and ") + " here." : (line == nil ? "Nothing here." : "Nothing for " + (line ?? "") + " here.")
         VStack(alignment: .leading, spacing: 0) {
             PageHeader(store.folder?.label ?? "", sub: store.listSub) {
-                // only on a list that has tagged tasks, or while a choice is still in force
-                if !store.viewTags.isEmpty {
-                    TodosTagFilter(store: store)
+                HStack(spacing: 0) {
+                    // only on a list with tasks that are part of the plan, or while a choice is still in force
+                    if !store.viewLines.isEmpty {
+                        TodosPlanFilter(store: store)
+                    }
+                    // likewise for tags
+                    if !store.viewTags.isEmpty {
+                        TodosTagFilter(store: store)
+                    }
                 }
             }
             TodosProblem(text: store.problem)
@@ -21,7 +30,7 @@ struct TodosListView: View {
                 TodosGroupView(group: group, store: store)
             }
             if empty {
-                Text(chosen.isEmpty ? "Nothing here." : "Nothing tagged \(chosen.joined(separator: " and ")) here.")
+                Text(nothing)
                     .font(.ssBody)
                     .foregroundStyle(Theme.ink3)
                     .padding(.horizontal, 4)
@@ -77,15 +86,70 @@ private struct TodosTagFilter: View {
     }
 }
 
-/// A task's tags at the end of its row, as quiet chips: the first one or two, and how many more.
+/// Narrows the list to the tasks that are part of one line of the plan (a priority brings its
+/// parts with it). It sits beside the tag filter and behaves the same way: quiet until a choice is
+/// made, then accent and named, and the choice follows from list to list. One line at a time.
+private struct TodosPlanFilter: View {
+    var store: TodosStore
+
+    var body: some View {
+        let chosen = store.focusedLine
+        let on = chosen != nil
+        let name = chosen?.title ?? "Priority"
+        Menu {
+            ForEach(store.viewLines) { line in
+                let label = line.parent_id == nil ? line.title : "   " + line.title
+                Button {
+                    store.setFocus(line.id == chosen?.id ? nil : line.id)
+                } label: {
+                    if line.id == chosen?.id { Label(label, systemImage: "checkmark") } else { Text(label) }
+                }
+            }
+            if on {
+                Divider()
+                Button("Show all") { store.setFocus(nil) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "flag")
+                Text(name.count > 16 ? String(name.prefix(15)) + "…" : name).lineLimit(1)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(on ? Theme.accent : Theme.ink3)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 36)
+            .background(on ? Theme.accentSoft : Color.clear, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel(on ? "Priority: \(name)" : "Filter by priority")
+        .accessibilityIdentifier("todos.plan.filter")
+    }
+}
+
+/// What a task is part of, then its tags, at the end of its row as quiet chips: one or two, and
+/// how many more tags there are.
 private struct TodosRowTags: View {
     var tags: [String]
+    /// The line of the plan the task is part of, shown first.
+    var line: String? = nil
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        let shown = Array(tags.prefix(sizeClass == .regular ? 2 : 1))
+        let room = (sizeClass == .regular ? 2 : 1) - (line == nil ? 0 : 1)
+        let shown = Array(tags.prefix(max(0, room)))
         let more = tags.count - shown.count
         HStack(spacing: 4) {
+            if let line {
+                Text(line.count > 20 ? String(line.prefix(19)) + "…" : line)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.ink2)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1)
+                    .background(Theme.fill, in: Capsule())
+                    .accessibilityLabel("Part of \(line)")
+            }
             ForEach(shown, id: \.self) { tag in
                 // a long tag is cut short here; the task itself shows it whole
                 Text(tag.count > 16 ? String(tag.prefix(15)) + "…" : tag)
@@ -280,8 +344,8 @@ private struct TodosRowLabel: View {
                 }
             }
             Spacer(minLength: 0)
-            if !tags.isEmpty {
-                TodosRowTags(tags: tags)
+            if !tags.isEmpty || row.plan != nil {
+                TodosRowTags(tags: tags, line: row.plan)
                     .padding(.top, 2)
             }
             if !place.isEmpty {
