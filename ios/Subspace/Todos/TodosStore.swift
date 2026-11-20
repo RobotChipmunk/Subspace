@@ -840,6 +840,10 @@ final class TodosStore {
         do {
             try await api.send("POST", "todos", body: ["title": title, "view": "backlog", "plan": line])
             problem = nil
+            // the line opens, so the new task is seen under it
+            if !openLines.contains(line) {
+                withAnimation(.ssSoft) { _ = openLines.insert(line) }
+            }
             await planChanged()
             return true
         } catch {

@@ -398,7 +398,7 @@ Patterns:
   after (named as a date pill names them: "Tomorrow", "Thursday", "Next week"), then Backlog and
   "Waiting for a day". Each section that is a place adds and takes carried tasks like the list it
   stands for; nothing can be carried onto "All" itself.
-- **Plan** (`Plan` in `todos/page.tsx`; `TodosPlan.swift` in the app): the owner's priorities as
+- **Plans** (`Plan` in `todos/page.tsx`; `TodosPlan.swift` in the app): the owner's priorities as
   a short outline, with the tasks under each. It is a view across the lists, listed with "All",
   and it is where the owner steps back and looks at everything; the day lists stay as they are.
   A priority is a line in 17px semibold; its parts sit under it, set in a little, one level and
@@ -411,8 +411,13 @@ Patterns:
   that line (the line lights as a list does); let go anywhere else it returns, since the order
   here is the lists' own. In the app the same word also offers the lines, as the system menu.
   An opened line ends with "Rename" and the bin (`ConfirmDelete`, "Remove"); removing a line
-  leaves its tasks in their lists. "Add a part" is a quiet line at the end of each priority's
-  parts and "Add a priority" a field at the end of the outline; both are always there. Last, set
+  leaves its tasks in their lists. Under each priority, after its parts, is the round plus the
+  lists use (`PlanAdd`). It adds a task to that priority. Parts are optional and must never look
+  required, so "Part" is offered only on request: with a pointer over the plus it grows to say
+  "Task" and shows "Part" beside it in `ink3`; where nothing can hover the first tap shows the two
+  and the second chooses (in the app the plus opens the system menu, "Add a task" first). A part
+  has its own "Add a task" field once opened. "Add a priority" is a field at the end of the
+  outline. Last, set
   apart, "Not in the plan" holds the tasks that are part of nothing, which is where chores live
   and is never a fault. Do not add counts, progress, colours or a third level.
 - **Part of** (todos): a task can be part of one line of the plan. In a list its row names that

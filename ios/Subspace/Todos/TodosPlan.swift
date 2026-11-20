@@ -29,7 +29,7 @@ struct TodosPlanView: View {
     var body: some View {
         let priorities = tops
         VStack(alignment: .leading, spacing: 0) {
-            PageHeader("Plan", sub: "What you are working towards, and the tasks under each.")
+            PageHeader("Plans", sub: "What you are working towards, and the tasks under each.")
             TodosProblem(text: store.problem)
             ForEach(priorities) { top in
                 VStack(alignment: .leading, spacing: 0) {
@@ -37,7 +37,7 @@ struct TodosPlanView: View {
                     ForEach(parts(of: top.id)) { part in
                         TodosPlanLine(item: part, empty: empty(part), store: store)
                     }
-                    TodosPlanAddPart(parent: top, store: store)
+                    TodosPlanAdd(parent: top, store: store)
                 }
                 .padding(.bottom, 12)
             }
@@ -177,25 +177,30 @@ private struct TodosPlanTasks: View {
             }
             if let item {
                 HStack(alignment: .center, spacing: 4) {
-                    Circle()
-                        .strokeBorder(Theme.ink3, lineWidth: 1.5)
-                        .frame(width: 22, height: 22)
-                        .opacity(0.4)
-                        .frame(width: 36, height: 36)
-                        .accessibilityHidden(true)
-                    TextField("Add a task", text: $draft)
-                        .font(.system(size: 16))
-                        .foregroundStyle(Theme.ink)
-                        .tint(Theme.accent)
-                        .focused($focused)
-                        .submitLabel(.done)
-                        .frame(minHeight: 36)
-                        .onSubmit {
-                            add()
-                            focused = true
-                        }
-                        .accessibilityLabel("Add a task to \(item.title)")
-                        .accessibilityIdentifier("todos.plan.add.\(line)")
+                    // a priority adds through the plus under it; a part has its own field here
+                    if item.parent_id != nil {
+                        Circle()
+                            .strokeBorder(Theme.ink3, lineWidth: 1.5)
+                            .frame(width: 22, height: 22)
+                            .opacity(0.4)
+                            .frame(width: 36, height: 36)
+                            .accessibilityHidden(true)
+                        TextField("Add a task", text: $draft)
+                            .font(.system(size: 16))
+                            .foregroundStyle(Theme.ink)
+                            .tint(Theme.accent)
+                            .focused($focused)
+                            .submitLabel(.done)
+                            .frame(minHeight: 36)
+                            .onSubmit {
+                                add()
+                                focused = true
+                            }
+                            .accessibilityLabel("Add a task to \(item.title)")
+                            .accessibilityIdentifier("todos.plan.add.\(line)")
+                    } else {
+                        Spacer(minLength: 0)
+                    }
                     Button(action: rename) {
                         Text("Rename")
                             .font(.system(size: 13))
@@ -315,56 +320,99 @@ private struct TodosPlanRow: View {
     }
 }
 
-/// The quiet line at the end of a priority's parts that adds another. Tapped, it becomes a field.
-private struct TodosPlanAddPart: View {
+/// The plus under a priority. It opens the system menu: "Add a task" first, which is what is
+/// wanted most often, then "Add a part". Parts are optional, so nothing about them shows until
+/// asked for. Either choice turns the plus into a field; a task typed there goes on the priority
+/// (in the backlog) and the priority opens to show it.
+private struct TodosPlanAdd: View {
     var parent: TodosPlanItem
     var store: TodosStore
-    @State private var adding = false
+    /// "task" or "part" while its field is open.
+    @State private var mode: String? = nil
     @State private var draft = ""
     @FocusState private var focused: Bool
 
     var body: some View {
+        let task = mode == "task"
         Group {
-            if adding {
-                TextField("Add a part", text: $draft)
-                    .font(.system(size: 15.5))
-                    .foregroundStyle(Theme.ink)
-                    .tint(Theme.accent)
-                    .focused($focused)
-                    .submitLabel(.done)
-                    .frame(minHeight: 36)
-                    .onSubmit { focused = false }
-                    .accessibilityLabel("Add a part of \(parent.title)")
-                    .accessibilityIdentifier("todos.plan.part.\(parent.id)")
-            } else {
-                Button {
-                    adding = true
-                    focused = true
-                } label: {
-                    Text("Add a part")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Theme.ink3)
+            if mode != nil {
+                HStack(alignment: .center, spacing: 4) {
+                    if task {
+                        Circle()
+                            .strokeBorder(Theme.ink3, lineWidth: 1.5)
+                            .frame(width: 22, height: 22)
+                            .opacity(0.4)
+                            .frame(width: 36, height: 36)
+                            .accessibilityHidden(true)
+                    }
+                    TextField(task ? "New task" : "New part", text: $draft)
+                        .font(.system(size: task ? 16 : 15.5))
+                        .foregroundStyle(Theme.ink)
+                        .tint(Theme.accent)
+                        .focused($focused)
+                        .submitLabel(.done)
                         .frame(minHeight: 36)
+                        .padding(.leading, task ? 0 : 20)
+                        .onSubmit {
+                            if task {
+                                // stays for the next one
+                                add()
+                                focused = true
+                            } else {
+                                focused = false
+                            }
+                        }
+                        .accessibilityLabel(task ? "New task for \(parent.title)" : "New part of \(parent.title)")
+                        .accessibilityIdentifier(task ? "todos.plan.add.\(parent.id)" : "todos.plan.part.\(parent.id)")
+                        // the field has only just appeared: it takes the keys once it is there
+                        .task { focused = true }
+                }
+            } else {
+                Menu {
+                    Button("Add a task") { begin("task") }
+                    Button("Add a part") { begin("part") }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.ink2)
+                        .frame(width: 22, height: 22)
+                        .background(Theme.fill2, in: Circle())
+                        .frame(width: 36, height: 36)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Add a part of \(parent.title)")
-                .accessibilityIdentifier("todos.plan.addPart.\(parent.id)")
+                .accessibilityLabel("Add to \(parent.title)")
+                .accessibilityIdentifier("todos.plan.plus.\(parent.id)")
             }
         }
-        .padding(.leading, 20)
         .onChange(of: focused) { _, on in
-            if !on && adding { add() }
+            if !on && mode != nil {
+                add()
+                mode = nil
+            }
         }
     }
 
+    private func begin(_ what: String) {
+        draft = ""
+        mode = what
+        focused = true
+    }
+
     private func add() {
-        adding = false
         let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let task = mode == "task"
         draft = ""
         if title.isEmpty { return }
         let id = parent.id
-        Task { _ = await store.addLine(title, parent: id) }
+        Task {
+            if task {
+                let saved = await store.addPlanTask(title, to: id)
+                // could not be saved: give the words back to the box
+                if !saved && draft.isEmpty && mode == "task" { draft = title }
+            } else {
+                _ = await store.addLine(title, parent: id)
+            }
+        }
     }
 }
 
