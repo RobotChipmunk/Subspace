@@ -243,7 +243,7 @@ function Todos() {
               {x.key === ALL && (
                 <button data-folder={PLAN} onClick={() => show(PLAN)} className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors ${view === PLAN ? "font-semibold text-ink" : "text-ink2 hover:text-ink"}`}>
                   {view === PLAN && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
-                  <span className="relative flex-1 whitespace-nowrap">Plan</span>
+                  <span className="relative flex-1 whitespace-nowrap">Plans</span>
                 </button>
               )}
               </Fragment>
@@ -273,7 +273,7 @@ function Todos() {
         <AnimatePresence mode="wait" initial={false}>
           {openId ? (
             <motion.div key="detail" initial={{ opacity: 0, x: 28 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 28 }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
-              <Detail key={openId} id={openId} backLabel={folder?.label ?? (view === PLAN ? "Plan" : "Back")} folders={f?.folders ?? []} tags={f?.tags ?? []} plan={f?.plan ?? []} today={f?.today} onOpen={setOpenId} onBack={() => setOpenId(null)} />
+              <Detail key={openId} id={openId} backLabel={folder?.label ?? (view === PLAN ? "Plans" : "Back")} folders={f?.folders ?? []} tags={f?.tags ?? []} plan={f?.plan ?? []} today={f?.today} onOpen={setOpenId} onBack={() => setOpenId(null)} />
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
@@ -689,9 +689,6 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
   const { mutate: globalMutate } = useSWRConfig();
   const refresh = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
   const [over, setOver] = useState<string | null>(null);
-  // the priority a part is being typed for
-  const [partFor, setPartFor] = useState<string | null>(null);
-  const [part, setPart] = useState("");
   const [priority, setPriority] = useState("");
   const tools: PlanTools = { today, folders, onOpen, onOver: setOver, refresh };
   const toggle = (id: string) => onOpenLines(open.includes(id) ? open.filter((x) => x !== id) : [...open, id]);
@@ -707,7 +704,7 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
   return (
     <div data-plan>
       <header className="mb-5 px-1">
-        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Plan</h1>
+        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Plans</h1>
         <p className="mt-0.5 text-[14px] text-ink2">What you are working towards, and the tasks under each.</p>
       </header>
 
@@ -719,15 +716,7 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
             {parts.map((p) => (
               <PlanLine key={p.id} item={p} empty={p.open === 0} open={open.includes(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} tools={tools} />
             ))}
-            {partFor === top.id ? (
-              <form onSubmit={(e) => (e.preventDefault(), addLine(part, top.id), setPart(""))} className="pl-6">
-                <input autoFocus value={part} onChange={(e) => setPart(e.target.value)} onBlur={() => (addLine(part, top.id), setPart(""), setPartFor(null))} onKeyDown={(e) => e.key === "Escape" && (setPart(""), setPartFor(null))} placeholder="Add a part" aria-label={`Add a part of ${top.title}`} className="w-full py-[7px] text-[15.5px]" />
-              </form>
-            ) : (
-              <button data-add-part={top.id} onClick={() => (setPart(""), setPartFor(top.id))} aria-label={`Add a part of ${top.title}`} className="block py-[7px] pl-6 text-[14px] text-ink3 transition-colors hover:text-ink2">
-                Add a part
-              </button>
-            )}
+            <PlanAdd top={top} onPart={(title) => addLine(title, top.id)} onTask={() => (open.includes(top.id) || onOpenLines([...open, top.id]), refresh())} />
           </div>
         );
       })}
@@ -743,6 +732,70 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
           <PlanLine item={null} empty={false} open={open.includes("none")} over={over === "none"} onToggle={() => toggle("none")} tools={tools} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The plus under a priority. A tap adds a task to that priority, which is what is wanted most
+ * often. With a pointer over it the plus says so ("Task") and offers "Part" beside it, for adding a
+ * part instead; where nothing can hover, the first tap shows the two and the second chooses. So a
+ * priority never looks as if it needs parts.
+ */
+function PlanAdd({ top, onPart, onTask }: { top: PlanItem; onPart: (title: string) => void; /** a task was added to the priority */ onTask: () => void }) {
+  const [mode, setMode] = useState<null | "choose" | "task" | "part">(null);
+  const [draft, setDraft] = useState("");
+  const el = useRef<HTMLDivElement>(null);
+  // the two choices, shown by a tap, step back on a tap anywhere else
+  useEffect(() => {
+    if (mode !== "choose") return;
+    const away = (e: PointerEvent) => !el.current?.contains(e.target as Node) && setMode(null);
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [mode]);
+
+  async function add(stay: boolean) {
+    const title = draft.trim();
+    const what = mode;
+    setDraft("");
+    if (!stay || !title) setMode(null);
+    if (!title) return;
+    if (what === "part") return onPart(title);
+    try {
+      // planning is not scheduling: a task added here waits in the backlog until it is given a place
+      await api("todos", { body: { title, view: "backlog", plan: top.id } });
+      onTask();
+    } catch {
+      setDraft(title);
+      setMode("task");
+    }
+  }
+
+  if (mode === "task" || mode === "part")
+    return (
+      <form onSubmit={(e) => (e.preventDefault(), add(mode === "task"))} className="mt-1 flex items-center gap-3 px-1">
+        {mode === "task" && <span className="check flex-none opacity-40" />}
+        <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => add(false)} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setMode(null))} placeholder={mode === "task" ? "New task" : "New part"} aria-label={mode === "task" ? `New task for ${top.title}` : `New part of ${top.title}`} className={`min-w-0 flex-1 ${mode === "task" ? "py-[9px] text-[16px]" : "py-[7px] pl-5 text-[15.5px]"}`} />
+      </form>
+    );
+  const shown = mode === "choose";
+  return (
+    <div ref={el} data-plan-add={top.id} className="group mt-1 flex h-9 items-center gap-1 px-1">
+      <button
+        aria-label={`Add a task to ${top.title}`}
+        onClick={() => setMode(!shown && window.matchMedia("(hover: none)").matches ? "choose" : "task")}
+        className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-fill2 text-ink2 transition-colors hover:bg-accent hover:text-white"
+      >
+        <Plus size={15} strokeWidth={2.4} className="flex-none" />
+        <span className={`overflow-hidden whitespace-nowrap text-[12.5px] font-medium transition-all duration-200 group-hover:max-w-[60px] group-hover:pl-0.5 group-hover:pr-2 group-hover:opacity-100 ${shown ? "max-w-[60px] pl-0.5 pr-2 opacity-100" : "max-w-0 opacity-0"}`}>Task</span>
+      </button>
+      <button
+        aria-label={`Add a part of ${top.title}`}
+        onClick={() => setMode("part")}
+        className={`h-[22px] rounded-full px-2 text-[12.5px] font-medium text-ink3 transition-opacity duration-200 hover:bg-fill hover:text-ink2 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 ${shown ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      >
+        Part
+      </button>
     </div>
   );
 }
@@ -824,10 +877,17 @@ function PlanTasks({ line, item, tools, onRename }: { line: string; item: PlanIt
       </ul>
       {item && (
         <div className="flex items-center gap-3 px-1">
-          <span className="check flex-none opacity-40" />
-          <form onSubmit={(e) => (e.preventDefault(), add())} className="min-w-0 flex-1">
-            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task" aria-label={`Add a task to ${item.title}`} className="w-full py-[9px] text-[16px]" />
-          </form>
+          {/* a priority adds through the plus under it; a part has its own field here */}
+          {item.parent_id ? (
+            <>
+              <span className="check flex-none opacity-40" />
+              <form onSubmit={(e) => (e.preventDefault(), add())} className="min-w-0 flex-1">
+                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task" aria-label={`Add a task to ${item.title}`} className="w-full py-[9px] text-[16px]" />
+              </form>
+            </>
+          ) : (
+            <span className="flex-1" />
+          )}
           <button onClick={onRename} className="h-8 flex-none rounded-full px-2.5 text-[13px] text-ink3 transition-colors hover:bg-fill hover:text-ink2">
             Rename
           </button>

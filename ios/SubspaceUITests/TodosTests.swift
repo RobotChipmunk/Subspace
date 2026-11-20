@@ -106,13 +106,17 @@ final class TodosTests: SubspaceTestCase {
         let line = expect(planLine(name), "the new priority")
         XCTAssertTrue(line.label.contains("Nothing yet"), "A new priority should say Nothing yet")
 
-        // A task typed under it waits in the backlog, and the line no longer says Nothing yet.
-        bringIntoView(line)
-        line.tap()
+        // The plus under a priority offers a task first, then a part. A task typed there waits in
+        // the backlog, and the priority opens to show it.
+        let plus = app.buttons["Add to \(name)"]
+        bringIntoView(plus)
+        expect(plus, "the plus under the new priority").tap()
+        expect(app.buttons["Add a part"], "Add a part, offered beside adding a task")
+        shot("17-todos-plan-plus")
+        expect(app.buttons["Add a task"], "Add a task in the plus menu").tap()
         let task = "Buy blackout blinds \(Int.random(in: 1000...9999))"
         let field = first("todos.plan.add.")
-        bringIntoView(field)
-        enter(task + "\n", into: field, "the field that adds a task to the line")
+        enter(task + "\n", into: field, "the field that adds a task to the priority")
         expect(planRow(task), "the new task under its line")
         let place = expect(first("todos.plan.place."), "where the new task sits")
         XCTAssertTrue(place.label.hasPrefix("Backlog"), "A task added in the plan should wait in the backlog, not \(place.label)")

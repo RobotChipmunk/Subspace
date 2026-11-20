@@ -142,7 +142,7 @@ private struct TodosFolderNav: View {
             out.append(TodosFolderEntry(key: folder.key, label: folder.label, count: folder.count, gap: gap, dim: false))
             // the plan sits with "All": both look across the lists
             if folder.key == TodosStore.allKey {
-                out.append(TodosFolderEntry(key: TodosStore.planKey, label: "Plan", count: 0, gap: false, dim: false))
+                out.append(TodosFolderEntry(key: TodosStore.planKey, label: "Plans", count: 0, gap: false, dim: false))
             }
         }
         // appears only while there is something to bring back

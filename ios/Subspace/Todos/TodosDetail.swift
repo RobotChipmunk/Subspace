@@ -74,7 +74,7 @@ struct TodosDetail: View {
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
-                    Text(store.folder?.label ?? (store.isPlan ? "Plan" : "Back")).font(.system(size: 15)).lineLimit(1)
+                    Text(store.folder?.label ?? (store.isPlan ? "Plans" : "Back")).font(.system(size: 15)).lineLimit(1)
                 }
                 .foregroundStyle(Theme.accent)
                 .padding(.trailing, 12)

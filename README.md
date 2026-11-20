@@ -202,7 +202,7 @@ narrows on the server to tasks carrying both, for agents (`todo_list(view, tag)`
 
 The owner's priorities for now, as a short outline: a priority, and parts one level down
 (`plan_items`; `src/lib/core/plan.ts`). A task can be part of one line (`plan` on `POST /todos`
-and `PATCH /todos/<id>`: a line's id, or `null`), and most tasks are part of none. "Plan" in Todos
+and `PATCH /todos/<id>`: a line's id, or `null`), and most tasks are part of none. "Plans" in Todos
 shows the outline with the tasks under each line; a line with no unfinished task says "Nothing
 yet". `GET /todos/folders` and `GET /plan` return the lines in order with `open`, the unfinished
 tasks on each; `POST /plan` (`title`, optional `parent`), `PATCH /plan/<id>` (`title`, `order`) and

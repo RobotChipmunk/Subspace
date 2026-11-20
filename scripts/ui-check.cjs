@@ -835,17 +835,23 @@ async function run(profile) {
     const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
     const line = (title) => page.locator("[data-plan-line]", { hasText: title });
     const task = (title) => page.locator("[data-plan-task]", { hasText: title });
+    // the word itself: the label also holds the (unseen) menu of lists, whose text innerText would add
+    const placeOf = (title) => task(title).locator("[data-place]").evaluate((el) => el.firstChild.textContent.trim());
     const planBtn = nav.locator("[data-folder=plan]");
     await planBtn.scrollIntoViewIfNeeded();
     await press(planBtn);
-    await page.locator("h1", { hasText: /^Plan$/ }).waitFor({ timeout: 4000 });
+    await page.locator("h1", { hasText: /^Plans$/ }).waitFor({ timeout: 4000 });
     await line("Start the year with a clear plan").waitFor({ timeout: 5000 });
     await settle(800);
     if (!(await line("A budget we both agree on").locator("[data-plan-empty]").count())) fail("todos plan: a line with no tasks does not say Nothing yet");
     if (await line("Goals for the first quarter").locator("[data-plan-empty]").count()) fail("todos plan: a line with an unfinished task says Nothing yet");
     if (await line("Start the year with a clear plan").locator("[data-plan-empty]").count()) fail("todos plan: a priority whose part has a task says Nothing yet");
     if (/\d/.test(await page.locator("[data-plan]").innerText())) fail("todos plan: the plan shows a number; it counts nothing");
-    await reachable(page.getByRole("button", { name: "Add a part of Start the year with a clear plan" }), "todos plan: Add a part");
+    // under each priority a plus adds a task; "Part" is offered beside it only on request, so parts never look required
+    const plus = (n) => page.getByRole("button", { name: `Add a task to ${n}`, exact: true });
+    const partBtn = (n) => page.getByRole("button", { name: `Add a part of ${n}`, exact: true });
+    await reachable(plus("Start the year with a clear plan"), "todos plan: the plus under a priority");
+    if (await partBtn("Start the year with a clear plan").evaluate((el) => getComputedStyle(el).opacity !== "0")) fail("todos plan: Part shows under a priority before it is asked for");
     await reachable(page.getByLabel("Add a priority"), "todos plan: Add a priority");
     await noSidewaysScroll("todos plan");
     await shot("todos-plan");
@@ -855,7 +861,7 @@ async function run(profile) {
     await task("Draft Q1 goals").waitFor({ timeout: 5000 });
     await settle(500);
     await reachable(task("Draft Q1 goals").locator("[data-place]"), "todos plan: where a task sits");
-    if ((await task("Draft Q1 goals").locator("[data-place]").innerText()).trim() !== "This week") fail("todos plan: a task set for the week does not say This week");
+    if ((await placeOf("Draft Q1 goals")) !== "This week") fail("todos plan: a task set for the week does not say This week");
     await press(line("Goals for the first quarter").getByRole("button").first());
     await settle(400);
 
@@ -868,16 +874,25 @@ async function run(profile) {
     await line(name).waitFor({ timeout: 5000 });
     await settle(600);
     if (!(await line(name).locator("[data-plan-empty]").count())) fail("todos plan: a new priority does not say Nothing yet");
-    await press(page.getByRole("button", { name: `Add a part of ${name}` }));
+    // with a pointer the plus offers "Part" beside it; without one the first tap shows the two
+    if (profile.touch) await press(plus(name));
+    else await plus(name).hover();
+    await settle(500);
+    await reachable(partBtn(name), "todos plan: Part beside the plus");
+    await shot("todos-plan-add");
+    await press(partBtn(name));
     await page.keyboard.type(part, { delay: 15 });
     await page.keyboard.press("Enter");
     await line(part).waitFor({ timeout: 5000 });
-    await press(line(name).getByRole("button").first());
-    await typeIn(page.getByLabel(`Add a task to ${name}`), title);
+    await settle(500);
+    // the plus itself adds a task (the second tap, where the first only shows the choices); the priority opens to show it
+    if (profile.touch) (await press(plus(name)), await settle(400));
+    await press(plus(name));
+    await page.keyboard.type(title, { delay: 15 });
     await page.keyboard.press("Enter");
     await task(title).waitFor({ timeout: 5000 });
     await settle(800);
-    if ((await task(title).locator("[data-place]").innerText()).trim() !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
+    if ((await placeOf(title)) !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
     if (await line(name).locator("[data-plan-empty]").count()) fail("todos plan: a line still says Nothing yet after a task was added to it");
     const plan = (await get("/api/v1/plan")).plan;
     const top = plan.find((i) => i.title === name);
