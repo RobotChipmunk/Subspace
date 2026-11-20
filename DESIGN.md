@@ -410,11 +410,15 @@ Patterns:
   to the backlog: planning is not scheduling. Carrying a task onto another line makes it part of
   that line (the line lights as a list does); let go anywhere else it returns, since the order
   here is the lists' own. In the app the same word also offers the lines, as the system menu.
-  An opened line ends with "Rename" and the bin (`ConfirmDelete`, "Remove"); removing a line
-  leaves its tasks in their lists. Under each priority, after its parts, is the round plus the
+  An open line's name is a field, like a task's name: tap the words and type, and return or
+  leaving it saves. The bin (`ConfirmDelete`, "Remove") sits beside the name while the line is
+  open; removing a line leaves its tasks in their lists. With a pointer over a closed line a
+  small pencil shows at its end, which opens the line with the name selected. Do not put renaming
+  or removing behind a word at the foot of the tasks: it was tried and was not found. Under each priority, after its parts, is the round plus the
   lists use (`PlanAdd`). It adds a task to that priority. Parts are optional and must never look
   required, so "Part" is offered only on request: with a pointer over the plus it grows to say
-  "Task" and shows "Part" beside it in `ink3`; where nothing can hover the first tap shows the two
+  "Task" and shows "Part" beside it in `ink3` (the plus itself must not move as it grows: the word
+  opens to its right); where nothing can hover the first tap shows the two
   and the second chooses (in the app the plus opens the system menu, "Add a task" first). A part
   has its own "Add a task" field once opened. "Add a priority" is a field at the end of the
   outline. Last, set
