@@ -116,9 +116,9 @@ final class TodosTests: SubspaceTestCase {
         let field = expect(planName(name), "the new priority")
         XCTAssertFalse(app.buttons["Close \(name)"].exists, "A new priority, with nothing under it, should have no chevron")
         bringIntoView(field)
-        // at the far end of the field, past the words, so the caret lands after them
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        Thread.sleep(forTimeInterval: 0.4)
+        // tapped, the words become a field with the caret after them
+        field.tap()
+        Thread.sleep(forTimeInterval: 0.6)
         app.typeText(" well\n")
         let renamed = name + " well"
         expect(planName(renamed), "the priority under its new name")
@@ -151,6 +151,23 @@ final class TodosTests: SubspaceTestCase {
         element("todos.plan.filter").tap()
         expect(app.buttons["Show all"], "Show all in the priority menu").tap()
         expect(row("Replace the hallway light"), "every task again, once the choice is off")
+
+        // Held and dragged onto the priority above it, a priority takes its place, and the new
+        // order is kept.
+        folder("plan").tap()
+        let moving = expect(planName(renamed), "the new priority, last in the plan")
+        bringIntoView(moving)
+        let above = expect(planName("A trip abroad in spring"), "the priority above it")
+        moving.press(forDuration: 1.2, thenDragTo: above, withVelocity: .slow, thenHoldForDuration: 0.6)
+        let names = { self.app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'todos.plan.name.'")).allElementsBoundByIndex.map(\.label) }
+        let saved = NSPredicate { _, _ in
+            let all = names()
+            guard let a = all.firstIndex(of: "Name of \(renamed)"), let b = all.firstIndex(of: "Name of A trip abroad in spring") else { return false }
+            return a < b
+        }
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation(for: saved, evaluatedWith: nil)], timeout: 10), .completed, "A priority dragged onto the one above it should take its place: \(names())")
+        shot("17-todos-plan-reordered")
+        folder("backlog").tap()
 
         // An open task says what it is part of.
         row(task).tap()

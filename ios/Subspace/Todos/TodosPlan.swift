@@ -56,6 +56,11 @@ struct TodosPlanView: View {
                     .padding(.top, 24)
             }
         }
+        // a line let go anywhere else in the plan keeps the place it was dragged to
+        .onDrop(of: [UTType.text], isTargeted: nil) { _ in
+            store.endLineDrag()
+            return true
+        }
         .task { await store.refreshPlan() }
     }
 }
@@ -63,8 +68,9 @@ struct TodosPlanView: View {
 /// One line of the plan and, while it is open, its tasks. Without an item it is "Not in the
 /// plan": the tasks that are part of nothing.
 ///
-/// A line's name is a field, as a task's name is: tap the words and type; return or leaving saves.
-/// The bin that takes the line out of the plan shows beside it while the name is being edited.
+/// A line's name becomes a field when its words are tapped; return or leaving saves. The bin that
+/// takes the line out of the plan shows beside it while the name is being edited. Held, the line
+/// lifts and can be dragged to another place among its neighbours.
 /// The chevron is there only when the line has something under it; otherwise its place is kept
 /// empty so the controls of every line stay in one column. A part has a small plus at its end
 /// that adds a task to it.
@@ -77,6 +83,8 @@ private struct TodosPlanLine: View {
     @State private var name = ""
     @State private var adding = false
     @State private var draft = ""
+    /// The name is a field (it was tapped); otherwise its words, which a finger can hold to drag.
+    @State private var editing = false
     @FocusState private var nameFocused: Bool
     @FocusState private var draftFocused: Bool
 
@@ -89,7 +97,7 @@ private struct TodosPlanLine: View {
         let rows = store.planTasks[key] ?? []
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 4) {
-                if item != nil {
+                if item != nil && editing {
                     TextField("Name", text: $name, axis: .vertical)
                         .font(font)
                         .foregroundStyle(over ? Theme.accent : Theme.ink)
@@ -107,6 +115,24 @@ private struct TodosPlanLine: View {
                         }
                         .accessibilityLabel("Name of \(title)")
                         .accessibilityIdentifier("todos.plan.name.\(key)")
+                        .task { nameFocused = true }
+                } else if item != nil {
+                    Button {
+                        editing = true
+                    } label: {
+                        Text(title)
+                            .font(font)
+                            .foregroundStyle(over ? Theme.accent : Theme.ink)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 7)
+                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Name of \(title)")
+                    .accessibilityHint("Tap to rename. Hold to move.")
+                    .accessibilityIdentifier("todos.plan.name.\(key)")
                 } else {
                     Button {
                         store.toggleLine(key)
@@ -166,6 +192,12 @@ private struct TodosPlanLine: View {
             }
             .padding(.leading, part ? 20 : 0)
             .animation(.ssSoft, value: nameFocused)
+            // held, the line lifts to be dragged among its neighbours
+            .onDrag {
+                store.planDragging = nil
+                if let id = item?.id { store.lineDragging = id }
+                return NSItemProvider(object: key as NSString)
+            }
             if open && (!rows.isEmpty || adding) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
@@ -207,17 +239,17 @@ private struct TodosPlanLine: View {
         .background(over ? Theme.solid : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(over ? Theme.accent : Color.clear, lineWidth: 1.5))
         .padding(.horizontal, -8)
-        .onDrop(of: [UTType.text], isTargeted: $over) { _ in
-            store.dropOnLine(key)
-            return true
-        }
+        .onDrop(of: [UTType.text], delegate: TodosPlanDrop(key: key, store: store, over: $over))
         .animation(.ssSpring, value: over)
         // the field shows the saved name whenever nothing is being typed over it
         .onChange(of: item?.title, initial: true) { _, saved in
             if !nameFocused { name = saved ?? "" }
         }
         .onChange(of: nameFocused) { _, on in
-            if !on { rename() }
+            if !on && editing {
+                editing = false
+                rename()
+            }
         }
         .onChange(of: draftFocused) { _, on in
             if !on && adding {
@@ -248,6 +280,44 @@ private struct TodosPlanLine: View {
             // could not be saved: give the words back to the box
             if !saved && draft.isEmpty && adding { draft = title }
         }
+    }
+}
+
+/// What a line of the plan does with something dragged over it: a line being moved takes its
+/// place (when they are neighbours); a task being carried lights it and becomes part of it.
+private struct TodosPlanDrop: DropDelegate {
+    let key: String
+    let store: TodosStore
+    @Binding var over: Bool
+
+    func dropEntered(info: DropInfo) {
+        MainActor.assumeIsolated {
+            if store.lineDragging != nil {
+                store.lineEntered(key)
+            } else {
+                over = true
+            }
+        }
+    }
+
+    func dropExited(info: DropInfo) {
+        MainActor.assumeIsolated { over = false }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        MainActor.assumeIsolated {
+            over = false
+            if store.lineDragging != nil {
+                store.endLineDrag()
+            } else {
+                store.dropOnLine(key)
+            }
+        }
+        return true
     }
 }
 
@@ -325,6 +395,7 @@ private struct TodosPlanRow: View {
         .fixedSize(horizontal: false, vertical: true)
         .contentShape(Rectangle())
         .onDrag {
+            store.lineDragging = nil
             store.planDragging = (id: id, line: line)
             return NSItemProvider(object: id as NSString)
         }

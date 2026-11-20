@@ -43,6 +43,8 @@ final class TodosStore {
     var planLoaded: Bool = false
     /// The task being carried in the plan, and the line it is part of.
     @ObservationIgnored var planDragging: (id: String, line: String)? = nil
+    /// The line of the plan being dragged to another place among its neighbours.
+    @ObservationIgnored var lineDragging: String? = nil
 
     /// The selected folder's key, or `binKey`.
     var view: String = "today"
@@ -421,7 +423,7 @@ final class TodosStore {
             today = reply.today
             binCount = reply.bin
             knownTags = reply.tags ?? []
-            plan = reply.plan ?? []
+            if lineDragging == nil { plan = reply.plan ?? [] }
             foldersLoaded = true
         }
         // a line that has left the plan cannot go on narrowing the lists
@@ -913,6 +915,35 @@ final class TodosStore {
             problem = error.localizedDescription
         }
         await planChanged()
+    }
+
+    /// A line being dragged has come over another: if they are neighbours (two priorities, or two
+    /// parts of one priority), it takes that one's place at once.
+    func lineEntered(_ target: String) {
+        guard let moving = lineDragging, moving != target else { return }
+        guard let from = plan.firstIndex(where: { $0.id == moving }), let to = plan.firstIndex(where: { $0.id == target }) else { return }
+        guard plan[from].parent_id == plan[to].parent_id else { return }
+        var next = plan
+        let item = next.remove(at: from)
+        next.insert(item, at: to)
+        withAnimation(.ssSoft) { plan = next }
+    }
+
+    /// The dragged line was let go: its place among its neighbours is saved.
+    func endLineDrag() {
+        guard let id = lineDragging, let api = app?.api else { return }
+        lineDragging = nil
+        guard let item = plan.first(where: { $0.id == id }) else { return }
+        let order = (plan.filter { $0.parent_id == item.parent_id }.firstIndex { $0.id == id } ?? 0) + 1
+        Task {
+            do {
+                try await api.send("PATCH", "plan/\(id)", body: ["order": order])
+                problem = nil
+            } catch {
+                problem = error.localizedDescription
+            }
+            await refreshFolders()
+        }
     }
 
     /// The carried task was let go over a line of the plan.

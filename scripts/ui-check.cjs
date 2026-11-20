@@ -851,7 +851,13 @@ async function run(profile) {
     if ((await caret("Goals for the first quarter").getAttribute("aria-expanded").catch(() => null)) !== "true") fail("todos plan: a line with tasks is not open from the start");
     if ((await caret("Start the year with a clear plan").getAttribute("aria-expanded").catch(() => null)) !== "true") fail("todos plan: a priority with parts is not open from the start");
     if ((await caret("Not in the plan").getAttribute("aria-expanded").catch(() => null)) !== "false") fail("todos plan: Not in the plan is open from the start");
-    if (/\d/.test(await page.locator("[data-plan]").innerText())) fail("todos plan: the plan shows a number; it counts nothing");
+    // the lines themselves, not the tasks under them, whose own titles may hold numbers
+    const linesText = await page.locator("[data-plan]").evaluate((el) => {
+      const copy = el.cloneNode(true);
+      copy.querySelectorAll("[data-plan-task]").forEach((t) => t.remove());
+      return copy.innerText;
+    });
+    if (/\d/.test(linesText)) fail("todos plan: the plan shows a number; it counts nothing");
     // under each priority a plus adds a task; "Part" is offered beside it only on request, so parts never look required
     const plus = (n) => page.getByRole("button", { name: `Add a task to ${n}`, exact: true });
     const partBtn = (n) => page.getByRole("button", { name: `Add a part of ${n}`, exact: true });
@@ -870,6 +876,7 @@ async function run(profile) {
     await settle(500);
     if (await task("Draft Q1 goals").count()) fail("todos plan: closing a line left its tasks showing");
     await page.reload();
+    await press(nav.locator("[data-folder=plan]"));
     await line("Goals for the first quarter").waitFor({ timeout: 8000 });
     await settle(1200);
     if (await task("Draft Q1 goals").count()) fail("todos plan: a closed line was open again after the page was loaded again");
@@ -913,14 +920,69 @@ async function run(profile) {
     await press(nameField);
     await settle(300);
     await reachable(line(name).getByRole("button", { name: /^Remove / }), "todos plan: the bin beside a line's name");
-    await nameField.fill(name + " well");
+    // tapped, the words became a field
+    await line(name).locator("textarea[data-plan-name]").fill(name + " well");
     await page.keyboard.press("Enter");
     await settle(900);
     if (!(await get("/api/v1/plan")).plan.some((i) => i.title === name + " well")) fail("todos plan: a name typed over an open line was not saved");
-    await line(name + " well").locator("[data-plan-name]").fill(name);
+    await press(line(name + " well").locator("[data-plan-name]"));
+    await line(name + " well").locator("textarea[data-plan-name]").fill(name);
     await page.keyboard.press("Enter");
     await settle(900);
     if (!(await get("/api/v1/plan")).plan.some((i) => i.title === name)) fail("todos plan: the line's name could not be put back");
+
+    const mid = (loc) => loc.evaluate((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left }))(e.getBoundingClientRect()));
+    // goals and parts are put in order by dragging: with a mouse by the grip in the margin, with a
+    // finger by resting on the line a moment
+    const drag = async (fromTitle, toTitle) => {
+      const target = await mid(line(toTitle).locator("[data-plan-name]").first());
+      let from;
+      if (profile.touch) from = await mid(line(fromTitle).locator("[data-plan-name]").first());
+      else {
+        await line(fromTitle).locator("[data-plan-name]").first().hover();
+        await settle(300);
+        from = await mid(page.getByRole("button", { name: `Move ${fromTitle}`, exact: true }));
+      }
+      const steps = 24;
+      const at = (i) => [from.x, from.y + ((target.y - 6 - from.y) * i) / steps];
+      if (profile.touch) {
+        const c = await page.context().newCDPSession(page);
+        const t = (type, x, y) => c.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+        await t("touchStart", from.x, from.y);
+        await page.waitForTimeout(450);
+        for (let i = 1; i <= steps; i++) (await t("touchMove", ...at(i)), await page.waitForTimeout(30));
+        await t("touchEnd", 0, 0);
+        await c.detach();
+      } else {
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        for (let i = 1; i <= steps; i++) (await page.mouse.move(...at(i)), await page.waitForTimeout(25));
+        await page.mouse.up();
+      }
+      await settle(1200);
+    };
+    const tops = async () => (await get("/api/v1/plan")).plan.filter((i) => !i.parent_id).map((i) => i.title);
+    await line(name).scrollIntoViewIfNeeded();
+    const beforeTops = await tops();
+    const above = beforeTops[beforeTops.indexOf(name) - 1];
+    await drag(name, above);
+    const afterTops = await tops();
+    if (afterTops.indexOf(name) !== beforeTops.indexOf(name) - 1) fail(`todos plan: a priority dragged onto the one above it did not take its place (${afterTops.join(", ")})`);
+    if (await page.locator("textarea[data-plan-name]").count()) fail("todos plan: dragging a line left its name being edited");
+    await shot("todos-plan-reordered");
+    const partsOfYear = async () => {
+      const all = (await get("/api/v1/plan")).plan;
+      const year = all.find((i) => i.title === "Start the year with a clear plan");
+      return all.filter((i) => i.parent_id === year?.id).map((i) => i.title);
+    };
+    await line("A budget we both agree on").scrollIntoViewIfNeeded();
+    await drag("A budget we both agree on", "Goals for the first quarter");
+    if ((await partsOfYear())[0] !== "A budget we both agree on") fail(`todos plan: a part dragged onto the one above it did not take its place (${(await partsOfYear()).join(", ")})`);
+    // put back as seeded, for the next screen size
+    const seeded = (await get("/api/v1/plan")).plan;
+    const budget = seeded.find((i) => i.title === "A budget we both agree on");
+    if (budget) await page.evaluate((id) => fetch(`/api/v1/plan/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: 2 }) }), budget.id);
+    await settle(600);
     const plan = (await get("/api/v1/plan")).plan;
     const top = plan.find((i) => i.title === name);
     const sub = plan.find((i) => i.title === part);
@@ -929,7 +991,6 @@ async function run(profile) {
     await shot("todos-plan-open");
 
     // carried onto another line, the task becomes part of that line
-    const mid = (loc) => loc.evaluate((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left }))(e.getBoundingClientRect()));
     const from = await mid(task(title));
     from.x = from.left + 110;
     const to = await mid(line(part));

@@ -414,8 +414,12 @@ Patterns:
   backlog: planning is not scheduling. Carrying a task onto another line makes it part of that
   line (the line lights as a list does); let go anywhere else it returns, since the order here is
   the lists' own. In the app the same word also offers the lines, as the system menu.
-  A line's name is always a field, like a task's name: tap the words and type, and return or
-  leaving it saves. The bin (`ConfirmDelete`, "Remove") shows beside the name while it is being
+  Priorities, and the parts within one priority, are put in order by dragging, as tasks are:
+  with a mouse by a grip that shows in the margin beside a line under the pointer, with a finger
+  by resting on the line a moment (`PlanDrag`; in the app, holding the line). A priority carries
+  its parts with it; a part moves only among its priority's parts.
+  A line's name is its words until they are tapped, then a field with the caret at the end (the
+  words, not a field, so a finger can rest on them to lift the line); return or leaving saves. The bin (`ConfirmDelete`, "Remove") shows beside the name while it is being
   edited, and on the web also while a pointer is over the line; removing a line leaves its tasks
   in their lists. Do not put renaming or removing behind a word at the foot of the tasks: it was
   tried and was not found. Under each priority, after its parts, is the round plus the lists use

@@ -1,7 +1,7 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, GripVertical, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { AnimatePresence, motion, Reorder, useDragControls, type DragControls } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -740,8 +740,24 @@ function Plan({ plan, folders, today, onOpen }: { plan?: PlanItem[]; folders: Fo
     await api("plan", { body: { title, ...(parent ? { parent } : {}) } });
     refresh();
   }
-  const tops = (plan ?? []).filter((i) => !i.parent_id);
-  const partsOf = (id: string) => (plan ?? []).filter((i) => i.parent_id === id);
+  // The outline in the order shown. A line being dragged reorders this copy at once; the server's
+  // copy takes over again once nothing is in the air.
+  const [lines, setLines] = useState<PlanItem[]>(plan ?? []);
+  const carrying = useRef(false);
+  useEffect(() => {
+    if (!carrying.current && plan) setLines(plan);
+  }, [plan]);
+  const tops = lines.filter((i) => !i.parent_id);
+  const partsOf = (id: string) => lines.filter((i) => i.parent_id === id);
+  /** A line let go after being dragged: its place among its neighbours is saved. */
+  async function placed(item: PlanItem) {
+    carrying.current = false;
+    const order = lines.filter((i) => i.parent_id === item.parent_id).findIndex((i) => i.id === item.id) + 1;
+    const was = (plan ?? []).filter((i) => i.parent_id === item.parent_id).findIndex((i) => i.id === item.id) + 1;
+    if (order > 0 && order !== was) await api(`plan/${item.id}`, { method: "PATCH", body: { order } }).catch(() => {});
+    refresh();
+  }
+  const lineDrag = { onStart: () => (carrying.current = true), onEnd: placed };
   // something under it: its own tasks (before they arrive, the count the server gave) or, for a priority, parts
   const kids = (item: PlanItem, parts: PlanItem[] = []) => parts.length > 0 || (data ? rowsOf(item.id).length > 0 : item.open > 0);
 
@@ -752,26 +768,39 @@ function Plan({ plan, folders, today, onOpen }: { plan?: PlanItem[]; folders: Fo
         <p className="mt-0.5 text-[14px] text-ink2">What you are working towards, and the tasks under each.</p>
       </header>
 
-      {tops.map((top) => {
-        const parts = partsOf(top.id);
-        const has = kids(top, parts);
-        // a line with nothing under it cannot be closed: there is nothing to hide
-        const open = !has || turned(top.id);
-        return (
-          <div key={top.id} className="mb-3">
-            <PlanLine item={top} rows={rowsOf(top.id)} kids={has} open={open} over={over === top.id} onToggle={() => toggle(top.id)} tools={tools} />
-            {open && (
-              <>
-                {parts.map((p) => {
-                  const partKids = kids(p);
-                  return <PlanLine key={p.id} item={p} rows={rowsOf(p.id)} kids={partKids} open={!partKids || turned(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} onReveal={() => reveal(p.id)} tools={tools} />;
-                })}
-                <PlanAdd top={top} onPart={(title) => addLine(title, top.id)} onTask={() => (reveal(top.id), refresh())} />
-              </>
-            )}
-          </div>
-        );
-      })}
+      {/* priorities, and within each its parts, are put in order by dragging them */}
+      <Reorder.Group axis="y" as="div" values={tops} onReorder={(next) => setLines((all) => [...next, ...all.filter((i) => i.parent_id)])}>
+        {tops.map((top) => {
+          const parts = partsOf(top.id);
+          const has = kids(top, parts);
+          // a line with nothing under it cannot be closed: there is nothing to hide
+          const open = !has || turned(top.id);
+          return (
+            <PlanDrag key={top.id} item={top} {...lineDrag} className="mb-3">
+              {(controls) => (
+                <>
+                  <PlanLine item={top} rows={rowsOf(top.id)} kids={has} open={open} over={over === top.id} onToggle={() => toggle(top.id)} controls={controls} tools={tools} />
+                  {open && (
+                    <>
+                      <Reorder.Group axis="y" as="div" values={parts} onReorder={(next) => setLines((all) => [...all.filter((i) => i.parent_id !== top.id), ...next])}>
+                        {parts.map((p) => {
+                          const partKids = kids(p);
+                          return (
+                            <PlanDrag key={p.id} item={p} {...lineDrag}>
+                              {(c) => <PlanLine item={p} rows={rowsOf(p.id)} kids={partKids} open={!partKids || turned(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} onReveal={() => reveal(p.id)} controls={c} tools={tools} />}
+                            </PlanDrag>
+                          );
+                        })}
+                      </Reorder.Group>
+                      <PlanAdd top={top} onPart={(title) => addLine(title, top.id)} onTask={() => (reveal(top.id), refresh())} />
+                    </>
+                  )}
+                </>
+              )}
+            </PlanDrag>
+          );
+        })}
+      </Reorder.Group>
 
       {plan && !tops.length && <p className="px-1 pb-2 text-ink3">Nothing here yet. Add what you are working towards; your tasks stay in their lists.</p>}
 
@@ -785,6 +814,31 @@ function Plan({ plan, folders, today, onOpen }: { plan?: PlanItem[]; folders: Fo
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A line of the plan (for a priority, with its parts and plus) that can be dragged to another
+ * place among its neighbours. It moves only from its line: with a mouse from the grip that shows
+ * in the margin, with a finger by resting on the line a moment, as a task in a list is lifted.
+ */
+function PlanDrag({ item, onStart, onEnd, className = "", children }: { item: PlanItem; onStart: () => void; onEnd: (item: PlanItem) => void; className?: string; children: (controls: DragControls) => React.ReactNode }) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      value={item}
+      as="div"
+      dragListener={false}
+      dragControls={controls}
+      onDragStart={onStart}
+      onDragEnd={() => onEnd(item)}
+      data-plan-item={item.id}
+      transition={soft}
+      whileDrag={{ scale: 1.01, boxShadow: "var(--shadow-lift)", backgroundColor: "var(--surface-solid)", zIndex: 5 }}
+      className={`relative rounded-2xl ${className}`}
+    >
+      {children(controls)}
+    </Reorder.Item>
   );
 }
 
@@ -861,11 +915,32 @@ function PlanAdd({ top, onPart, onTask }: { top: PlanItem; onPart: (title: strin
  * line or the name is being edited. The chevron is there only when the line has something under
  * it. A part has a small plus at its end that adds a task to it.
  */
-function PlanLine({ item, rows, kids, open, over, onToggle, onReveal, tools }: { item: PlanItem | null; rows: Row[]; kids: boolean; open: boolean; over: boolean; onToggle: () => void; /** opens the line if it is closed (a part, as a task is added to it) */ onReveal?: () => void; tools: PlanTools }) {
+function PlanLine({ item, rows, kids, open, over, onToggle, onReveal, controls, tools }: { item: PlanItem | null; rows: Row[]; kids: boolean; open: boolean; over: boolean; onToggle: () => void; /** opens the line if it is closed (a part, as a task is added to it) */ onReveal?: () => void; /** moves the line among its neighbours */ controls?: DragControls; tools: PlanTools }) {
   const key = item?.id ?? "none";
   const title = item?.title ?? "Not in the plan";
-  // what is being typed over the name; null while it shows the saved one
+  // what is being typed over the name; null while it shows the words, ready to be tapped or held
   const [name, setName] = useState<string | null>(null);
+  const editing = name !== null;
+  // A finger resting on the line lifts it to be dragged; a quick tap edits the name. The page
+  // keeps still once it is lifted, as it does for a task.
+  const row = useRef<HTMLDivElement>(null);
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  const lifted = useRef(false);
+  useEffect(() => {
+    const node = row.current;
+    if (!node) return;
+    const still = (e: Event) => lifted.current && e.cancelable && e.preventDefault();
+    node.addEventListener("touchmove", still, { passive: false });
+    node.addEventListener("contextmenu", still);
+    return () => (node.removeEventListener("touchmove", still), node.removeEventListener("contextmenu", still));
+  }, []);
+  const cancelHold = () => (hold.current && clearTimeout(hold.current.timer), (hold.current = null));
+  useEffect(() => {
+    const up = () => ((lifted.current = false), cancelHold());
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+    return () => (document.removeEventListener("pointerup", up), document.removeEventListener("pointercancel", up));
+  }, []);
   // a part's own field for a new task, open from its plus
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
@@ -875,6 +950,7 @@ function PlanLine({ item, rows, kids, open, over, onToggle, onReveal, tools }: {
   async function rename() {
     const next = name?.trim();
     setName(null);
+    if (lifted.current) return;
     if (!item || !next || next === item.title) return;
     await api(`plan/${item.id}`, { method: "PATCH", body: { title: next } });
     tools.refresh();
@@ -898,21 +974,53 @@ function PlanLine({ item, rows, kids, open, over, onToggle, onReveal, tools }: {
   const onHover = "opacity-0 pointer-events-none group-hover/line:opacity-100 group-hover/line:pointer-events-auto group-focus-within/line:opacity-100 group-focus-within/line:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto";
   return (
     <div data-plan-line={key} data-plan-title={title} data-over={over || undefined} className={`-mx-2 rounded-2xl px-2 transition-colors ${over ? "drop-target" : ""}`}>
-      <div className={`group/line flex min-h-10 items-center gap-1 ${part ? "pl-5" : ""}`}>
-        {item ? (
+      <div
+        ref={row}
+        onPointerDown={(e) => {
+          if (!controls || e.pointerType === "mouse" || editing || (e.target as HTMLElement).closest("button:not([data-plan-name]), label, input")) return;
+          const start = e.nativeEvent;
+          cancelHold();
+          hold.current = { x: e.clientX, y: e.clientY, timer: setTimeout(() => ((hold.current = null), (lifted.current = true), controls.start(start)), HOLD_MS) };
+        }}
+        onPointerMove={(e) => hold.current && Math.hypot(e.clientX - hold.current.x, e.clientY - hold.current.y) > 8 && cancelHold()}
+        className={`group/line relative flex min-h-10 items-center gap-1 ${part ? "pl-5" : ""}`}
+      >
+        {/* with a mouse, the line is dragged by a grip that shows in the margin beside it */}
+        {controls && (
+          <button
+            aria-label={`Move ${title}`}
+            onPointerDown={(e) => (e.preventDefault(), controls.start(e))}
+            className={`absolute top-1/2 grid h-8 w-5 -translate-y-1/2 cursor-grab place-items-center rounded-md text-ink3 opacity-0 transition-opacity hover:text-ink2 active:cursor-grabbing group-hover/line:opacity-100 [@media(hover:none)]:hidden ${part ? "left-0" : "-left-6"}`}
+          >
+            <GripVertical size={14} />
+          </button>
+        )}
+        {item && editing ? (
           <textarea
             ref={(el) => {
               if (el) (el.style.height = "0px"), (el.style.height = el.scrollHeight + "px");
             }}
+            autoFocus
+            onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
             rows={1}
             value={name ?? item.title}
             aria-label={`Name of ${item.title}`}
             data-plan-name
             onChange={(e) => setName(e.target.value.replace(/\n/g, ""))}
             onBlur={rename}
-            onKeyDown={(e) => (e.key === "Enter" ? (e.preventDefault(), e.currentTarget.blur()) : e.key === "Escape" && (setName(null), e.currentTarget.blur()))}
-            className={`min-w-0 flex-1 resize-none overflow-hidden rounded-lg px-1 py-[7px] leading-[1.35] transition-colors hover:bg-fill focus:bg-fill ${over ? "text-accent" : ""} ${type}`}
+            onKeyDown={(e) => (e.key === "Enter" ? (e.preventDefault(), e.currentTarget.blur()) : e.key === "Escape" && (setName(item.title), e.currentTarget.blur()))}
+            className={`min-w-0 flex-1 resize-none overflow-hidden rounded-lg bg-fill px-1 py-[7px] leading-[1.35] ${type}`}
           />
+        ) : item ? (
+          // the words, until they are tapped: then a field to type over (a finger held on them lifts the line instead)
+          <button
+            data-plan-name
+            aria-label={`Name of ${item.title}`}
+            onClick={() => !lifted.current && setName(item.title)}
+            className={`min-w-0 flex-1 cursor-text select-none break-words rounded-lg px-1 py-[7px] text-left leading-[1.35] transition-colors [-webkit-touch-callout:none] hover:bg-fill ${over ? "text-accent" : ""} ${type}`}
+          >
+            {item.title}
+          </button>
         ) : (
           <button onClick={onToggle} className={`min-w-0 flex-1 break-words px-1 py-[7px] text-left leading-[1.35] transition-colors ${over ? "text-accent" : "text-ink2"} ${type}`}>
             {title}
