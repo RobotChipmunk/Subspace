@@ -1036,8 +1036,10 @@ async function run(profile) {
     await noSidewaysScroll("todos priority menu");
     await shot("todos-plan-filter");
     await press(menuEl.getByRole("menuitemradio", { name }));
-    await settle(800);
-    const shown = await page.locator("main ul li").evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
+    // rows that leave fade out over a moment; read the list once they have gone
+    const listed = () => page.locator("main ul li").evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
+    let shown = [];
+    for (let i = 0; i < 12 && (shown = await listed()).join("|") !== title; i++) await page.waitForTimeout(250);
     if (shown.join("|") !== title) fail(`todos plan: narrowed to a priority, the list shows ${JSON.stringify(shown)}`);
     if ((await filter.getAttribute("aria-label")) !== `Priority: ${name}`) fail("todos plan: the filter does not name the chosen line");
     await press(filter);
