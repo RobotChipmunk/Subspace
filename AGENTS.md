@@ -206,5 +206,9 @@ being true. Read this list before starting work.
   "matched" a text of one or two words about one run in ten (sharing one place was half the
   likeness). It now gives each word sixteen. If "a search that found nothing is not recognisable"
   fails again, look at the stand-in before the search.
+- `Reorder.Group` (motion 14) asks `onReorder` for one new order and then asks for nothing more
+  until its `values` prop is a new array. The todo list ignored the request while a carried row
+  was away to the side, so `values` never changed and rows stopped trading places for that drag
+  and every later one. An `onReorder` that turns an order down must still pass a fresh array.
 - When a command chain ends in `git commit && git push`, make the build's own exit status gate it
   (`xcodebuild ... | grep` returns grep's status, so a failed build was committed and pushed once).

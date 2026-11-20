@@ -484,6 +484,37 @@ async function run(profile) {
     if (after.indexOf(before[0]) !== 3) fail(`todos reorder: dragging the first task past three rows left it at position ${after.indexOf(before[0]) + 1}, expected 4`);
     if (await page.getByLabel("Task name").count()) fail("todos reorder: letting go of a dragged task opened it");
     await shot("todos-reordered");
+    // A row that wanders sideways stops trading places; brought back, it must carry on. (It used
+    // to stay stuck where it left the list, for that drag and every one after.)
+    const now = await rows.evaluateAll((els) => els.map((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height }))(e.getBoundingClientRect())));
+    const from = now[3];
+    const top = now[0].y - now[0].h * 0.4;
+    // out to the side, up past a row while out there (the order it asks for is turned down), back
+    // in line, then on to the top
+    const path = [];
+    for (let i = 1; i <= 4; i++) path.push([from.x - (90 * i) / 4, from.y - i]);
+    for (let i = 1; i <= 8; i++) path.push([from.x - 90, from.y - 4 - (from.h * 1.5 * i) / 8]);
+    for (let i = 1; i <= 6; i++) path.push([from.x - 90 + (90 * i) / 6, from.y - 4 - from.h * 1.5 - i]);
+    const back = from.y - 10 - from.h * 1.5;
+    for (let i = 1; i <= 16; i++) path.push([from.x, back + ((top - back) * i) / 16]);
+    if (profile.touch) {
+      const cdp = await page.context().newCDPSession(page);
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      await touch("touchStart", from.x, from.y);
+      await page.waitForTimeout(450);
+      for (const [x, y] of path) (await touch("touchMove", x, y), await page.waitForTimeout(25));
+      await page.waitForTimeout(200);
+      await touch("touchEnd", 0, 0);
+      await cdp.detach();
+    } else {
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      for (const [x, y] of path) (await page.mouse.move(x, y), await page.waitForTimeout(20));
+      await page.mouse.up();
+    }
+    await settle(900);
+    const returned = (await titles()).indexOf(before[0]);
+    if (returned !== 0) fail(`todos reorder: a task carried sideways and back, then to the top, was left at position ${returned + 1}, expected 1`);
   });
   await step("todos carry to another day", async () => {
     // A task dragged onto a list in the folders moves there. On touch the folders are beside the

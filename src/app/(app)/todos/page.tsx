@@ -827,7 +827,10 @@ function List({
               {groupName(key)}
             </h2>
           )}
-          <Reorder.Group axis="y" values={items} onReorder={(o) => !away.current && reorder(key, o)} as="ul">
+          {/* The group asks for one new order at a time and waits for `values` to change before it
+              asks again. An order turned down (the row is away from the list) must still hand it a
+              fresh list, or it waits for good and the row never trades places again. */}
+          <Reorder.Group axis="y" values={items} onReorder={(o) => (away.current ? setRows((rs) => rs && [...rs]) : reorder(key, o))} as="ul">
             <AnimatePresence initial={false}>
               {items.map((r) => (
                 <TodoRow
