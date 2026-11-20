@@ -55,6 +55,8 @@ struct TodosScreen: View {
                 if slow { await store.refreshFolders() }
                 if store.isBin {
                     if slow { await store.refreshBin() }
+                } else if store.isPlan {
+                    if store.openID == nil { await store.refreshPlan() }
                 } else if store.openID == nil {
                     await store.refreshList()
                 }
@@ -104,6 +106,9 @@ private struct TodosSection: View {
         } else if store.isBin {
             TodosBinView(store: store)
                 .transition(.opacity)
+        } else if store.isPlan {
+            TodosPlanView(store: store)
+                .transition(.opacity)
         } else {
             TodosListView(store: store)
                 .transition(.opacity)
@@ -135,6 +140,10 @@ private struct TodosFolderNav: View {
             if index == 2 && folder.key != "weekend" { gap = true }
             if folder.guest != nil && index > 0 && folders[index - 1].guest == nil { gap = true }
             out.append(TodosFolderEntry(key: folder.key, label: folder.label, count: folder.count, gap: gap, dim: false))
+            // the plan sits with "All": both look across the lists
+            if folder.key == TodosStore.allKey {
+                out.append(TodosFolderEntry(key: TodosStore.planKey, label: "Plan", count: 0, gap: false, dim: false))
+            }
         }
         // appears only while there is something to bring back
         if store.binCount > 0 {

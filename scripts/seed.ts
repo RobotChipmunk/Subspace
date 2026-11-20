@@ -11,6 +11,7 @@ import { setModule } from "../src/lib/core/rail";
 import { ensureSystem, propose } from "../src/lib/core/rules";
 import { ensureCurrent } from "../src/lib/core/current";
 import { addItem, connect as connectPieces, createIdea, getIdea, grow, relate, sayRipe, updateItem } from "../src/lib/core/ideas";
+import { createPlanItem } from "../src/lib/core/plan";
 import { createTodo, updateTodo } from "../src/lib/core/todos";
 import { createTracker } from "../src/lib/core/trackers";
 import { agentById, newId, ownerAgent } from "../src/lib/core/util";
@@ -116,11 +117,17 @@ async function main() {
   const t = await createTodo(owner, { title: "Review robotics allocation", view: "today", tags: ["finance"] });
   await updateTodo(owner, t.id, { notes: "## What I want\n\nDecide whether to add to Agility before year end. @claude can you pull the numbers?\n\n- [ ] Compare revenue multiples\n- [ ] Check lock-up dates" });
   await updateTodo(claude, t.id, { notes_append: "## Numbers\n\n- Figure: $39B valuation, about 95x revenue\n- Agility: $4.1B, about 31x revenue\n- [ ] Lock-up on the secondary ends 12 December" });
-  await createTodo(owner, { title: "Book parent-teacher conference", view: "today" });
+  // The plan: three priorities, one with parts, and one part with nothing under it yet.
+  const year = await createPlanItem(owner, { title: "Start the year with a clear plan" });
+  const goals = await createPlanItem(owner, { title: "Goals for the first quarter", parent: year.id });
+  await createPlanItem(owner, { title: "A budget we both agree on", parent: year.id });
+  const school = await createPlanItem(owner, { title: "Be around more for school" });
+  const trip = await createPlanItem(owner, { title: "A trip abroad in spring" });
+  await createTodo(owner, { title: "Book parent-teacher conference", view: "today", plan: school.id });
   await createTodo(atlas, { title: "Put compost bin out Sunday night", view: "weekend" });
   await createTodo(owner, { title: "Call the roofer back", view: "today", tags: ["house"] });
-  await createTodo(owner, { title: "Draft Q1 goals", view: "week" });
-  await createTodo(owner, { title: "Renew passport", view: "next_week" });
+  await createTodo(owner, { title: "Draft Q1 goals", view: "week", plan: goals.id });
+  await createTodo(owner, { title: "Renew passport", view: "next_week", plan: trip.id });
   // two tags on one task, so narrowing to both keeps it and drops the other "house" task
   await createTodo(owner, { title: "Replace the hallway light", view: "backlog", tags: ["house", "diy"] });
   // Something an agent needs the owner to decide: a task in their list, tagged, with the detail in its notes.

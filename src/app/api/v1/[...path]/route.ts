@@ -16,6 +16,7 @@ import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
+import { createPlanItem, deletePlanItem, listPlan, updatePlanItem } from "@/lib/core/plan";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
 import { ApiError, listAgents, listGuests, setSetting, timezone, type Agent } from "@/lib/core/util";
@@ -53,8 +54,13 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^posts\/([^/]+)\/replies$/, ({ actor, body }, id) => createReply(actor, id, body.body, body.page)],
 
   ["GET", /^todos\/folders$/, () => folders()],
+  // the plan: priorities and their parts. A task joins a line with PATCH todos/<id> { plan: <line id> | null }
+  ["GET", /^plan$/, async () => ({ plan: await listPlan() })],
+  ["POST", /^plan$/, ({ actor, body }) => createPlanItem(actor, body)],
+  ["PATCH", /^plan\/([^/]+)$/, ({ actor, body }, id) => updatePlanItem(actor, id, body)],
+  ["DELETE", /^plan\/([^/]+)$/, async ({ actor }, id) => (await deletePlanItem(actor, id), { ok: true })],
   // one list ("all" is every task), optionally only the tasks carrying every one of ?tags=a,b
-  ["GET", /^todos$/, ({ url }) => listTodos(url.searchParams.get("view") || "today", { tags: url.searchParams.get("tags")?.split(",").filter(Boolean) })],
+  ["GET", /^todos$/, ({ url }) => listTodos(url.searchParams.get("view") || "today", { tags: url.searchParams.get("tags")?.split(",").filter(Boolean), plan: url.searchParams.get("plan") || undefined })],
   ["POST", /^todos$/, ({ actor, body }) => createTodo(actor, body)],
   ["POST", /^todos\/reorder$/, async ({ actor, body }) => (await reorderTodos(actor, body.ids ?? []), { ok: true })],
   ["GET", /^todos\/bin$/, async () => ({ todos: await binnedTodos(), keep_days: BIN_DAYS })],

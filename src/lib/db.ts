@@ -583,6 +583,18 @@ const MIGRATIONS: string[] = [
           i.updated_at
    FROM ideas i WHERE i.deleted_at IS NULL
    ON CONFLICT (entity_type, entity_id) DO NOTHING`,
+  // The plan: the owner's priorities for now, each with parts one level down, and the task's place in it.
+  `CREATE TABLE IF NOT EXISTS plan_items (
+     id text PRIMARY KEY,
+     parent_id text,
+     title text NOT NULL,
+     position double precision NOT NULL DEFAULT 0,
+     created_by text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now()
+   );
+   ALTER TABLE todos ADD COLUMN IF NOT EXISTS plan_id text;
+   CREATE INDEX IF NOT EXISTS todos_plan ON todos (plan_id) WHERE plan_id IS NOT NULL`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

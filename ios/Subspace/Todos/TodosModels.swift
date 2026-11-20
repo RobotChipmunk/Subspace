@@ -22,12 +22,24 @@ struct TodosTagCount: Codable, Identifiable, Hashable {
     var id: String { tag }
 }
 
+/// One line of the plan: a priority, or (with `parent_id`) a part of one. They arrive in the
+/// owner's order, each priority followed by its parts.
+struct TodosPlanItem: Codable, Identifiable, Hashable {
+    let id: String
+    var parent_id: String?
+    var title: String
+    /// Unfinished tasks that are part of this line itself (a priority's parts are counted on the parts).
+    var open: Int?
+}
+
 struct TodosFoldersResponse: Codable {
     var today: String
     var folders: [TodosFolder]
     var bin: Int
     /// Every tag the tasks carry, most used first. Older servers send none.
     var tags: [TodosTagCount]?
+    /// The plan. Older servers send none.
+    var plan: [TodosPlanItem]?
 }
 
 struct TodosListResponse: Codable {

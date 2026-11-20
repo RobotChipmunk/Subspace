@@ -9,6 +9,10 @@ final class TodosStore {
     static let binKey = "bin"
     /// Every task, wherever it is: a view across the lists rather than a place of its own.
     static let allKey = "all"
+    /// The plan: the owner's priorities with the tasks under each. Like "All", a view across the lists.
+    static let planKey = "plan"
+    /// The tasks that are part of no line of the plan.
+    static let noLine = "none"
 
     @ObservationIgnored var app: AppModel? = nil
 
@@ -23,6 +27,17 @@ final class TodosStore {
     var filter: [String] = TodosStore.keptFilter
     /// The choice, held for as long as the app runs, so a new screen starts with it.
     @ObservationIgnored private static var keptFilter: [String] = []
+
+    /// The plan, in the owner's order: each priority followed by its parts.
+    var plan: [TodosPlanItem] = []
+    /// The line of the plan the lists are narrowed to, kept the way the tags are.
+    var focus: String? = TodosStore.keptFocus
+    @ObservationIgnored private static var keptFocus: String? = nil
+    /// The lines of the plan that are open, and the tasks of each once they have arrived.
+    var openLines: Set<String> = []
+    var planTasks: [String: [Todo]] = [:]
+    /// The task being carried in the plan, and the line it is part of.
+    @ObservationIgnored var planDragging: (id: String, line: String)? = nil
 
     /// The selected folder's key, or `binKey`.
     var view: String = "today"
@@ -53,6 +68,8 @@ final class TodosStore {
     // MARK: Reading
 
     var isBin: Bool { view == Self.binKey }
+
+    var isPlan: Bool { view == Self.planKey }
 
     var folder: TodosFolder? {
         let key = view
@@ -120,12 +137,47 @@ final class TodosStore {
     /// there are any.
     var shownRows: [Todo]? {
         guard let rows else { return nil }
-        if filter.isEmpty { return rows }
+        if filter.isEmpty && focus == nil { return rows }
         let chosen = filter
+        let scope: Set<String>? = focus.map { planScope($0) }
         return rows.filter { row in
             let tags = row.tags ?? []
-            return chosen.allSatisfy { tags.contains($0) }
+            guard chosen.allSatisfy({ tags.contains($0) }) else { return false }
+            guard let scope else { return true }
+            guard let line = row.plan_id else { return false }
+            return scope.contains(line)
         }
+    }
+
+    /// A line of the plan and, for a priority, its parts: the lines whose tasks count as under it.
+    func planScope(_ id: String) -> Set<String> {
+        var out: Set<String> = [id]
+        for item in plan where item.parent_id == id { out.insert(item.id) }
+        return out
+    }
+
+    /// The lines of the plan this list has tasks for (a priority counts its parts' tasks), and
+    /// the chosen one whatever it has, so a choice can always be taken off.
+    var viewLines: [TodosPlanItem] {
+        var used: Set<String> = []
+        for row in rows ?? [] {
+            if let line = row.plan_id { used.insert(line) }
+        }
+        let chosen = focus
+        return plan.filter { item in
+            item.id == chosen || !planScope(item.id).isDisjoint(with: used)
+        }
+    }
+
+    var focusedLine: TodosPlanItem? {
+        guard let focus else { return nil }
+        return plan.first { $0.id == focus }
+    }
+
+    /// Narrows the lists to one line of the plan, or takes that choice off.
+    func setFocus(_ id: String?) {
+        withAnimation(.ssSoft) { focus = id }
+        Self.keptFocus = id
     }
 
     /// The tags on this list's tasks, most used first, and whichever are chosen even when no
@@ -251,8 +303,8 @@ final class TodosStore {
 
     /// The line under the list's title.
     var listSub: String? {
-        // narrowed to some tags, it counts what is left
-        if filter.isEmpty {
+        // narrowed to some tags or to a line of the plan, it counts what is left
+        if filter.isEmpty && focus == nil {
             if view == "today", let today { return TodosDates.longDate(today) }
             if TodosDates.isDate(view) { return TodosDates.longDate(view) }
             if view == "backlog" { return "No date. Pull from here when you have room." }
@@ -349,6 +401,8 @@ final class TodosStore {
     func refreshCurrent() async {
         if isBin {
             await refreshBin()
+        } else if isPlan {
+            await refreshPlan()
         } else {
             await refreshList()
         }
@@ -362,10 +416,13 @@ final class TodosStore {
             today = reply.today
             binCount = reply.bin
             knownTags = reply.tags ?? []
+            plan = reply.plan ?? []
             foldersLoaded = true
         }
+        // a line that has left the plan cannot go on narrowing the lists
+        if let chosen = focus, !plan.contains(where: { $0.id == chosen }) { setFocus(nil) }
         // If the day rolls over a dated folder may be gone; the bin's entry goes once it is empty.
-        let stranded = isBin ? reply.bin == 0 : folder == nil
+        let stranded = isBin ? reply.bin == 0 : (isPlan ? false : folder == nil)
         if stranded {
             generation += 1
             withAnimation(.ssSpring) {
@@ -378,7 +435,7 @@ final class TodosStore {
     }
 
     func refreshList() async {
-        guard let api = app?.api, !isBin else { return }
+        guard let api = app?.api, !isBin, !isPlan else { return }
         // a row is in the air: leave the order alone
         if let at = dragAt, Date().timeIntervalSince(at) < 8 { return }
         let asked = view
@@ -493,7 +550,14 @@ final class TodosStore {
             ai_unseen: false, created_by: nil, guest_id: nil, created_at: nil, updated_at: nil, has_notes: false
         )
         temp.tags = tags
-        let body: [String: Any] = tags.isEmpty ? ["title": title, "view": target] : ["title": title, "view": target, "tags": tags]
+        var body: [String: Any] = ["title": title, "view": target]
+        if !tags.isEmpty { body["tags"] = tags }
+        // and the line of the plan it is narrowed to
+        if let line = focusedLine {
+            temp.plan_id = line.id
+            temp.plan = line.title
+            body["plan"] = line.id
+        }
         generation += 1
         unsaved.append(temp)
         withAnimation(.ssSoft) {
@@ -688,6 +752,157 @@ final class TodosStore {
                 problem = error.localizedDescription
             }
             await refreshList()
+        }
+    }
+
+    // MARK: The plan
+
+    /// The tasks that are part of one line itself, soonest first ("none": those part of nothing).
+    /// A priority's own list holds only its own tasks; those of its parts are under the parts.
+    func refreshLine(_ key: String) async {
+        guard let api = app?.api else { return }
+        guard let reply: TodosListResponse = try? await api.get("todos?view=all&plan=" + q(key)) else { return }
+        let mine = reply.todos.filter { todo in
+            key == Self.noLine ? todo.plan_id == nil : todo.plan_id == key
+        }
+        if planTasks[key] != mine {
+            withAnimation(.ssSoft) { planTasks[key] = mine }
+        }
+        if let day = reply.today { today = day }
+    }
+
+    func refreshPlan() async {
+        for key in openLines.sorted() {
+            await refreshLine(key)
+        }
+    }
+
+    private func planChanged() async {
+        await refreshFolders()
+        await refreshPlan()
+    }
+
+    func toggleLine(_ key: String) {
+        if openLines.contains(key) {
+            withAnimation(.ssSoft) { _ = openLines.remove(key) }
+        } else {
+            withAnimation(.ssSoft) { _ = openLines.insert(key) }
+            Task { await refreshLine(key) }
+        }
+    }
+
+    /// Adds a priority, or with `parent` a part of one. False means it could not be saved.
+    func addLine(_ title: String, parent: String? = nil) async -> Bool {
+        guard let api = app?.api else { return false }
+        var body: [String: Any] = ["title": title]
+        if let parent { body["parent"] = parent }
+        do {
+            try await api.send("POST", "plan", body: body)
+            problem = nil
+            await refreshFolders()
+            return true
+        } catch {
+            problem = error.localizedDescription
+            return false
+        }
+    }
+
+    func renameLine(_ id: String, to title: String) async {
+        guard let api = app?.api else { return }
+        do {
+            try await api.send("PATCH", "plan/\(id)", body: ["title": title])
+            problem = nil
+        } catch {
+            problem = error.localizedDescription
+        }
+        await refreshFolders()
+    }
+
+    /// Takes a line out of the plan, and a priority's parts with it. Its tasks stay in their lists.
+    func removeLine(_ id: String) async {
+        guard let api = app?.api else { return }
+        do {
+            try await api.send("DELETE", "plan/\(id)")
+            problem = nil
+            for key in planScope(id) {
+                openLines.remove(key)
+                planTasks[key] = nil
+            }
+        } catch {
+            problem = error.localizedDescription
+        }
+        await planChanged()
+    }
+
+    /// A task typed under a line: planning is not scheduling, so it waits in the backlog.
+    func addPlanTask(_ title: String, to line: String) async -> Bool {
+        guard let api = app?.api else { return false }
+        do {
+            try await api.send("POST", "todos", body: ["title": title, "view": "backlog", "plan": line])
+            problem = nil
+            await planChanged()
+            return true
+        } catch {
+            problem = error.localizedDescription
+            return false
+        }
+    }
+
+    func togglePlanTask(_ id: String, in line: String) async {
+        guard let api = app?.api, var list = planTasks[line], let index = list.firstIndex(where: { $0.id == id }) else { return }
+        let was = list[index].done
+        list[index].done = !was
+        withAnimation(.ssSpring) { planTasks[line] = list }
+        do {
+            try await api.send("PATCH", "todos/\(id)", body: ["done": !was])
+            problem = nil
+        } catch {
+            problem = error.localizedDescription
+        }
+        await planChanged()
+        await app?.refreshRail()
+    }
+
+    /// Sends a task under a line to another list (today, the backlog and so on).
+    func movePlanTask(_ id: String, to key: String) async {
+        guard let api = app?.api else { return }
+        do {
+            try await api.send("PATCH", "todos/\(id)", body: ["view": key])
+            problem = nil
+        } catch {
+            problem = error.localizedDescription
+        }
+        await planChanged()
+    }
+
+    /// Makes a task part of another line, or of none. It leaves the line it was under at once.
+    func setLine(_ id: String, from line: String, to target: String?) async {
+        guard let api = app?.api, (target ?? Self.noLine) != line else { return }
+        if var list = planTasks[line] {
+            list.removeAll { $0.id == id }
+            withAnimation(.ssSoft) { planTasks[line] = list }
+        }
+        do {
+            try await api.send("PATCH", "todos/\(id)", body: ["plan": target ?? "none"])
+            problem = nil
+        } catch {
+            problem = error.localizedDescription
+        }
+        await planChanged()
+    }
+
+    /// The carried task was let go over a line of the plan.
+    func dropOnLine(_ key: String) {
+        guard let carried = planDragging else { return }
+        planDragging = nil
+        guard carried.line != key else { return }
+        Task { await setLine(carried.id, from: carried.line, to: key == Self.noLine ? nil : key) }
+    }
+
+    /// The lists a task can be sent to from a menu: the same choices as the web's "Move to".
+    func moveOptions(guest: String?) -> [TodosFolder] {
+        folders.filter { folder in
+            folder.key != "week" && folder.key != "later" && folder.key != Self.allKey && (folder.guest == nil || folder.guest == guest)
         }
     }
 

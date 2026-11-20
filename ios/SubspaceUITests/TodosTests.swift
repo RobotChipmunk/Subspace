@@ -65,6 +65,91 @@ final class TodosTests: SubspaceTestCase {
         expect(row("Review robotics allocation"), "every task again, once the choice is off")
     }
 
+    /// A line of the plan, by the words on it.
+    private func planLine(_ title: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.plan.line.' AND label BEGINSWITH %@", title)).firstMatch
+    }
+
+    /// A task under an open line of the plan.
+    private func planRow(_ title: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.plan.row.' AND label BEGINSWITH %@", title)).firstMatch
+    }
+
+    private func first(_ prefix: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).firstMatch
+    }
+
+    func testThePlan() {
+        launchSignedIn()
+        go("todos")
+        // The plan sits with "All" in the folders: priorities, their parts, and the tasks under each.
+        folder("plan").tap()
+        expect(planLine("Start the year with a clear plan"), "a priority in the plan")
+        let gap = expect(planLine("A budget we both agree on"), "a part with no tasks")
+        XCTAssertTrue(gap.label.contains("Nothing yet"), "A line with no unfinished task should say Nothing yet, not \(gap.label)")
+        shot("17-todos-plan")
+
+        // Tapping a line opens its tasks in place, each saying where it sits.
+        let goals = expect(planLine("Goals for the first quarter"), "a part with a task")
+        XCTAssertFalse(goals.label.contains("Nothing yet"), "A line with an unfinished task should say nothing at its end")
+        goals.tap()
+        expect(planRow("Draft Q1 goals"), "the task under the opened line")
+        shot("17-todos-plan-open")
+        goals.tap()
+        waitToVanish(planRow("Draft Q1 goals"), "the tasks of a line that was closed")
+
+        // A new priority goes at the end, with nothing under it yet.
+        let name = "Sleep better \(Int.random(in: 1000...9999))"
+        let adder = app.textFields["todos.plan.addPriority"]
+        bringIntoView(adder)
+        enter(name + "\n", into: adder, "the field that adds a priority")
+        let line = expect(planLine(name), "the new priority")
+        XCTAssertTrue(line.label.contains("Nothing yet"), "A new priority should say Nothing yet")
+
+        // A task typed under it waits in the backlog, and the line no longer says Nothing yet.
+        bringIntoView(line)
+        line.tap()
+        let task = "Buy blackout blinds \(Int.random(in: 1000...9999))"
+        let field = first("todos.plan.add.")
+        bringIntoView(field)
+        enter(task + "\n", into: field, "the field that adds a task to the line")
+        expect(planRow(task), "the new task under its line")
+        let place = expect(first("todos.plan.place."), "where the new task sits")
+        XCTAssertTrue(place.label.hasPrefix("Backlog"), "A task added in the plan should wait in the backlog, not \(place.label)")
+        shot("17-todos-plan-added")
+
+        // Back in the lists the task carries its line, and the list can be narrowed to it.
+        folder("backlog").tap()
+        expect(row(task), "the task, in the backlog")
+        expect(element("todos.plan.filter"), "the priority filter, on a list with tasks in the plan").tap()
+        expect(app.buttons[name], "the new priority among the lines to choose from").tap()
+        waitToVanish(row("Replace the hallway light"), "a task that is not part of the chosen line")
+        expect(row(task), "the task that is part of the chosen line")
+        XCTAssertEqual(element("todos.plan.filter").label, "Priority: \(name)", "The filter should name the chosen line")
+        shot("17-todos-plan-filter")
+        element("todos.plan.filter").tap()
+        expect(app.buttons["Show all"], "Show all in the priority menu").tap()
+        expect(row("Replace the hallway light"), "every task again, once the choice is off")
+
+        // An open task says what it is part of.
+        row(task).tap()
+        let partOf = expect(element("todos.detail.partOf"), "the Part of pill on the task")
+        XCTAssertEqual(partOf.label, "Part of. Now: \(name)", "The task should say which line it is part of")
+        // Deleted, so the next test finds the backlog as it was.
+        let delete = element("todos.detail.delete")
+        expect(delete, "the delete control").tap()
+        delete.tap()
+        waitToVanish(row(task), "the deleted task")
+
+        // Taking the line out of the plan: the first tap arms, the second does it.
+        folder("plan").tap()
+        let remove = first("todos.plan.remove.")
+        bringIntoView(remove)
+        expect(remove, "the control that removes the open line").tap()
+        remove.tap()
+        waitToVanish(planLine(name), "the removed priority")
+    }
+
     func testAddATagToATaskAndTakeItOff() {
         launchSignedIn()
         go("todos")

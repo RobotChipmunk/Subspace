@@ -1,10 +1,10 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { ArrowUpRight, Check, ChevronLeft, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Avatar } from "@/components/bits";
 import { DatePill } from "@/components/DatePicker";
@@ -12,14 +12,21 @@ import { Editor } from "@/components/Editor";
 import { Floating } from "@/components/Floating";
 import { TagPills } from "@/components/TagPills";
 import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
+import type { PlanItem } from "@/lib/core/plan";
 import type { RailAction } from "@/lib/core/rail";
 import type { BinnedTodo, Folder, Repeat, TagCount, Todo } from "@/lib/core/todos";
 
 type Row = Omit<Todo, "notes"> & { has_notes: boolean };
-type Folders = { today: string; folders: Folder[]; bin: number; tags?: TagCount[] };
+type Folders = { today: string; folders: Folder[]; bin: number; tags?: TagCount[]; plan?: PlanItem[] };
 const BIN = "bin";
 /** Every task, wherever it is: a view across the lists rather than a place of its own. */
 const ALL = "all";
+/** The plan: the owner's priorities with the tasks under each. Like "All" it is a view across the lists, not a place. */
+const PLAN = "plan";
+/** The lists a task can be sent to from a menu: every place but the ones that only show what is elsewhere. */
+const movable = (folders: Folder[], guest: string | null) => folders.filter((x) => x.key !== "week" && x.key !== "later" && x.key !== ALL && (!x.guest || x.guest === guest));
+/** A line of the plan and, for a priority, its parts: the lines whose tasks count as being under it. */
+const planScope = (plan: PlanItem[], id: string) => new Set([id, ...plan.filter((i) => i.parent_id === id).map((i) => i.id)]);
 
 const dayName = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" });
 const longDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -135,6 +142,8 @@ function FromTag({ id }: { id: string | null }) {
 
 /** Where the chosen tags are kept while the owner is elsewhere in the app. */
 const FILTER_KEY = "ss_todo_tags";
+/** And the line of the plan they are narrowed to. */
+const FOCUS_KEY = "ss_todo_plan";
 
 export default function TodosPage() {
   // the address is read (?open=), which needs a boundary above it
@@ -171,6 +180,26 @@ function Todos() {
       // private windows may refuse; the choice then lasts only while this screen is up
     }
   };
+  // the line of the plan the lists are narrowed to, kept the same way
+  const [focus, setFocusNow] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      setFocusNow(sessionStorage.getItem(FOCUS_KEY) || null);
+    } catch {
+      // no storage: start with no choice
+    }
+  }, []);
+  const setFocus = (id: string | null) => {
+    setFocusNow(id);
+    try {
+      if (id) sessionStorage.setItem(FOCUS_KEY, id);
+      else sessionStorage.removeItem(FOCUS_KEY);
+    } catch {
+      // as above
+    }
+  };
+  // the lines of the plan that are open; kept here so they are still open on coming back from a task
+  const [openLines, setOpenLines] = useState<string[]>([]);
   const show = (key: string) => (setView(key), setOpenId(null));
 
   // The rail links here with ?open=<task id> to show one task, also while this screen is already up.
@@ -182,10 +211,12 @@ function Todos() {
 
   // If the day rolls over while the app is open, a dated folder may no longer exist.
   useEffect(() => {
-    if (f && !folder && view !== BIN) setView("today");
+    if (f && !folder && view !== BIN && view !== PLAN) setView("today");
+    // a line that has left the plan cannot go on narrowing the lists
+    if (f && focus && !f.plan?.some((i) => i.id === focus)) setFocus(null);
     // the bin's entry goes away once it is empty; do not strand the owner on a list with no way back
     if (f && view === BIN && !f.bin) setView("today");
-  }, [f, folder, view]);
+  }, [f, folder, view, focus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="mx-auto flex max-w-[920px] gap-8 max-md:flex-col max-md:gap-4">
@@ -195,8 +226,8 @@ function Todos() {
             const on = x.key === view;
             const gap = x.key === "next_week" || x.key === ALL || (i === 2 && x.key !== "weekend") || (!!x.guest && !f.folders[i - 1]?.guest);
             return (
+              <Fragment key={x.key}>
               <button
-                key={x.key}
                 data-folder={x.key}
                 data-over={carry === x.key || undefined}
                 onClick={() => show(x.key)}
@@ -208,6 +239,14 @@ function Todos() {
                   {x.count || ""}
                 </motion.span>
               </button>
+              {/* the plan sits with "All": both look across the lists */}
+              {x.key === ALL && (
+                <button data-folder={PLAN} onClick={() => show(PLAN)} className={`relative flex h-9 flex-none items-center gap-2 rounded-xl px-3 text-left text-[14.5px] transition-colors ${view === PLAN ? "font-semibold text-ink" : "text-ink2 hover:text-ink"}`}>
+                  {view === PLAN && <motion.span layoutId="folder" transition={spring} className="glass absolute inset-0 rounded-xl" />}
+                  <span className="relative flex-1 whitespace-nowrap">Plan</span>
+                </button>
+              )}
+              </Fragment>
             );
           })}
           {/* appears only while there is something to bring back */}
@@ -234,11 +273,17 @@ function Todos() {
         <AnimatePresence mode="wait" initial={false}>
           {openId ? (
             <motion.div key="detail" initial={{ opacity: 0, x: 28 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 28 }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}>
-              <Detail key={openId} id={openId} backLabel={folder?.label ?? "Back"} folders={f?.folders ?? []} tags={f?.tags ?? []} today={f?.today} onOpen={setOpenId} onBack={() => setOpenId(null)} />
+              <Detail key={openId} id={openId} backLabel={folder?.label ?? (view === PLAN ? "Plan" : "Back")} folders={f?.folders ?? []} tags={f?.tags ?? []} plan={f?.plan ?? []} today={f?.today} onOpen={setOpenId} onBack={() => setOpenId(null)} />
             </motion.div>
           ) : (
             <motion.div key={"list-" + view} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}>
-              {view === BIN ? <Bin /> : <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} filter={filter} onFilter={setFilter} onOpen={setOpenId} onCarry={setCarry} />}
+              {view === BIN ? (
+                <Bin />
+              ) : view === PLAN ? (
+                <Plan plan={f?.plan} folders={f?.folders ?? []} today={f?.today} open={openLines} onOpenLines={setOpenLines} onOpen={setOpenId} />
+              ) : (
+                <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} filter={filter} onFilter={setFilter} plan={f?.plan ?? []} focus={focus} onFocus={setFocus} onOpen={setOpenId} onCarry={setCarry} />
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -483,14 +528,20 @@ function TodoRow({
           {tag && <FromTag id={r.guest_id} />}
           {r.done && r.next_id && r.next_date && <NextNote date={r.next_date} today={today} onOpen={() => onOpenNext(r.next_id!)} className="mt-0.5" />}
         </span>
-        {!!r.tags?.length && (
+        {/* what it is part of comes first, then its tags; two chips at most, so the row stays quiet */}
+        {(!!r.plan || !!r.tags?.length) && (
           <span data-tags className="mt-[4px] flex max-w-[46%] flex-none flex-wrap justify-end gap-1">
-            {r.tags.slice(0, 2).map((t) => (
+            {r.plan && (
+              <span data-part-of className="max-w-[150px] truncate rounded-full bg-fill px-2 py-[1px] text-[11.5px] font-medium text-ink2">
+                {r.plan}
+              </span>
+            )}
+            {(r.tags ?? []).slice(0, r.plan ? 1 : 2).map((t) => (
               <span key={t} className="max-w-[112px] truncate rounded-full bg-fill px-2 py-[1px] text-[11.5px] font-medium text-ink2">
                 {t}
               </span>
             ))}
-            {r.tags.length > 2 && <span className="py-[1px] text-[11.5px] text-ink3">+{r.tags.length - 2}</span>}
+            {(r.tags?.length ?? 0) > (r.plan ? 1 : 2) && <span className="py-[1px] text-[11.5px] text-ink3">+{r.tags.length - (r.plan ? 1 : 2)}</span>}
           </span>
         )}
         {r.repeat && !r.done && <RepeatIcon size={14} aria-label="Repeats" className="mt-[6px] flex-none text-ink3" />}
@@ -562,6 +613,353 @@ function TagFilter({ tags, chosen, onChange }: { tags: TagCount[]; chosen: strin
   );
 }
 
+/**
+ * Narrows a list to the tasks that are part of one line of the plan (a priority brings its parts
+ * with it). It sits beside the tag filter and behaves the same way: quiet until a choice is made,
+ * then accent and named, and the choice follows from list to list. One line at a time.
+ */
+function PlanFilter({ lines, chosen, onChange }: { lines: PlanItem[]; chosen: string | null; onChange: (id: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const on = lines.find((i) => i.id === chosen);
+  return (
+    <>
+      <button
+        ref={btn}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={on ? `Priority: ${on.title}` : "Filter by priority"}
+        data-plan-filter
+        className={`flex h-8 max-w-[200px] flex-none items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium transition-colors ${on ? "bg-accent-soft text-accent" : open ? "bg-fill text-ink2" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+      >
+        <Flag size={14} className="flex-none" />
+        <span className="truncate">{on ? on.title : "Priority"}</span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <Floating
+            anchor={() => {
+              const r = btn.current?.getBoundingClientRect();
+              return r ? { left: r.right - PLAN_MENU_W, top: r.top, bottom: r.bottom } : null;
+            }}
+            inside={() => btn.current}
+            onDismiss={() => setOpen(false)}
+          >
+            <motion.div role="menu" aria-label="Priority" initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={spring} style={{ width: PLAN_MENU_W, transformOrigin: "top right" }} className="menu scroll max-h-[min(360px,60vh)] rounded-2xl p-1.5">
+              {lines.map((i) => (
+                <button key={i.id} role="menuitemradio" aria-checked={i.id === chosen} onClick={() => (onChange(i.id === chosen ? null : i.id), setOpen(false))} className={`flex min-h-9 w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-[14px] hover:bg-fill2 ${i.parent_id ? "" : "font-medium"}`}>
+                  <Check size={15} strokeWidth={2.4} className={`flex-none text-accent transition-opacity ${i.id === chosen ? "" : "opacity-0"}`} />
+                  <span className={`line-clamp-2 min-w-0 flex-1 ${i.parent_id ? "pl-3" : ""}`}>{i.title}</span>
+                </button>
+              ))}
+              {on && (
+                <button role="menuitem" onClick={() => (onChange(null), setOpen(false))} className="mt-1 flex min-h-9 w-full items-center rounded-xl px-2 py-1.5 pl-[31px] text-left text-[14px] text-ink2 hover:bg-fill2">
+                  Show all
+                </button>
+              )}
+            </motion.div>
+          </Floating>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+const PLAN_MENU_W = 256;
+
+type PlanTools = {
+  today?: string;
+  folders: Folder[];
+  onOpen: (id: string) => void;
+  /** the line a carried task is held over, or null */
+  onOver: (line: string | null) => void;
+  refresh: () => void;
+};
+
+/**
+ * The plan: the owner's priorities as a short outline, each with parts one level down, and the
+ * tasks under each line. It is where they step back and look at everything; the day lists are
+ * where the work is done. A line says "Nothing yet" while no unfinished task is part of it, which
+ * is the one thing planning needs to see. Nothing is counted.
+ *
+ * Tapping a line opens its tasks in place. A task shows where it sits (Today, This week, Backlog)
+ * and that word moves it; carrying a task onto another line makes it part of that line.
+ */
+function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: PlanItem[]; folders: Folder[]; today?: string; open: string[]; onOpenLines: (ids: string[]) => void; onOpen: (id: string) => void }) {
+  const { mutate: globalMutate } = useSWRConfig();
+  const refresh = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
+  const [over, setOver] = useState<string | null>(null);
+  // the priority a part is being typed for
+  const [partFor, setPartFor] = useState<string | null>(null);
+  const [part, setPart] = useState("");
+  const [priority, setPriority] = useState("");
+  const tools: PlanTools = { today, folders, onOpen, onOver: setOver, refresh };
+  const toggle = (id: string) => onOpenLines(open.includes(id) ? open.filter((x) => x !== id) : [...open, id]);
+
+  async function addLine(title: string, parent?: string) {
+    if (!title.trim()) return;
+    await api("plan", { body: { title, ...(parent ? { parent } : {}) } });
+    refresh();
+  }
+  const tops = (plan ?? []).filter((i) => !i.parent_id);
+  const partsOf = (id: string) => (plan ?? []).filter((i) => i.parent_id === id);
+
+  return (
+    <div data-plan>
+      <header className="mb-5 px-1">
+        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Plan</h1>
+        <p className="mt-0.5 text-[14px] text-ink2">What you are working towards, and the tasks under each.</p>
+      </header>
+
+      {tops.map((top) => {
+        const parts = partsOf(top.id);
+        return (
+          <div key={top.id} className="mb-3">
+            <PlanLine item={top} empty={top.open + parts.reduce((n, p) => n + p.open, 0) === 0} open={open.includes(top.id)} over={over === top.id} onToggle={() => toggle(top.id)} tools={tools} />
+            {parts.map((p) => (
+              <PlanLine key={p.id} item={p} empty={p.open === 0} open={open.includes(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} tools={tools} />
+            ))}
+            {partFor === top.id ? (
+              <form onSubmit={(e) => (e.preventDefault(), addLine(part, top.id), setPart(""))} className="pl-6">
+                <input autoFocus value={part} onChange={(e) => setPart(e.target.value)} onBlur={() => (addLine(part, top.id), setPart(""), setPartFor(null))} onKeyDown={(e) => e.key === "Escape" && (setPart(""), setPartFor(null))} placeholder="Add a part" aria-label={`Add a part of ${top.title}`} className="w-full py-[7px] text-[15.5px]" />
+              </form>
+            ) : (
+              <button data-add-part={top.id} onClick={() => (setPart(""), setPartFor(top.id))} aria-label={`Add a part of ${top.title}`} className="block py-[7px] pl-6 text-[14px] text-ink3 transition-colors hover:text-ink2">
+                Add a part
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {plan && !tops.length && <p className="px-1 pb-2 text-ink3">Nothing here yet. Add what you are working towards; your tasks stay in their lists.</p>}
+
+      <form onSubmit={(e) => (e.preventDefault(), addLine(priority), setPriority(""))} className="mt-4 px-1">
+        <input value={priority} onChange={(e) => setPriority(e.target.value)} placeholder="Add a priority" aria-label="Add a priority" className="w-full py-[7px] text-[17px] font-semibold tracking-[-0.015em]" />
+      </form>
+
+      {tops.length > 0 && (
+        <div className="mt-6">
+          <PlanLine item={null} empty={false} open={open.includes("none")} over={over === "none"} onToggle={() => toggle("none")} tools={tools} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One line of the plan with, once opened, its tasks. Without an item it is "Not in the plan": the tasks that are part of nothing. */
+function PlanLine({ item, empty, open, over, onToggle, tools }: { item: PlanItem | null; empty: boolean; open: boolean; over: boolean; onToggle: () => void; tools: PlanTools }) {
+  const key = item?.id ?? "none";
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const top = !!item && !item.parent_id;
+  async function rename() {
+    const title = renaming?.trim();
+    setRenaming(null);
+    if (!item || !title || title === item.title) return;
+    await api(`plan/${item.id}`, { method: "PATCH", body: { title } });
+    tools.refresh();
+  }
+  return (
+    <div data-plan-line={key} data-over={over || undefined} className={`-mx-2 rounded-2xl px-2 transition-colors ${over ? "drop-target" : ""}`}>
+      {renaming !== null ? (
+        <form onSubmit={(e) => (e.preventDefault(), rename())} className={`flex min-h-10 items-center px-1 ${top || !item ? "" : "pl-6"}`}>
+          <input autoFocus value={renaming} onChange={(e) => setRenaming(e.target.value)} onBlur={rename} onKeyDown={(e) => e.key === "Escape" && setRenaming(null)} aria-label="Name" className={`w-full py-[7px] ${top ? "text-[17px] font-semibold tracking-[-0.015em]" : "text-[15.5px]"}`} />
+        </form>
+      ) : (
+        <button onClick={onToggle} aria-expanded={open} className={`flex min-h-10 w-full items-center gap-3 rounded-xl px-1 py-[7px] text-left ${top || !item ? "" : "pl-6"}`}>
+          <span className={`min-w-0 flex-1 break-words transition-colors ${over ? "text-accent" : ""} ${top ? "text-[17px] font-semibold tracking-[-0.015em]" : item ? "text-[15.5px]" : "text-[15.5px] text-ink2"}`}>{item?.title ?? "Not in the plan"}</span>
+          {empty && <span data-plan-empty className="flex-none whitespace-nowrap text-[12.5px] text-ink2">Nothing yet</span>}
+          <ChevronRight size={14} className={`flex-none text-ink3 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+        </button>
+      )}
+      {open && <PlanTasks line={key} item={item} tools={tools} onRename={() => setRenaming(item?.title ?? "")} />}
+    </div>
+  );
+}
+
+/** The tasks of one opened line, soonest first, with a way to add one and, for a line of the plan, to rename or remove it. */
+function PlanTasks({ line, item, tools, onRename }: { line: string; item: PlanItem | null; tools: PlanTools; onRename: () => void }) {
+  const { data, mutate } = useSWR<{ todos: Row[]; today: string }>(`todos?view=all&plan=${line}`, fetcher, { refreshInterval: 15_000 });
+  const [draft, setDraft] = useState("");
+  // a priority's own list holds only its own tasks: those of its parts are under the parts
+  const rows = data?.todos.filter((r) => (item ? r.plan_id === item.id : !r.plan_id));
+  const today = data?.today ?? tools.today;
+  const edit = (id: string, change: Partial<Row> | null) => mutate((cur) => (cur ? { ...cur, todos: change ? cur.todos.map((r) => (r.id === id ? { ...r, ...change } : r)) : cur.todos.filter((r) => r.id !== id) } : cur), false);
+  async function send(id: string, body: Record<string, unknown>) {
+    try {
+      await api(`todos/${id}`, { method: "PATCH", body });
+    } finally {
+      tools.refresh();
+    }
+  }
+  async function add() {
+    const title = draft.trim();
+    if (!title || !item) return;
+    setDraft("");
+    try {
+      // planning is not scheduling: a task added here waits in the backlog until it is given a place
+      await api("todos", { body: { title, view: "backlog", plan: item.id } });
+      tools.refresh();
+    } catch {
+      setDraft(title);
+    }
+  }
+  return (
+    <div className={`pb-2 ${item?.parent_id ? "pl-5" : ""}`}>
+      <ul>
+        {rows?.map((r) => (
+          <PlanRow
+            key={r.id}
+            r={r}
+            line={line}
+            today={today}
+            folders={tools.folders}
+            onOpen={() => tools.onOpen(r.id)}
+            onOver={tools.onOver}
+            onToggle={() => (edit(r.id, { done: !r.done }), send(r.id, { done: !r.done }))}
+            onPlace={(view) => send(r.id, { view })}
+            onDropped={(to) => (edit(r.id, null), send(r.id, { plan: to === "none" ? null : to }))}
+          />
+        ))}
+      </ul>
+      {item && (
+        <div className="flex items-center gap-3 px-1">
+          <span className="check flex-none opacity-40" />
+          <form onSubmit={(e) => (e.preventDefault(), add())} className="min-w-0 flex-1">
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task" aria-label={`Add a task to ${item.title}`} className="w-full py-[9px] text-[16px]" />
+          </form>
+          <button onClick={onRename} className="h-8 flex-none rounded-full px-2.5 text-[13px] text-ink3 transition-colors hover:bg-fill hover:text-ink2">
+            Rename
+          </button>
+          <ConfirmDelete label={`Remove ${item.title} from the plan`} confirm="Remove" size={15} onConfirm={async () => (await api(`plan/${item.id}`, { method: "DELETE" }), tools.refresh())} />
+        </div>
+      )}
+      {!item && rows && !rows.length && <p className="px-1 py-2 text-[14px] text-ink3">Every task is part of the plan.</p>}
+    </div>
+  );
+}
+
+/**
+ * A task under a line of the plan. Tapping it opens it; the word at its end says where it sits and
+ * moves it to another list. It lifts the way a task in a list does (at once with a mouse, after a
+ * short rest or a sideways pull with a finger) and, let go over another line, becomes part of it.
+ * Let go anywhere else it returns to where it was: the order here is the lists' own.
+ */
+function PlanRow({ r, line, today, folders, onToggle, onOpen, onOver, onPlace, onDropped }: { r: Row; line: string; today?: string; folders: Folder[]; onToggle: () => void; onOpen: () => void; onOver: (line: string | null) => void; onPlace: (view: string) => void; onDropped: (line: string) => void }) {
+  const controls = useDragControls();
+  const el = useRef<HTMLLIElement>(null);
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; start: PointerEvent } | null>(null);
+  const lifted = useRef(false);
+  const dragging = useRef(false);
+  const over = useRef<string | null>(null);
+  const [up, setUp] = useState(false);
+
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    // once lifted, the touch belongs to the carry: no scrolling, no callout
+    const still = (e: Event) => lifted.current && e.cancelable && e.preventDefault();
+    node.addEventListener("touchmove", still, { passive: false });
+    node.addEventListener("contextmenu", still);
+    return () => {
+      node.removeEventListener("touchmove", still);
+      node.removeEventListener("contextmenu", still);
+    };
+  }, []);
+
+  const cancelHold = () => {
+    if (hold.current) clearTimeout(hold.current.timer);
+    hold.current = null;
+  };
+  const release = () => {
+    cancelHold();
+    lifted.current = false;
+    setUp(false);
+  };
+  const lift = (start: PointerEvent) => {
+    cancelHold();
+    lifted.current = true;
+    dragging.current = true;
+    setUp(true);
+    controls.start(start);
+  };
+  const place = placeLabel(r, today) || "No date";
+
+  return (
+    <motion.li
+      ref={el}
+      data-plan-task={r.id}
+      drag
+      dragListener={false}
+      dragControls={controls}
+      dragSnapToOrigin
+      dragElastic={0}
+      animate={{ scale: up ? 1.02 : 1, boxShadow: up ? "var(--shadow-lift)" : "0 0 0 rgba(0,0,0,0)", backgroundColor: up ? "var(--surface-solid)" : "rgba(0,0,0,0)", zIndex: up ? 5 : 0 }}
+      whileDrag={{ scale: 1.02, boxShadow: "var(--shadow-lift)", backgroundColor: "var(--surface-solid)", zIndex: 5 }}
+      transition={soft}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest("[data-nodrag]") || e.button > 0) return;
+        if (e.pointerType === "mouse") return controls.start(e);
+        const start = e.nativeEvent;
+        cancelHold();
+        hold.current = { x: e.clientX, y: e.clientY, start, timer: setTimeout(() => lift(start), HOLD_MS) };
+      }}
+      onPointerMove={(e) => {
+        if (!hold.current) return;
+        const dx = Math.abs(e.clientX - hold.current.x);
+        const dy = Math.abs(e.clientY - hold.current.y);
+        if (Math.hypot(dx, dy) <= 8) return;
+        if (dx > dy * 1.5) lift(hold.current.start);
+        else cancelHold();
+      }}
+      onPointerUp={() => {
+        const was = lifted.current;
+        release();
+        if (was) setTimeout(() => (dragging.current = false), 50);
+      }}
+      onPointerCancel={release}
+      onDragStart={() => (dragging.current = true)}
+      onDrag={(e) => {
+        const at = e as PointerEvent;
+        const under = document.elementsFromPoint(at.clientX, at.clientY).filter((n) => !el.current?.contains(n));
+        const key = under.map((n) => n.closest("[data-plan-line]")).find(Boolean)?.getAttribute("data-plan-line") ?? null;
+        const to = key && key !== line ? key : null;
+        if (to !== over.current) onOver((over.current = to));
+      }}
+      onDragEnd={() => {
+        const to = over.current;
+        over.current = null;
+        onOver(null);
+        release();
+        setTimeout(() => (dragging.current = false), 50);
+        if (to) onDropped(to);
+      }}
+      className="todo-row relative -mx-1 flex cursor-grab touch-pan-y select-none items-start gap-3 rounded-2xl px-2 active:cursor-grabbing"
+    >
+      <button role="checkbox" aria-checked={r.done} aria-label={r.done ? "Mark not done" : "Mark done"} data-on={r.done} data-nodrag onClick={onToggle} className="check mt-[9px] flex-none">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2.5 6.2l2.4 2.4 4.6-5" />
+        </svg>
+      </button>
+      <div onClick={() => !dragging.current && onOpen()} className={`min-w-0 flex-1 cursor-pointer break-words py-[9px] text-[16px] ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>
+        {r.title}
+      </div>
+      {/* where it sits, and the way to move it: the same lists a task's "Move to" offers */}
+      <label data-nodrag data-place className={`relative mt-[5px] flex h-8 flex-none cursor-pointer items-center whitespace-nowrap rounded-full px-2.5 text-[12.5px] transition-colors hover:bg-fill2 ${place === "Today" ? "text-accent" : "text-ink3"}`}>
+        {place}
+        <select aria-label={`Move ${r.title} to`} value="" onChange={(e) => e.target.value && onPlace(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+          <option value="">Move to…</option>
+          {movable(folders, r.guest_id).map((x) => (
+            <option key={x.key} value={x.key}>
+              {x.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </motion.li>
+  );
+}
+
 function List({
   view,
   folder,
@@ -569,6 +967,9 @@ function List({
   today,
   filter,
   onFilter,
+  plan,
+  focus,
+  onFocus,
   onOpen,
   onCarry,
 }: {
@@ -579,6 +980,10 @@ function List({
   /** the tags this list is narrowed to; none shows every task */
   filter: string[];
   onFilter: (tags: string[]) => void;
+  plan: PlanItem[];
+  /** the line of the plan this list is narrowed to, if any */
+  focus: string | null;
+  onFocus: (id: string | null) => void;
   onOpen: (id: string) => void;
   onCarry: (folder: string | null) => void;
 }) {
@@ -640,7 +1045,13 @@ function List({
     return [...n.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
   }, [rows, filter]);
   // several tags narrow it to the tasks carrying every one of them
-  const shown = useMemo(() => (filter.length ? (rows ?? []).filter((r) => filter.every((t) => r.tags?.includes(t))) : (rows ?? [])), [rows, filter]);
+  // the lines of the plan this list has tasks for (a priority counts its parts' tasks), and the chosen one whatever it has
+  const lines = useMemo(() => plan.filter((i) => i.id === focus || (rows ?? []).some((r) => r.plan_id && planScope(plan, i.id).has(r.plan_id))), [plan, rows, focus]);
+  const focused = focus ? plan.find((i) => i.id === focus) : undefined;
+  const shown = useMemo(() => {
+    const scope = focus ? planScope(plan, focus) : null;
+    return (rows ?? []).filter((r) => filter.every((t) => r.tags?.includes(t)) && (!scope || (!!r.plan_id && scope.has(r.plan_id))));
+  }, [rows, filter, focus, plan]);
 
   const groups = useMemo(() => {
     const map = new Map<string, Row[]>();
@@ -694,11 +1105,12 @@ function List({
     // while the list is narrowed to some tags a new task takes them, or it would vanish as it was added
     const tags = filter;
     // Show it straight away, exactly where it will live; the server's copy replaces it silently.
-    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, guest_id: folder?.guest ?? null, tags, ...placeOf(target) } as unknown as Row;
+    // and the line of the plan it is narrowed to
+    const temp = { id: `new_${Date.now()}_${unsaved.current.length}`, title, done: false, has_notes: false, ai_unseen: false, guest_id: folder?.guest ?? null, tags, plan_id: focus, plan: focused?.title ?? null, ...placeOf(target) } as unknown as Row;
     unsaved.current.push(temp);
     setRows((rs) => [...(rs ?? []), temp]);
     try {
-      const t = await api<Row>("todos", { body: { title, view: target, ...(tags.length ? { tags } : {}) } });
+      const t = await api<Row>("todos", { body: { title, view: target, ...(tags.length ? { tags } : {}), ...(focus ? { plan: focus } : {}) } });
       const row = { ...t, has_notes: false };
       keys.current.set(row.id, temp.id);
       unsaved.current = unsaved.current.filter((u) => u !== temp);
@@ -814,9 +1226,11 @@ function List({
       <header className="mb-5 flex items-end gap-3 px-1">
         <div className="min-w-0 flex-1">
           <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">{title}</h1>
-          <p className="mt-0.5 h-5 truncate text-[14px] text-ink2">{(!filter.length && sub) || (rows ? (openCount ? `${openCount} to do` : shown.length ? "All done" : "") : "")}</p>
+          <p className="mt-0.5 h-5 truncate text-[14px] text-ink2">{(!filter.length && !focus && sub) || (rows ? (openCount ? `${openCount} to do` : shown.length ? "All done" : "") : "")}</p>
         </div>
         {/* only on a list that has tagged tasks, or while a choice is still in force */}
+        {/* likewise, only on a list with tasks that are part of the plan */}
+        {lines.length > 0 && <PlanFilter lines={lines} chosen={focus} onChange={onFocus} />}
         {tags.length > 0 && <TagFilter tags={tags} chosen={filter} onChange={onFilter} />}
       </header>
 
@@ -858,7 +1272,7 @@ function List({
         </div>
       ))}
 
-      {rows && shown.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">{filter.length ? `Nothing tagged ${filter.join(" and ")} here.` : "Nothing here."}</p>}
+      {rows && shown.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">{filter.length ? `Nothing tagged ${filter.join(" and ")} here.` : focused ? `Nothing for ${focused.title} here.` : "Nothing here."}</p>}
 
       {/* a list without sections has one plus at its end; "Later" adds only through its days, as a task gets there by being given a date */}
       {!multi && adder("")}
@@ -866,7 +1280,7 @@ function List({
   );
 }
 
-function Detail({ id, backLabel, folders, tags, today, onOpen, onBack }: { id: string; backLabel: string; folders: Folder[]; /** the tags tasks already carry, offered when one is added */ tags: TagCount[]; today?: string; onOpen: (id: string) => void; onBack: () => void }) {
+function Detail({ id, backLabel, folders, tags, plan, today, onOpen, onBack }: { id: string; backLabel: string; folders: Folder[]; /** the tags tasks already carry, offered when one is added */ tags: TagCount[]; /** the lines of the plan the task can be part of */ plan: PlanItem[]; today?: string; onOpen: (id: string) => void; onBack: () => void }) {
   const { agent } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
   // While notes typed here are waiting to be saved, background refreshes are held back: nothing
@@ -919,7 +1333,7 @@ function Detail({ id, backLabel, folders, tags, today, onOpen, onBack }: { id: s
             className="h-8 cursor-pointer appearance-none rounded-full bg-fill px-3 text-[13px] font-medium text-ink2 outline-none transition-colors hover:bg-fill2"
           >
             <option value="">Move to…</option>
-            {folders.filter((x) => x.key !== "week" && x.key !== "later" && x.key !== ALL && (!x.guest || x.guest === todo.guest_id)).map((x) => (
+            {movable(folders, todo.guest_id).map((x) => (
               <option key={x.key} value={x.key}>
                 {x.label}
               </option>
@@ -963,6 +1377,21 @@ function Detail({ id, backLabel, folders, tags, today, onOpen, onBack }: { id: s
             ))}
           </select>
         </label>
+        {/* the line of the plan it is part of; only once there is a plan */}
+        {plan.length > 0 && (
+          <label data-part-of className={`relative flex h-8 max-w-[240px] cursor-pointer items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${todo.plan_id ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
+            <Flag size={14} className="flex-none" />
+            <span className="truncate">{plan.find((i) => i.id === todo.plan_id)?.title ?? "Part of"}</span>
+            <select aria-label="Part of" value={todo.plan_id ?? ""} onChange={(e) => patch({ plan: e.target.value || null })} className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+              <option value="">Not in the plan</option>
+              {plan.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {(i.parent_id ? "\u2003" : "") + i.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {/* its tags, and the way to add one; the lists can be narrowed to them */}
         <TagPills tags={todo.tags ?? []} known={tags.map((t) => t.tag)} add="Add tag" onChange={(next) => (mutate({ ...todo, tags: next }, false), patch({ tags: next }))} />
       </div>

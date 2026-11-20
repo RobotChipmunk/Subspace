@@ -12,6 +12,7 @@ import { RAIL_BLOCKS, RAIL_ICONS, railGone, removeModule, setModule } from "../c
 import { aimsAtSystem, propose } from "../core/rules";
 import { routineDone, usage } from "../core/routines";
 import { sharingFor } from "../core/guests";
+import { createPlanItem, deletePlanItem, updatePlanItem } from "../core/plan";
 import { createTodo, listTodos, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
 import { bad, notFound, oneLine, type Agent } from "../core/util";
@@ -206,22 +207,22 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_list",
-    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Tasks come in the order the owner keeps them, and each carries order: its place among the tasks of its own day or list, 1 first. Pass tag to see only the tasks carrying it (several, separated by commas, for tasks carrying all of them).",
-    inputSchema: obj({ view: str("Default today."), tag: str('Optional. Only tasks carrying this tag, e.g. "finance". With view "all" this is every open task on that subject.') }),
+    description: "The owner's tasks for a view: today, week, weekend, next_week, later (dated beyond next week), backlog, all (every unfinished task, wherever it is), or a YYYY-MM-DD date. Tasks come in the order the owner keeps them, and each carries order: its place among the tasks of its own day or list, 1 first. Pass tag to see only the tasks carrying it (several, separated by commas, for tasks carrying all of them). Pass plan to see only the tasks that are part of one line of the owner's plan.",
+    inputSchema: obj({ view: str("Default today."), tag: str('Optional. Only tasks carrying this tag, e.g. "finance". With view "all" this is every open task on that subject.'), plan: str('Optional. The id of a line in the owner\'s plan (your briefing lists them): only the tasks that are part of it, and for a priority those of its parts too. "none" gives the tasks that are part of nothing. With view "all" this is everything open towards that priority.') }),
     readOnly: true,
-    run: async (_a, { view, tag }) => {
-      const l = await listTodos(view || "today", { tags: tag ? String(tag).split(",") : undefined });
+    run: async (_a, { view, tag, plan }) => {
+      const l = await listTodos(view || "today", { tags: tag ? String(tag).split(",") : undefined, plan: plan ? String(plan) : undefined });
       const share = await sharingFor(l.todos.map((t) => t.guest_id));
-      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, order: t.ord, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
+      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, order: t.ord, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
     },
   },
   {
     name: "todo_add",
     description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions). This is also how you ask the owner for anything: when you need them to do, decide or answer something, add the task here with what they need in its notes, then point a rail module at it with rail_set(todo: id). Never ask in the feed.",
-    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished."), order: { type: "integer", description: "Optional: where it goes among the tasks of that day or list, 1 for first. Left out, it goes last, which is usually right." } }, ["title"]),
+    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, plan: str("Optional: the id of the line in the owner's plan this task works towards (your briefing lists the plan). Leave it out for a chore, an errand or anything that serves none of their priorities."), repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished."), order: { type: "integer", description: "Optional: where it goes among the tasks of that day or list, 1 for first. Left out, it goes last, which is usually right." } }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
-      return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, label, title, show_until, todo: this id)." };
+      return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, label, title, show_until, todo: this id)." };
     },
   },
   {
@@ -235,6 +236,7 @@ export const TOOLS: Tool[] = [
         view: str("Move to: today, week, weekend, next_week, backlog or YYYY-MM-DD."),
         repeat: str("daily, every_3_days, weekly, biweekly, monthly, yearly, or none to stop. Finishing a repeating task creates the next one that long after the day it was finished; the result then names it under next."),
         tags: { type: "array", items: { type: "string" }, description: "The task's whole set of tags, replacing what it has; [] takes them all off. Leave out to keep them. Do not remove tags the owner chose." },
+        plan: str('The id of the line in the owner\'s plan the task is part of, or "none" to take it out of the plan. Leave out to keep it where it is. Which priority a task serves is the owner\'s call: change it only when they ask.'),
         order: { type: "integer", description: "Its place among the tasks of its day or list (the one it is moved to, when view is given too): 1 for first, a number past the end for last. The other tasks keep their order around it. The order is the owner's: change it only when they ask." },
         notes_append: str("Markdown to add at the end of the notes. May contain blocks: fenced code blocks whose language is the block type and whose body is JSON."),
         notes_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement markdown.") }, required: ["find", "replace"] },
@@ -243,7 +245,24 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, { id, ...patch }) => {
       const t = await updateTodo(a, id, patch);
-      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.repeat ? { repeat: t.repeat } : {}), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.done && t.next_id && t.next_date ? { next: { id: t.next_id, date: t.next_date } } : {}), notes_chars: t.notes.length, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
+      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.repeat ? { repeat: t.repeat } : {}), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(t.done && t.next_id && t.next_date ? { next: { id: t.next_id, date: t.next_date } } : {}), notes_chars: t.notes.length, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
+    },
+  },
+  {
+    name: "plan_write",
+    description:
+      "Change the owner's plan: the short outline of what they are working towards for now (their priorities, each with parts one level down), which your briefing lists. Without id it adds a line: a priority, or with parent a part of that priority. With id it renames the line (title), moves it among its neighbours (order) or takes it out (remove: true; its tasks stay in their lists, part of nothing). The plan is the owner's: change it only when they ask, for instance to turn a journal entry or a conversation into their plan. Keep it short: about five priorities, a few parts each, each line a few words in the owner's own. Tasks join a line with todo_add or todo_update (plan: the line's id).",
+    inputSchema: obj({
+      id: str("The line to change. Omit to add one."),
+      title: str("The line, in a few words."),
+      parent: str("When adding: the id of the priority this is a part of. Omit for a priority. A part cannot have parts."),
+      order: { type: "integer", description: "Its place among its neighbours, 1 for first." },
+      remove: { type: "boolean", description: "With id: take the line out of the plan, and a priority's parts with it." },
+    }),
+    run: async (a, { id, title, parent, order, remove }) => {
+      if (id && remove) return (await deletePlanItem(a, id), { removed: id });
+      const item = id ? await updatePlanItem(a, id, { title, order }) : await createPlanItem(a, { title, parent });
+      return { id: item.id, title: item.title, ...(item.parent_id ? { part_of: item.parent_id } : {}) };
     },
   },
   {
@@ -586,6 +605,7 @@ const AREA: Record<string, Section> = {
   todo_list: "todos",
   todo_add: "todos",
   todo_update: "todos",
+  plan_write: "todos",
   journal_write: "journal",
   page_write: "pages",
   link_save: "links",

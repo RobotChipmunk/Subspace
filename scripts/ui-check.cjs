@@ -826,6 +826,143 @@ async function run(profile) {
     await page.reload();
     await settle(1500);
   });
+  await step("todos plan", async () => {
+    // The plan: priorities, their parts and the tasks under each. A line with no unfinished task
+    // says "Nothing yet"; nothing is counted. A task is carried onto a line to become part of it,
+    // and any list can be narrowed to a line.
+    const nav = page.getByRole("navigation", { name: "Lists" });
+    const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
+    const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
+    const line = (title) => page.locator("[data-plan-line]", { hasText: title });
+    const task = (title) => page.locator("[data-plan-task]", { hasText: title });
+    const planBtn = nav.locator("[data-folder=plan]");
+    await planBtn.scrollIntoViewIfNeeded();
+    await press(planBtn);
+    await page.locator("h1", { hasText: /^Plan$/ }).waitFor({ timeout: 4000 });
+    await line("Start the year with a clear plan").waitFor({ timeout: 5000 });
+    await settle(800);
+    if (!(await line("A budget we both agree on").locator("[data-plan-empty]").count())) fail("todos plan: a line with no tasks does not say Nothing yet");
+    if (await line("Goals for the first quarter").locator("[data-plan-empty]").count()) fail("todos plan: a line with an unfinished task says Nothing yet");
+    if (await line("Start the year with a clear plan").locator("[data-plan-empty]").count()) fail("todos plan: a priority whose part has a task says Nothing yet");
+    if (/\d/.test(await page.locator("[data-plan]").innerText())) fail("todos plan: the plan shows a number; it counts nothing");
+    await reachable(page.getByRole("button", { name: "Add a part of Start the year with a clear plan" }), "todos plan: Add a part");
+    await reachable(page.getByLabel("Add a priority"), "todos plan: Add a priority");
+    await noSidewaysScroll("todos plan");
+    await shot("todos-plan");
+
+    // tapping a line opens its tasks in place, each saying where it sits
+    await press(line("Goals for the first quarter").getByRole("button").first());
+    await task("Draft Q1 goals").waitFor({ timeout: 5000 });
+    await settle(500);
+    await reachable(task("Draft Q1 goals").locator("[data-place]"), "todos plan: where a task sits");
+    if ((await task("Draft Q1 goals").locator("[data-place]").innerText()).trim() !== "This week") fail("todos plan: a task set for the week does not say This week");
+    await press(line("Goals for the first quarter").getByRole("button").first());
+    await settle(400);
+
+    // a new priority, a part of it, and a task under the priority: it waits in the backlog
+    const name = `Sleep better ${profile.name}`;
+    const part = `Evenings ${profile.name}`;
+    const title = `Buy blackout blinds ${profile.name}`;
+    await typeIn(page.getByLabel("Add a priority"), name);
+    await page.keyboard.press("Enter");
+    await line(name).waitFor({ timeout: 5000 });
+    await settle(600);
+    if (!(await line(name).locator("[data-plan-empty]").count())) fail("todos plan: a new priority does not say Nothing yet");
+    await press(page.getByRole("button", { name: `Add a part of ${name}` }));
+    await page.keyboard.type(part, { delay: 15 });
+    await page.keyboard.press("Enter");
+    await line(part).waitFor({ timeout: 5000 });
+    await press(line(name).getByRole("button").first());
+    await typeIn(page.getByLabel(`Add a task to ${name}`), title);
+    await page.keyboard.press("Enter");
+    await task(title).waitFor({ timeout: 5000 });
+    await settle(800);
+    if ((await task(title).locator("[data-place]").innerText()).trim() !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
+    if (await line(name).locator("[data-plan-empty]").count()) fail("todos plan: a line still says Nothing yet after a task was added to it");
+    const plan = (await get("/api/v1/plan")).plan;
+    const top = plan.find((i) => i.title === name);
+    const sub = plan.find((i) => i.title === part);
+    if (!top || !sub || sub.parent_id !== top.id) fail("todos plan: the new priority and its part were not saved as one under the other");
+    await noSidewaysScroll("todos plan open");
+    await shot("todos-plan-open");
+
+    // carried onto another line, the task becomes part of that line
+    const mid = (loc) => loc.evaluate((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left }))(e.getBoundingClientRect()));
+    const from = await mid(task(title));
+    from.x = from.left + 110;
+    const to = await mid(line(part));
+    const at = (i) => [from.x + ((to.x - from.x) * i) / 24, from.y + ((to.y - from.y) * i) / 24];
+    let cdp;
+    const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+    if (profile.touch) {
+      cdp = await page.context().newCDPSession(page);
+      await touch("touchStart", from.x, from.y);
+      // straight up or down is a scroll until the row has been held
+      await page.waitForTimeout(450);
+      for (let i = 1; i <= 24; i++) (await touch("touchMove", ...at(i)), await page.waitForTimeout(25));
+    } else {
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      for (let i = 1; i <= 24; i++) (await page.mouse.move(...at(i)), await page.waitForTimeout(20));
+    }
+    await page.waitForTimeout(400);
+    if ((await line(part).getAttribute("data-over")) !== "true") fail("todos plan: holding a task over another line did not light it");
+    await shot("todos-plan-carry");
+    if (profile.touch) (await touch("touchEnd", 0, 0), await cdp.detach());
+    else await page.mouse.up();
+    await settle(1500);
+    if (await page.getByLabel("Task name").count()) fail("todos plan: letting go of a carried task opened it");
+    const made = (await get("/api/v1/todos?view=backlog")).todos.find((t) => t.title === title);
+    if (!made) fail("todos plan: the task added under a line is not in the backlog");
+    else if (made.plan_id !== sub?.id) fail("todos plan: a task dropped on another line did not become part of it");
+
+    // in its list the task names its line, and the list can be narrowed to the priority (parts included)
+    const backlog = nav.getByRole("button", { name: /^Backlog/ });
+    await backlog.scrollIntoViewIfNeeded();
+    await press(backlog);
+    await page.locator(".todo-row", { hasText: title }).waitFor({ timeout: 5000 });
+    await settle(800);
+    if (!(await page.locator(".todo-row", { hasText: title }).locator("[data-part-of]", { hasText: "Evenings" }).count())) fail("todos plan: a task does not name the line it is part of in its list");
+    const filter = page.locator("[data-plan-filter]");
+    await reachable(filter, "todos priority filter");
+    await press(filter);
+    const menuEl = page.getByRole("menu", { name: "Priority" });
+    await menuEl.waitFor({ timeout: 4000 });
+    await settle(400);
+    await reachable(menuEl.getByRole("menuitemradio", { name }), "priority filter choice");
+    await noSidewaysScroll("todos priority menu");
+    await shot("todos-plan-filter");
+    await press(menuEl.getByRole("menuitemradio", { name }));
+    await settle(800);
+    const shown = await page.locator("main ul li").evaluateAll((els) => els.map((e) => e.innerText.trim().split("\n")[0]));
+    if (shown.join("|") !== title) fail(`todos plan: narrowed to a priority, the list shows ${JSON.stringify(shown)}`);
+    if ((await filter.getAttribute("aria-label")) !== `Priority: ${name}`) fail("todos plan: the filter does not name the chosen line");
+    await press(filter);
+    await press(menuEl.getByRole("menuitem", { name: "Show all" }));
+    await settle(600);
+    if ((await filter.getAttribute("aria-label")) !== "Filter by priority") fail("todos plan: Show all did not take the choice off");
+
+    // opened, the task says what it is part of, and that can be changed there
+    await press(page.locator(".todo-row", { hasText: title }).getByText(title));
+    const partOf = page.locator("label[data-part-of]");
+    await partOf.waitFor({ timeout: 5000 });
+    await settle(600);
+    await reachable(partOf, "todo Part of pill");
+    if (!(await partOf.innerText()).includes("Evenings")) fail("todos plan: an open task does not say what it is part of");
+    await partOf.locator("select").selectOption({ label: name });
+    await settle(900);
+    if ((await get(`/api/v1/todos?view=backlog`)).todos.find((t) => t.title === title)?.plan_id !== top?.id) fail("todos plan: choosing another line in a task did not save");
+    await shot("todos-plan-task");
+    await press(page.getByRole("button", { name: "Backlog" }).first());
+    await settle(600);
+
+    // tidy up: the task (twice: to the bin, then for good) and the priority, which takes its part with it
+    if (made) (await del(`/api/v1/todos/${made.id}`), await del(`/api/v1/todos/${made.id}?forever=1`));
+    if (top) await del(`/api/v1/plan/${top.id}`);
+    if ((await get("/api/v1/plan")).plan.some((i) => i.title === name || i.title === part)) fail("todos plan: removing a priority left it, or its part, in the plan");
+    await page.reload();
+    await settle(1500);
+  });
   await step("todos all and tags", async () => {
     // "All" shows every task under the day or list it is on; any list with tagged tasks can be narrowed to tags.
     const nav = page.getByRole("navigation", { name: "Lists" });
