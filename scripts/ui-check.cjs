@@ -833,7 +833,8 @@ async function run(profile) {
     const nav = page.getByRole("navigation", { name: "Lists" });
     const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
     const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
-    const line = (title) => page.locator("[data-plan-line]", { hasText: title });
+    // by its name, which is not text on the page while the line is open (it is a field then)
+    const line = (title) => page.locator(`[data-plan-line][data-plan-title=${JSON.stringify(title)}]`);
     const task = (title) => page.locator("[data-plan-task]", { hasText: title });
     // the word itself: the label also holds the (unseen) menu of lists, whose text innerText would add
     const placeOf = (title) => task(title).locator("[data-place]").evaluate((el) => el.firstChild.textContent.trim());
@@ -857,12 +858,12 @@ async function run(profile) {
     await shot("todos-plan");
 
     // tapping a line opens its tasks in place, each saying where it sits
-    await press(line("Goals for the first quarter").getByRole("button").first());
+    await press(line("Goals for the first quarter").locator("[aria-expanded]"));
     await task("Draft Q1 goals").waitFor({ timeout: 5000 });
     await settle(500);
     await reachable(task("Draft Q1 goals").locator("[data-place]"), "todos plan: where a task sits");
     if ((await placeOf("Draft Q1 goals")) !== "This week") fail("todos plan: a task set for the week does not say This week");
-    await press(line("Goals for the first quarter").getByRole("button").first());
+    await press(line("Goals for the first quarter").locator("[aria-expanded]"));
     await settle(400);
 
     // a new priority, a part of it, and a task under the priority: it waits in the backlog
@@ -894,6 +895,18 @@ async function run(profile) {
     await settle(800);
     if ((await placeOf(title)) !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
     if (await line(name).locator("[data-plan-empty]").count()) fail("todos plan: a line still says Nothing yet after a task was added to it");
+    // an open line's name is a field: typed over, it is saved, and the line keeps its tasks
+    const nameField = line(name).locator("[data-plan-name]");
+    await reachable(nameField, "todos plan: the name of an open line");
+    await reachable(line(name).getByRole("button", { name: /^Remove / }), "todos plan: the bin beside an open line's name");
+    await nameField.fill(name + " well");
+    await page.keyboard.press("Enter");
+    await settle(900);
+    if (!(await get("/api/v1/plan")).plan.some((i) => i.title === name + " well")) fail("todos plan: a name typed over an open line was not saved");
+    await page.locator("[data-plan-name]").first().fill(name);
+    await page.keyboard.press("Enter");
+    await settle(900);
+    if (!(await get("/api/v1/plan")).plan.some((i) => i.title === name)) fail("todos plan: the line's name could not be put back");
     const plan = (await get("/api/v1/plan")).plan;
     const top = plan.find((i) => i.title === name);
     const sub = plan.find((i) => i.title === part);

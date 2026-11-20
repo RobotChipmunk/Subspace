@@ -1,6 +1,6 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, Pencil, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -784,10 +784,10 @@ function PlanAdd({ top, onPart, onTask }: { top: PlanItem; onPart: (title: strin
       <button
         aria-label={`Add a task to ${top.title}`}
         onClick={() => setMode(!shown && window.matchMedia("(hover: none)").matches ? "choose" : "task")}
-        className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-fill2 text-ink2 transition-colors hover:bg-accent hover:text-white"
+        className="flex h-[22px] items-center rounded-full bg-fill2 pl-[3.5px] text-ink2 transition-colors hover:bg-accent hover:text-white"
       >
         <Plus size={15} strokeWidth={2.4} className="flex-none" />
-        <span className={`overflow-hidden whitespace-nowrap text-[12.5px] font-medium transition-all duration-200 group-hover:max-w-[60px] group-hover:pl-0.5 group-hover:pr-2 group-hover:opacity-100 ${shown ? "max-w-[60px] pl-0.5 pr-2 opacity-100" : "max-w-0 opacity-0"}`}>Task</span>
+        <span className={`overflow-hidden whitespace-nowrap text-[12.5px] font-medium transition-all duration-200 group-hover:max-w-[60px] group-hover:pl-0.5 group-hover:pr-2 group-hover:opacity-100 ${shown ? "max-w-[60px] pl-0.5 pr-2 opacity-100" : "max-w-0 pr-[3.5px] opacity-0"}`}>Task</span>
       </button>
       <button
         aria-label={`Add a part of ${top.title}`}
@@ -800,38 +800,78 @@ function PlanAdd({ top, onPart, onTask }: { top: PlanItem; onPart: (title: strin
   );
 }
 
-/** One line of the plan with, once opened, its tasks. Without an item it is "Not in the plan": the tasks that are part of nothing. */
+/**
+ * One line of the plan with, once opened, its tasks. Without an item it is "Not in the plan": the
+ * tasks that are part of nothing.
+ *
+ * An open line's name is a field: tap the words and type, as with a task's name. The bin that
+ * takes the line out of the plan sits beside it. With a pointer over a closed line a pencil shows
+ * at its end, which opens the line with the name ready to type over.
+ */
 function PlanLine({ item, empty, open, over, onToggle, tools }: { item: PlanItem | null; empty: boolean; open: boolean; over: boolean; onToggle: () => void; tools: PlanTools }) {
   const key = item?.id ?? "none";
-  const [renaming, setRenaming] = useState<string | null>(null);
+  // what is being typed over the name; null while it shows the saved one
+  const [name, setName] = useState<string | null>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const focusNext = useRef(false);
   const top = !!item && !item.parent_id;
+  const type = top ? "text-[17px] font-semibold tracking-[-0.015em]" : "text-[15.5px]";
+  useEffect(() => {
+    if (open && focusNext.current) (field.current?.focus(), field.current?.select());
+    focusNext.current = false;
+  }, [open]);
   async function rename() {
-    const title = renaming?.trim();
-    setRenaming(null);
+    const title = name?.trim();
+    setName(null);
     if (!item || !title || title === item.title) return;
     await api(`plan/${item.id}`, { method: "PATCH", body: { title } });
     tools.refresh();
   }
   return (
-    <div data-plan-line={key} data-over={over || undefined} className={`-mx-2 rounded-2xl px-2 transition-colors ${over ? "drop-target" : ""}`}>
-      {renaming !== null ? (
-        <form onSubmit={(e) => (e.preventDefault(), rename())} className={`flex min-h-10 items-center px-1 ${top || !item ? "" : "pl-6"}`}>
-          <input autoFocus value={renaming} onChange={(e) => setRenaming(e.target.value)} onBlur={rename} onKeyDown={(e) => e.key === "Escape" && setRenaming(null)} aria-label="Name" className={`w-full py-[7px] ${top ? "text-[17px] font-semibold tracking-[-0.015em]" : "text-[15.5px]"}`} />
-        </form>
-      ) : (
-        <button onClick={onToggle} aria-expanded={open} className={`flex min-h-10 w-full items-center gap-3 rounded-xl px-1 py-[7px] text-left ${top || !item ? "" : "pl-6"}`}>
-          <span className={`min-w-0 flex-1 break-words transition-colors ${over ? "text-accent" : ""} ${top ? "text-[17px] font-semibold tracking-[-0.015em]" : item ? "text-[15.5px]" : "text-[15.5px] text-ink2"}`}>{item?.title ?? "Not in the plan"}</span>
-          {empty && <span data-plan-empty className="flex-none whitespace-nowrap text-[12.5px] text-ink2">Nothing yet</span>}
-          <ChevronRight size={14} className={`flex-none text-ink3 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+    <div data-plan-line={key} data-plan-title={item?.title ?? "Not in the plan"} data-over={over || undefined} className={`-mx-2 rounded-2xl px-2 transition-colors ${over ? "drop-target" : ""}`}>
+      <div className={`group/line flex min-h-10 items-center gap-1 ${top || !item ? "" : "pl-5"}`}>
+        {open && item ? (
+          <textarea
+            ref={(el) => {
+              field.current = el;
+              if (el) (el.style.height = "0px"), (el.style.height = el.scrollHeight + "px");
+            }}
+            rows={1}
+            value={name ?? item.title}
+            aria-label={`Name of ${item.title}`}
+            data-plan-name
+            onChange={(e) => setName(e.target.value.replace(/\n/g, ""))}
+            onBlur={rename}
+            onKeyDown={(e) => (e.key === "Enter" ? (e.preventDefault(), e.currentTarget.blur()) : e.key === "Escape" && (setName(null), e.currentTarget.blur()))}
+            className={`min-w-0 flex-1 resize-none overflow-hidden rounded-lg px-1 py-[7px] leading-[1.35] transition-colors hover:bg-fill focus:bg-fill ${type}`}
+          />
+        ) : (
+          <button onClick={onToggle} className={`min-w-0 flex-1 break-words px-1 py-[7px] text-left leading-[1.35] transition-colors ${over ? "text-accent" : item ? "" : "text-ink2"} ${type}`}>
+            {item?.title ?? "Not in the plan"}
+          </button>
+        )}
+        {empty && <span data-plan-empty className="flex-none whitespace-nowrap px-1 text-[12.5px] text-ink2">Nothing yet</span>}
+        {item && !open && (
+          <button
+            aria-label={`Rename ${item.title}`}
+            onClick={() => ((focusNext.current = true), onToggle())}
+            className="pointer-events-none grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 opacity-0 transition-opacity hover:bg-fill hover:text-ink2 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/line:pointer-events-auto group-hover/line:opacity-100"
+          >
+            <Pencil size={14} />
+          </button>
+        )}
+        {item && open && <ConfirmDelete label={`Remove ${item.title} from the plan`} confirm="Remove" size={15} onConfirm={async () => (await api(`plan/${item.id}`, { method: "DELETE" }), tools.refresh())} />}
+        <button onClick={onToggle} aria-expanded={open} aria-label={`${open ? "Close" : "Open"} ${item?.title ?? "Not in the plan"}`} className="grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink2">
+          <ChevronRight size={14} className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
         </button>
-      )}
-      {open && <PlanTasks line={key} item={item} tools={tools} onRename={() => setRenaming(item?.title ?? "")} />}
+      </div>
+      {open && <PlanTasks line={key} item={item} tools={tools} />}
     </div>
   );
 }
 
-/** The tasks of one opened line, soonest first, with a way to add one and, for a line of the plan, to rename or remove it. */
-function PlanTasks({ line, item, tools, onRename }: { line: string; item: PlanItem | null; tools: PlanTools; onRename: () => void }) {
+/** The tasks of one opened line, soonest first, and for a part the field that adds one (a priority adds through the plus under it). */
+function PlanTasks({ line, item, tools }: { line: string; item: PlanItem | null; tools: PlanTools }) {
   const { data, mutate } = useSWR<{ todos: Row[]; today: string }>(`todos?view=all&plan=${line}`, fetcher, { refreshInterval: 15_000 });
   const [draft, setDraft] = useState("");
   // a priority's own list holds only its own tasks: those of its parts are under the parts
@@ -875,23 +915,12 @@ function PlanTasks({ line, item, tools, onRename }: { line: string; item: PlanIt
           />
         ))}
       </ul>
-      {item && (
+      {item?.parent_id && (
         <div className="flex items-center gap-3 px-1">
-          {/* a priority adds through the plus under it; a part has its own field here */}
-          {item.parent_id ? (
-            <>
-              <span className="check flex-none opacity-40" />
-              <form onSubmit={(e) => (e.preventDefault(), add())} className="min-w-0 flex-1">
-                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task" aria-label={`Add a task to ${item.title}`} className="w-full py-[9px] text-[16px]" />
-              </form>
-            </>
-          ) : (
-            <span className="flex-1" />
-          )}
-          <button onClick={onRename} className="h-8 flex-none rounded-full px-2.5 text-[13px] text-ink3 transition-colors hover:bg-fill hover:text-ink2">
-            Rename
-          </button>
-          <ConfirmDelete label={`Remove ${item.title} from the plan`} confirm="Remove" size={15} onConfirm={async () => (await api(`plan/${item.id}`, { method: "DELETE" }), tools.refresh())} />
+          <span className="check flex-none opacity-40" />
+          <form onSubmit={(e) => (e.preventDefault(), add())} className="min-w-0 flex-1">
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task" aria-label={`Add a task to ${item.title}`} className="w-full py-[9px] text-[16px]" />
+          </form>
         </div>
       )}
       {!item && rows && !rows.length && <p className="px-1 py-2 text-[14px] text-ink3">Every task is part of the plan.</p>}

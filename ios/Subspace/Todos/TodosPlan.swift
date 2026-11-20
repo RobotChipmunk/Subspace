@@ -62,76 +62,96 @@ struct TodosPlanView: View {
 
 /// One line of the plan with, once opened, its tasks. Without an item it is "Not in the plan":
 /// the tasks that are part of nothing.
+///
+/// An open line's name is a field: tap the words and type, as with a task's name. The bin that
+/// takes the line out of the plan sits beside it.
 private struct TodosPlanLine: View {
     var item: TodosPlanItem?
     var empty: Bool
     var store: TodosStore
     @State private var over = false
-    @State private var renaming = false
     @State private var name = ""
     @FocusState private var nameFocused: Bool
 
     var body: some View {
         let key = item?.id ?? TodosStore.noLine
+        let title = item?.title ?? "Not in the plan"
         let open = store.openLines.contains(key)
         let top = item != nil && item?.parent_id == nil
         let part = item?.parent_id != nil
         let font: Font = top ? .system(size: 17, weight: .semibold) : .system(size: 15.5)
         let ink: Color = over ? Theme.accent : (item == nil ? Theme.ink2 : Theme.ink)
         VStack(alignment: .leading, spacing: 0) {
-            if renaming {
-                TextField("Name", text: $name)
-                    .font(font)
-                    .foregroundStyle(Theme.ink)
-                    .tint(Theme.accent)
-                    .focused($nameFocused)
-                    .submitLabel(.done)
-                    .frame(minHeight: 40)
-                    .padding(.leading, part ? 20 : 0)
-                    .onSubmit { nameFocused = false }
-                    .accessibilityIdentifier("todos.plan.name.\(key)")
-            } else {
-                Button {
-                    store.toggleLine(key)
-                } label: {
-                    HStack(alignment: .center, spacing: 12) {
-                        Text(item?.title ?? "Not in the plan")
+            HStack(alignment: .center, spacing: 4) {
+                if open, item != nil {
+                    TextField("Name", text: $name, axis: .vertical)
+                        .font(font)
+                        .foregroundStyle(Theme.ink)
+                        .tint(Theme.accent)
+                        .focused($nameFocused)
+                        .submitLabel(.done)
+                        .padding(.vertical, 7)
+                        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                        .onChange(of: name) { _, now in
+                            // return ends the name: it is one line of words, however it wraps
+                            if now.contains("\n") {
+                                name = now.replacingOccurrences(of: "\n", with: "")
+                                nameFocused = false
+                            }
+                        }
+                        .accessibilityLabel("Name of \(title)")
+                        .accessibilityIdentifier("todos.plan.name.\(key)")
+                } else {
+                    Button {
+                        store.toggleLine(key)
+                    } label: {
+                        Text(title)
                             .font(font)
                             .foregroundStyle(ink)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                        if empty {
-                            Text("Nothing yet")
-                                .font(.ssMeta)
-                                .foregroundStyle(Theme.ink2)
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.ink3)
-                            .rotationEffect(.degrees(open ? 90 : 0))
-                            .accessibilityHidden(true)
+                            .padding(.vertical, 7)
+                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
-                    .padding(.leading, part ? 20 : 0)
-                    .padding(.vertical, 7)
-                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(title + (empty ? ". Nothing yet" : ""))
+                    .accessibilityIdentifier("todos.plan.line.\(key)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel((item?.title ?? "Not in the plan") + (empty ? ". Nothing yet" : ""))
-                .accessibilityAddTraits(open ? .isSelected : [])
-                .accessibilityIdentifier("todos.plan.line.\(key)")
+                if empty {
+                    Text("Nothing yet")
+                        .font(.ssMeta)
+                        .foregroundStyle(Theme.ink2)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .accessibilityHidden(!open)
+                }
+                if open, item != nil {
+                    ConfirmDelete(label: "Remove \(title) from the plan", confirm: "Remove", size: 15) {
+                        await store.removeLine(key)
+                    }
+                    .accessibilityIdentifier("todos.plan.remove.\(key)")
+                }
+                Button {
+                    nameFocused = false
+                    store.toggleLine(key)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.ink3)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel((open ? "Close " : "Open ") + title)
+                .accessibilityIdentifier("todos.plan.toggle.\(key)")
             }
+            .padding(.leading, part ? 20 : 0)
             if open {
-                TodosPlanTasks(line: key, item: item, store: store) {
-                    name = item?.title ?? ""
-                    renaming = true
-                    nameFocused = true
-                }
-                .padding(.leading, part ? 16 : 0)
-                .transition(.opacity)
+                TodosPlanTasks(line: key, item: item, store: store)
+                    .padding(.leading, part ? 16 : 0)
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 8)
@@ -144,27 +164,36 @@ private struct TodosPlanLine: View {
             return true
         }
         .animation(.ssSpring, value: over)
+        // the field shows the saved name whenever nothing is being typed over it
+        .onChange(of: open, initial: true) { _, _ in
+            name = item?.title ?? ""
+        }
+        .onChange(of: item?.title) { _, saved in
+            if !nameFocused { name = saved ?? "" }
+        }
         .onChange(of: nameFocused) { _, on in
-            if !on && renaming { rename() }
+            if !on { rename() }
         }
     }
 
     private func rename() {
-        renaming = false
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let item, !title.isEmpty, title != item.title else { return }
+        guard let item else { return }
+        guard !title.isEmpty, title != item.title else {
+            name = item.title
+            return
+        }
         let id = item.id
         Task { await store.renameLine(id, to: title) }
     }
 }
 
-/// The tasks of one opened line, soonest first, with a field that adds one and, for a line of the
-/// plan, the ways to rename it or take it out.
+/// The tasks of one opened line, soonest first, and for a part the field that adds one (a
+/// priority adds through the plus under it).
 private struct TodosPlanTasks: View {
     var line: String
     var item: TodosPlanItem?
     var store: TodosStore
-    var rename: () -> Void
     @State private var draft = ""
     @FocusState private var focused: Bool
 
@@ -176,9 +205,8 @@ private struct TodosPlanTasks: View {
                     .transition(.opacity)
             }
             if let item {
-                HStack(alignment: .center, spacing: 4) {
-                    // a priority adds through the plus under it; a part has its own field here
-                    if item.parent_id != nil {
+                if item.parent_id != nil {
+                    HStack(alignment: .center, spacing: 4) {
                         Circle()
                             .strokeBorder(Theme.ink3, lineWidth: 1.5)
                             .frame(width: 22, height: 22)
@@ -198,24 +226,7 @@ private struct TodosPlanTasks: View {
                             }
                             .accessibilityLabel("Add a task to \(item.title)")
                             .accessibilityIdentifier("todos.plan.add.\(line)")
-                    } else {
-                        Spacer(minLength: 0)
                     }
-                    Button(action: rename) {
-                        Text("Rename")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.ink3)
-                            .padding(.horizontal, 8)
-                            .frame(minHeight: 36)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Rename \(item.title)")
-                    .accessibilityIdentifier("todos.plan.rename.\(line)")
-                    ConfirmDelete(label: "Remove \(item.title) from the plan", confirm: "Remove", size: 15) {
-                        await store.removeLine(line)
-                    }
-                    .accessibilityIdentifier("todos.plan.remove.\(line)")
                 }
             } else if let rows, rows.isEmpty {
                 Text("Every task is part of the plan.")
