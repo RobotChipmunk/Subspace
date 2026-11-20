@@ -144,6 +144,9 @@ Patterns:
 - **Rows** (todos, links): no dividers; hover fill; title, one secondary line, one meta line.
   A row that stands for something in another place (a task in a person's list) names that place
   in a word or two at its end, in meta type.
+  A task row shows its title, tags, place and the repeat mark only: no mark for having notes and
+  no dot for an agent's change since it was last opened (the owner's call, Nov 2026). What an
+  agent changed is still highlighted inside the task when it is opened.
 - **Cards** (`.glass`): feed posts, context nodes, pages.
 - **Pictures on a post** (`Pictures` in `feed/page.tsx`): one picture is the rule. Up to six are
   swiped sideways in one frame that takes the first picture's shape; a picture of a clearly
