@@ -1,6 +1,6 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { AlignLeft, ArrowUpRight, Check, ChevronLeft, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -481,8 +481,6 @@ function TodoRow({
         <span className={`min-w-0 flex-1 break-words text-[16px] transition-colors duration-300 ${r.done ? "text-ink3 line-through decoration-[var(--line)]" : ""}`}>
           {r.title}
           {tag && <FromTag id={r.guest_id} />}
-          {/* someone else changed this task since you last opened it: the dot sits right after the words */}
-          {r.ai_unseen && <span title="Changed since you last looked" aria-label="Changed since you last looked" className="relative -top-px ml-2 inline-block h-[7px] w-[7px] rounded-full bg-accent align-middle shadow-[0_0_0_3px_var(--accent-soft)]" />}
           {r.done && r.next_id && r.next_date && <NextNote date={r.next_date} today={today} onOpen={() => onOpenNext(r.next_id!)} className="mt-0.5" />}
         </span>
         {!!r.tags?.length && (
@@ -497,7 +495,6 @@ function TodoRow({
         )}
         {r.repeat && !r.done && <RepeatIcon size={14} aria-label="Repeats" className="mt-[6px] flex-none text-ink3" />}
         {place && <span data-place className="mt-[4px] flex-none whitespace-nowrap text-[12.5px] text-ink3">{place}</span>}
-        {r.has_notes && <AlignLeft size={15} className="mt-[5px] flex-none text-ink3" />}
       </div>
     </Reorder.Item>
   );
@@ -888,7 +885,7 @@ function Detail({ id, backLabel, folders, tags, today, onOpen, onBack }: { id: s
   }, [todo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshLists = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos") && k !== `todos/${id}`);
-  /** quiet: a notes save while typing. It changes nothing the lists show except the notes mark, so they are refreshed on leaving instead. */
+  /** quiet: a notes save while typing. It changes nothing the lists show, so they are refreshed on leaving instead. */
   async function patch(body: Record<string, unknown>, quiet = false) {
     const t = await api<Todo>(`todos/${id}`, { method: "PATCH", body });
     mutate(t, false);

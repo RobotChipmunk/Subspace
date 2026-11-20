@@ -265,8 +265,6 @@ private struct TodosRowLabel: View {
     var place: String
 
     var body: some View {
-        let unseen = row.ai_unseen ?? false
-        let notes = row.has_notes ?? false
         let repeats = row.`repeat` != nil && !row.done
         let tags = row.tags ?? []
         HStack(alignment: .top, spacing: 8) {
@@ -280,16 +278,6 @@ private struct TodosRowLabel: View {
                 if tag {
                     TodosFromTag(guestID: row.guest_id)
                 }
-            }
-            if unseen {
-                // someone else changed this task since it was last opened
-                Circle()
-                    .fill(Theme.accent)
-                    .frame(width: 7, height: 7)
-                    .padding(3)
-                    .background(Theme.accentSoft, in: Circle())
-                    .padding(.top, 4)
-                    .accessibilityLabel("Changed since you last looked")
             }
             Spacer(minLength: 0)
             if !tags.isEmpty {
@@ -310,13 +298,6 @@ private struct TodosRowLabel: View {
                     .foregroundStyle(Theme.ink3)
                     .padding(.top, 4)
                     .accessibilityLabel("Repeats")
-            }
-            if notes {
-                Image(systemName: "text.alignleft")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.ink3)
-                    .padding(.top, 3)
-                    .accessibilityLabel("Has notes")
             }
         }
         .padding(.vertical, 8)
