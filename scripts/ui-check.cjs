@@ -835,6 +835,8 @@ async function run(profile) {
     const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
     const line = (title) => page.locator("[data-plan-line]", { hasText: title });
     const task = (title) => page.locator("[data-plan-task]", { hasText: title });
+    // the word itself: the label also holds the (unseen) menu of lists, whose text innerText would add
+    const placeOf = (title) => task(title).locator("[data-place]").evaluate((el) => el.firstChild.textContent.trim());
     const planBtn = nav.locator("[data-folder=plan]");
     await planBtn.scrollIntoViewIfNeeded();
     await press(planBtn);
@@ -855,7 +857,7 @@ async function run(profile) {
     await task("Draft Q1 goals").waitFor({ timeout: 5000 });
     await settle(500);
     await reachable(task("Draft Q1 goals").locator("[data-place]"), "todos plan: where a task sits");
-    if ((await task("Draft Q1 goals").locator("[data-place]").innerText()).trim() !== "This week") fail("todos plan: a task set for the week does not say This week");
+    if ((await placeOf("Draft Q1 goals")) !== "This week") fail("todos plan: a task set for the week does not say This week");
     await press(line("Goals for the first quarter").getByRole("button").first());
     await settle(400);
 
@@ -877,7 +879,7 @@ async function run(profile) {
     await page.keyboard.press("Enter");
     await task(title).waitFor({ timeout: 5000 });
     await settle(800);
-    if ((await task(title).locator("[data-place]").innerText()).trim() !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
+    if ((await placeOf(title)) !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
     if (await line(name).locator("[data-plan-empty]").count()) fail("todos plan: a line still says Nothing yet after a task was added to it");
     const plan = (await get("/api/v1/plan")).plan;
     const top = plan.find((i) => i.title === name);
