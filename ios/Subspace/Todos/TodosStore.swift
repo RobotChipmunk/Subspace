@@ -33,9 +33,14 @@ final class TodosStore {
     /// The line of the plan the lists are narrowed to, kept the way the tags are.
     var focus: String? = TodosStore.keptFocus
     @ObservationIgnored private static var keptFocus: String? = nil
-    /// The lines of the plan that are open, and the tasks of each once they have arrived.
-    var openLines: Set<String> = []
+    /// The lines turned the other way from how they start: a priority or part starts open, "Not in
+    /// the plan" closed. Kept on this device for good, so a line the owner closed stays closed.
+    var flippedLines: Set<String> = Set(UserDefaults.standard.stringArray(forKey: TodosStore.flippedKey) ?? [])
+    @ObservationIgnored private static let flippedKey = "todos.plan.flipped"
+    /// The tasks under each line ("none": those part of nothing), once they have arrived.
     var planTasks: [String: [Todo]] = [:]
+    /// Whether the plan's tasks have arrived at least once.
+    var planLoaded: Bool = false
     /// The task being carried in the plan, and the line it is part of.
     @ObservationIgnored var planDragging: (id: String, line: String)? = nil
 
@@ -757,24 +762,21 @@ final class TodosStore {
 
     // MARK: The plan
 
-    /// The tasks that are part of one line itself, soonest first ("none": those part of nothing).
-    /// A priority's own list holds only its own tasks; those of its parts are under the parts.
-    func refreshLine(_ key: String) async {
+    /// Every task, read once and sorted onto its line: one request however many lines are open.
+    func refreshPlan() async {
         guard let api = app?.api else { return }
-        guard let reply: TodosListResponse = try? await api.get("todos?view=all&plan=" + q(key)) else { return }
-        let mine = reply.todos.filter { todo in
-            key == Self.noLine ? todo.plan_id == nil : todo.plan_id == key
+        guard let reply: TodosListResponse = try? await api.get("todos?view=all") else { return }
+        var next: [String: [Todo]] = [:]
+        for todo in reply.todos {
+            next[todo.plan_id ?? Self.noLine, default: []].append(todo)
         }
-        if planTasks[key] != mine {
-            withAnimation(.ssSoft) { planTasks[key] = mine }
+        if planTasks != next || !planLoaded {
+            withAnimation(.ssSoft) {
+                planTasks = next
+                planLoaded = true
+            }
         }
         if let day = reply.today { today = day }
-    }
-
-    func refreshPlan() async {
-        for key in openLines.sorted() {
-            await refreshLine(key)
-        }
     }
 
     private func planChanged() async {
@@ -782,13 +784,33 @@ final class TodosStore {
         await refreshPlan()
     }
 
+    /// Open: a line of the plan unless the owner closed it; "Not in the plan" only if they opened it.
+    func isOpen(_ key: String) -> Bool {
+        (key != Self.noLine) != flippedLines.contains(key)
+    }
+
+    /// Something under the line: its own tasks (before they arrive, the count the server gave)
+    /// or, for a priority, its parts. Only such a line can be closed.
+    func hasKids(_ item: TodosPlanItem) -> Bool {
+        if plan.contains(where: { $0.parent_id == item.id }) { return true }
+        if planLoaded { return !(planTasks[item.id] ?? []).isEmpty }
+        return (item.open ?? 0) > 0
+    }
+
     func toggleLine(_ key: String) {
-        if openLines.contains(key) {
-            withAnimation(.ssSoft) { _ = openLines.remove(key) }
-        } else {
-            withAnimation(.ssSoft) { _ = openLines.insert(key) }
-            Task { await refreshLine(key) }
+        withAnimation(.ssSoft) {
+            if flippedLines.contains(key) {
+                flippedLines.remove(key)
+            } else {
+                flippedLines.insert(key)
+            }
         }
+        UserDefaults.standard.set(Array(flippedLines), forKey: Self.flippedKey)
+    }
+
+    /// Opens a line if it is closed, as a task is added to it.
+    func revealLine(_ key: String) {
+        if !isOpen(key) { toggleLine(key) }
     }
 
     /// Adds a priority, or with `parent` a part of one. False means it could not be saved.
@@ -825,8 +847,8 @@ final class TodosStore {
             try await api.send("DELETE", "plan/\(id)")
             problem = nil
             for key in planScope(id) {
-                openLines.remove(key)
                 planTasks[key] = nil
+                if flippedLines.contains(key) { toggleLine(key) }
             }
         } catch {
             problem = error.localizedDescription
@@ -841,9 +863,7 @@ final class TodosStore {
             try await api.send("POST", "todos", body: ["title": title, "view": "backlog", "plan": line])
             problem = nil
             // the line opens, so the new task is seen under it
-            if !openLines.contains(line) {
-                withAnimation(.ssSoft) { _ = openLines.insert(line) }
-            }
+            revealLine(line)
             await planChanged()
             return true
         } catch {

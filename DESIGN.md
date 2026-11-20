@@ -402,28 +402,32 @@ Patterns:
   a short outline, with the tasks under each. It is a view across the lists, listed with "All",
   and it is where the owner steps back and looks at everything; the day lists stay as they are.
   A priority is a line in 17px semibold; its parts sit under it, set in a little, one level and
-  no further. No numbers anywhere: a line shows nothing at its end unless no unfinished task is
-  part of it (for a priority, of it or any of its parts), where it says "Nothing yet" in `ink2`,
-  because a gap is the one thing planning needs to see. Tapping a line opens its tasks in place,
-  soonest first. A task there shows where it sits ("Today" in accent, "This week", "Backlog") and
-  that word moves it to another list; tapping the task opens it. A task typed under a line goes
-  to the backlog: planning is not scheduling. Carrying a task onto another line makes it part of
-  that line (the line lights as a list does); let go anywhere else it returns, since the order
-  here is the lists' own. In the app the same word also offers the lines, as the system menu.
-  An open line's name is a field, like a task's name: tap the words and type, and return or
-  leaving it saves. The bin (`ConfirmDelete`, "Remove") sits beside the name while the line is
-  open; removing a line leaves its tasks in their lists. With a pointer over a closed line a
-  small pencil shows at its end, which opens the line with the name selected. Do not put renaming
-  or removing behind a word at the foot of the tasks: it was tried and was not found. Under each priority, after its parts, is the round plus the
-  lists use (`PlanAdd`). It adds a task to that priority. Parts are optional and must never look
-  required, so "Part" is offered only on request: with a pointer over the plus it grows to say
-  "Task" and shows "Part" beside it in `ink3` (the plus itself must not move as it grows: the word
-  opens to its right); where nothing can hover the first tap shows the two
-  and the second chooses (in the app the plus opens the system menu, "Add a task" first). A part
-  has its own "Add a task" field once opened. "Add a priority" is a field at the end of the
-  outline. Last, set
-  apart, "Not in the plan" holds the tasks that are part of nothing, which is where chores live
-  and is never a fault. Do not add counts, progress, colours or a third level.
+  no further. No numbers anywhere, and an empty line says nothing about being empty (the owner's
+  call, Nov 2026: "Nothing yet" was noise). Every priority and part starts open with its tasks
+  showing, soonest first; "Not in the plan" starts closed. Only a line with something under it
+  (tasks, or for a priority its parts) has a chevron, which closes and opens it, and what the
+  owner closes or opens stays that way across visits (on the web in `localStorage`, in the app
+  in `UserDefaults`; per device). A line without a chevron keeps its place empty, so the controls
+  of lines with and without one line up. A closed priority hides its parts and its plus.
+  A task under a line shows where it sits ("Today" in accent, "This week", "Backlog") and that
+  word moves it to another list; tapping the task opens it. A task typed under a line goes to the
+  backlog: planning is not scheduling. Carrying a task onto another line makes it part of that
+  line (the line lights as a list does); let go anywhere else it returns, since the order here is
+  the lists' own. In the app the same word also offers the lines, as the system menu.
+  A line's name is always a field, like a task's name: tap the words and type, and return or
+  leaving it saves. The bin (`ConfirmDelete`, "Remove") shows beside the name while it is being
+  edited, and on the web also while a pointer is over the line; removing a line leaves its tasks
+  in their lists. Do not put renaming or removing behind a word at the foot of the tasks: it was
+  tried and was not found. Under each priority, after its parts, is the round plus the lists use
+  (`PlanAdd`). It adds a task to that priority. Parts are optional and must never look required,
+  so "Part" is offered only on request: with a pointer over the plus it grows to say "Task" and
+  shows "Part" beside it in `ink3` (the plus itself must not move as it grows: the word opens to
+  its right); where nothing can hover the first tap shows the two and the second chooses (in the
+  app the plus opens the system menu, "Add a task" first). A part has a small plus at its end,
+  before the chevron's place, that adds a task to it: shown with a pointer over the part, always
+  where nothing can hover. "Add a priority" is a field at the end of the outline. Last, set apart,
+  "Not in the plan" holds the tasks that are part of nothing, which is where chores live and is
+  never a fault. Do not add counts, progress, colours or a third level.
 - **Part of** (todos): a task can be part of one line of the plan. In a list its row names that
   line as the first of its chips, in the same quiet style as a tag, and then shows one tag fewer
   (two chips at most). In the task it is a pill after the repeat pill, with a flag: "Part of"

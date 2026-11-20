@@ -827,9 +827,10 @@ async function run(profile) {
     await settle(1500);
   });
   await step("todos plan", async () => {
-    // The plan: priorities, their parts and the tasks under each. A line with no unfinished task
-    // says "Nothing yet"; nothing is counted. A task is carried onto a line to become part of it,
-    // and any list can be narrowed to a line.
+    // The plan: priorities, their parts and the tasks under each, open from the start. Only a line
+    // with something under it has a chevron, which closes it, and what is closed stays closed.
+    // Nothing is counted. A task is carried onto a line to become part of it, and any list can be
+    // narrowed to a line.
     const nav = page.getByRole("navigation", { name: "Lists" });
     const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
     const del = (url) => page.evaluate((u) => fetch(u, { method: "DELETE" }).then((r) => r.status), url);
@@ -844,9 +845,12 @@ async function run(profile) {
     await page.locator("h1", { hasText: /^Plans$/ }).waitFor({ timeout: 4000 });
     await line("Start the year with a clear plan").waitFor({ timeout: 5000 });
     await settle(800);
-    if (!(await line("A budget we both agree on").locator("[data-plan-empty]").count())) fail("todos plan: a line with no tasks does not say Nothing yet");
-    if (await line("Goals for the first quarter").locator("[data-plan-empty]").count()) fail("todos plan: a line with an unfinished task says Nothing yet");
-    if (await line("Start the year with a clear plan").locator("[data-plan-empty]").count()) fail("todos plan: a priority whose part has a task says Nothing yet");
+    const caret = (title) => line(title).locator("[aria-expanded]");
+    if (await caret("A budget we both agree on").count()) fail("todos plan: a line with nothing under it has a chevron");
+    if (await line("A budget we both agree on").getByText("Nothing yet").count()) fail("todos plan: an empty line says Nothing yet");
+    if ((await caret("Goals for the first quarter").getAttribute("aria-expanded").catch(() => null)) !== "true") fail("todos plan: a line with tasks is not open from the start");
+    if ((await caret("Start the year with a clear plan").getAttribute("aria-expanded").catch(() => null)) !== "true") fail("todos plan: a priority with parts is not open from the start");
+    if ((await caret("Not in the plan").getAttribute("aria-expanded").catch(() => null)) !== "false") fail("todos plan: Not in the plan is open from the start");
     if (/\d/.test(await page.locator("[data-plan]").innerText())) fail("todos plan: the plan shows a number; it counts nothing");
     // under each priority a plus adds a task; "Part" is offered beside it only on request, so parts never look required
     const plus = (n) => page.getByRole("button", { name: `Add a task to ${n}`, exact: true });
@@ -857,13 +861,20 @@ async function run(profile) {
     await noSidewaysScroll("todos plan");
     await shot("todos-plan");
 
-    // tapping a line opens its tasks in place, each saying where it sits
-    await press(line("Goals for the first quarter").locator("[aria-expanded]"));
+    // a line's tasks show from the start, each saying where it sits
     await task("Draft Q1 goals").waitFor({ timeout: 5000 });
-    await settle(500);
     await reachable(task("Draft Q1 goals").locator("[data-place]"), "todos plan: where a task sits");
     if ((await placeOf("Draft Q1 goals")) !== "This week") fail("todos plan: a task set for the week does not say This week");
-    await press(line("Goals for the first quarter").locator("[aria-expanded]"));
+    // closed with its chevron, a line stays closed after the page is loaded again, until it is opened
+    await press(caret("Goals for the first quarter"));
+    await settle(500);
+    if (await task("Draft Q1 goals").count()) fail("todos plan: closing a line left its tasks showing");
+    await page.reload();
+    await line("Goals for the first quarter").waitFor({ timeout: 8000 });
+    await settle(1200);
+    if (await task("Draft Q1 goals").count()) fail("todos plan: a closed line was open again after the page was loaded again");
+    await press(caret("Goals for the first quarter"));
+    await task("Draft Q1 goals").waitFor({ timeout: 5000 }).catch(() => fail("todos plan: a closed line did not open again"));
     await settle(400);
 
     // a new priority, a part of it, and a task under the priority: it waits in the backlog
@@ -874,7 +885,7 @@ async function run(profile) {
     await page.keyboard.press("Enter");
     await line(name).waitFor({ timeout: 5000 });
     await settle(600);
-    if (!(await line(name).locator("[data-plan-empty]").count())) fail("todos plan: a new priority does not say Nothing yet");
+    if (await caret(name).count()) fail("todos plan: a new priority, with nothing under it, has a chevron");
     // with a pointer the plus offers "Part" beside it; without one the first tap shows the two
     if (profile.touch) await press(plus(name));
     else await plus(name).hover();
@@ -894,16 +905,19 @@ async function run(profile) {
     await task(title).waitFor({ timeout: 5000 });
     await settle(800);
     if ((await placeOf(title)) !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
-    if (await line(name).locator("[data-plan-empty]").count()) fail("todos plan: a line still says Nothing yet after a task was added to it");
+    if (!(await caret(name).count())) fail("todos plan: a priority with a task under it has no chevron");
     // an open line's name is a field: typed over, it is saved, and the line keeps its tasks
     const nameField = line(name).locator("[data-plan-name]");
     await reachable(nameField, "todos plan: the name of an open line");
-    await reachable(line(name).getByRole("button", { name: /^Remove / }), "todos plan: the bin beside an open line's name");
+    // the bin shows while the name is being edited (and with a pointer over the line)
+    await press(nameField);
+    await settle(300);
+    await reachable(line(name).getByRole("button", { name: /^Remove / }), "todos plan: the bin beside a line's name");
     await nameField.fill(name + " well");
     await page.keyboard.press("Enter");
     await settle(900);
     if (!(await get("/api/v1/plan")).plan.some((i) => i.title === name + " well")) fail("todos plan: a name typed over an open line was not saved");
-    await page.locator("[data-plan-name]").first().fill(name);
+    await line(name + " well").locator("[data-plan-name]").fill(name);
     await page.keyboard.press("Enter");
     await settle(900);
     if (!(await get("/api/v1/plan")).plan.some((i) => i.title === name)) fail("todos plan: the line's name could not be put back");

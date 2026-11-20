@@ -3,11 +3,11 @@ import UniformTypeIdentifiers
 
 /// The plan: the owner's priorities as a short outline, each with parts one level down, and the
 /// tasks under each line. It is where they step back and look at everything; the day lists are
-/// where the work is done. A line says "Nothing yet" while no unfinished task is part of it, which
-/// is the one thing planning needs to see. Nothing is counted.
+/// where the work is done. Nothing is counted.
 ///
-/// Tapping a line opens its tasks in place. A task shows where it sits (Today, This week,
-/// Backlog), and that word offers the other lists and the other lines it can go to.
+/// Every priority and part starts open with its tasks showing; "Not in the plan" starts closed.
+/// Only a line with something under it has a chevron, which closes it, and what the owner closes
+/// or opens stays that way. A line with nothing under it is just its name.
 struct TodosPlanView: View {
     var store: TodosStore
 
@@ -19,25 +19,25 @@ struct TodosPlanView: View {
         store.plan.filter { $0.parent_id == id }
     }
 
-    /// Nothing unfinished is part of this line, nor (for a priority) of any of its parts.
-    private func empty(_ item: TodosPlanItem) -> Bool {
-        var open = item.open ?? 0
-        for part in parts(of: item.id) { open += part.open ?? 0 }
-        return open == 0
-    }
-
     var body: some View {
         let priorities = tops
+        let loose = store.planTasks[TodosStore.noLine] ?? []
         VStack(alignment: .leading, spacing: 0) {
             PageHeader("Plans", sub: "What you are working towards, and the tasks under each.")
             TodosProblem(text: store.problem)
             ForEach(priorities) { top in
+                let kids = store.hasKids(top)
+                // a line with nothing under it cannot be closed: there is nothing to hide
+                let open = !kids || store.isOpen(top.id)
                 VStack(alignment: .leading, spacing: 0) {
-                    TodosPlanLine(item: top, empty: empty(top), store: store)
-                    ForEach(parts(of: top.id)) { part in
-                        TodosPlanLine(item: part, empty: empty(part), store: store)
+                    TodosPlanLine(item: top, kids: kids, open: open, store: store)
+                    if open {
+                        ForEach(parts(of: top.id)) { part in
+                            let partKids = store.hasKids(part)
+                            TodosPlanLine(item: part, kids: partKids, open: !partKids || store.isOpen(part.id), store: store)
+                        }
+                        TodosPlanAdd(parent: top, store: store)
                     }
-                    TodosPlanAdd(parent: top, store: store)
                 }
                 .padding(.bottom, 12)
             }
@@ -52,7 +52,7 @@ struct TodosPlanView: View {
             TodosPlanAddPriority(store: store)
                 .padding(.top, 4)
             if !priorities.isEmpty {
-                TodosPlanLine(item: nil, empty: false, store: store)
+                TodosPlanLine(item: nil, kids: !loose.isEmpty, open: store.isOpen(TodosStore.noLine), store: store)
                     .padding(.top, 24)
             }
         }
@@ -60,33 +60,39 @@ struct TodosPlanView: View {
     }
 }
 
-/// One line of the plan with, once opened, its tasks. Without an item it is "Not in the plan":
-/// the tasks that are part of nothing.
+/// One line of the plan and, while it is open, its tasks. Without an item it is "Not in the
+/// plan": the tasks that are part of nothing.
 ///
-/// An open line's name is a field: tap the words and type, as with a task's name. The bin that
-/// takes the line out of the plan sits beside it.
+/// A line's name is a field, as a task's name is: tap the words and type; return or leaving saves.
+/// The bin that takes the line out of the plan shows beside it while the name is being edited.
+/// The chevron is there only when the line has something under it; otherwise its place is kept
+/// empty so the controls of every line stay in one column. A part has a small plus at its end
+/// that adds a task to it.
 private struct TodosPlanLine: View {
     var item: TodosPlanItem?
-    var empty: Bool
+    var kids: Bool
+    var open: Bool
     var store: TodosStore
     @State private var over = false
     @State private var name = ""
+    @State private var adding = false
+    @State private var draft = ""
     @FocusState private var nameFocused: Bool
+    @FocusState private var draftFocused: Bool
 
     var body: some View {
         let key = item?.id ?? TodosStore.noLine
         let title = item?.title ?? "Not in the plan"
-        let open = store.openLines.contains(key)
         let top = item != nil && item?.parent_id == nil
         let part = item?.parent_id != nil
         let font: Font = top ? .system(size: 17, weight: .semibold) : .system(size: 15.5)
-        let ink: Color = over ? Theme.accent : (item == nil ? Theme.ink2 : Theme.ink)
+        let rows = store.planTasks[key] ?? []
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 4) {
-                if open, item != nil {
+                if item != nil {
                     TextField("Name", text: $name, axis: .vertical)
                         .font(font)
-                        .foregroundStyle(Theme.ink)
+                        .foregroundStyle(over ? Theme.accent : Theme.ink)
                         .tint(Theme.accent)
                         .focused($nameFocused)
                         .submitLabel(.done)
@@ -107,51 +113,93 @@ private struct TodosPlanLine: View {
                     } label: {
                         Text(title)
                             .font(font)
-                            .foregroundStyle(ink)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(over ? Theme.accent : Theme.ink2)
                             .padding(.vertical, 7)
                             .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(title + (empty ? ". Nothing yet" : ""))
                     .accessibilityIdentifier("todos.plan.line.\(key)")
                 }
-                if empty {
-                    Text("Nothing yet")
-                        .font(.ssMeta)
-                        .foregroundStyle(Theme.ink2)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .accessibilityHidden(!open)
-                }
-                if open, item != nil {
+                if item != nil && nameFocused {
                     ConfirmDelete(label: "Remove \(title) from the plan", confirm: "Remove", size: 15) {
                         await store.removeLine(key)
                     }
                     .accessibilityIdentifier("todos.plan.remove.\(key)")
+                    .transition(.opacity)
                 }
-                Button {
-                    nameFocused = false
-                    store.toggleLine(key)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.ink3)
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
+                if part {
+                    Button {
+                        draft = ""
+                        adding = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.ink3)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Add a task to \(title)")
+                    .accessibilityIdentifier("todos.plan.partPlus.\(key)")
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel((open ? "Close " : "Open ") + title)
-                .accessibilityIdentifier("todos.plan.toggle.\(key)")
+                if kids {
+                    Button {
+                        nameFocused = false
+                        store.toggleLine(key)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.ink3)
+                            .rotationEffect(.degrees(open ? 90 : 0))
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel((open ? "Close " : "Open ") + title)
+                    .accessibilityAddTraits(open ? .isSelected : [])
+                    .accessibilityIdentifier("todos.plan.toggle.\(key)")
+                } else if item != nil {
+                    // the chevron's place, kept empty, so the controls of every line line up
+                    Color.clear.frame(width: 36, height: 36).accessibilityHidden(true)
+                }
             }
             .padding(.leading, part ? 20 : 0)
-            if open {
-                TodosPlanTasks(line: key, item: item, store: store)
-                    .padding(.leading, part ? 16 : 0)
-                    .transition(.opacity)
+            .animation(.ssSoft, value: nameFocused)
+            if open && (!rows.isEmpty || adding) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows) { row in
+                        TodosPlanRow(row: row, line: key, store: store)
+                            .transition(.opacity)
+                    }
+                    if adding, let item {
+                        HStack(alignment: .center, spacing: 4) {
+                            Circle()
+                                .strokeBorder(Theme.ink3, lineWidth: 1.5)
+                                .frame(width: 22, height: 22)
+                                .opacity(0.4)
+                                .frame(width: 36, height: 36)
+                                .accessibilityHidden(true)
+                            TextField("New task", text: $draft)
+                                .font(.system(size: 16))
+                                .foregroundStyle(Theme.ink)
+                                .tint(Theme.accent)
+                                .focused($draftFocused)
+                                .submitLabel(.done)
+                                .frame(minHeight: 36)
+                                .onSubmit {
+                                    addTask()
+                                    draftFocused = true
+                                }
+                                .task { draftFocused = true }
+                                .accessibilityLabel("New task for \(item.title)")
+                                .accessibilityIdentifier("todos.plan.add.\(key)")
+                        }
+                    }
+                }
+                .padding(.leading, part ? 16 : 0)
+                .padding(.bottom, 8)
+                .transition(.opacity)
             }
         }
         .padding(.horizontal, 8)
@@ -165,88 +213,40 @@ private struct TodosPlanLine: View {
         }
         .animation(.ssSpring, value: over)
         // the field shows the saved name whenever nothing is being typed over it
-        .onChange(of: open, initial: true) { _, _ in
-            name = item?.title ?? ""
-        }
-        .onChange(of: item?.title) { _, saved in
+        .onChange(of: item?.title, initial: true) { _, saved in
             if !nameFocused { name = saved ?? "" }
         }
         .onChange(of: nameFocused) { _, on in
             if !on { rename() }
         }
+        .onChange(of: draftFocused) { _, on in
+            if !on && adding {
+                addTask()
+                adding = false
+            }
+        }
     }
 
     private func rename() {
-        let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let item else { return }
-        guard !title.isEmpty, title != item.title else {
+        guard !next.isEmpty, next != item.title else {
             name = item.title
             return
         }
         let id = item.id
-        Task { await store.renameLine(id, to: title) }
-    }
-}
-
-/// The tasks of one opened line, soonest first, and for a part the field that adds one (a
-/// priority adds through the plus under it).
-private struct TodosPlanTasks: View {
-    var line: String
-    var item: TodosPlanItem?
-    var store: TodosStore
-    @State private var draft = ""
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        let rows = store.planTasks[line]
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(rows ?? []) { row in
-                TodosPlanRow(row: row, line: line, store: store)
-                    .transition(.opacity)
-            }
-            if let item {
-                if item.parent_id != nil {
-                    HStack(alignment: .center, spacing: 4) {
-                        Circle()
-                            .strokeBorder(Theme.ink3, lineWidth: 1.5)
-                            .frame(width: 22, height: 22)
-                            .opacity(0.4)
-                            .frame(width: 36, height: 36)
-                            .accessibilityHidden(true)
-                        TextField("Add a task", text: $draft)
-                            .font(.system(size: 16))
-                            .foregroundStyle(Theme.ink)
-                            .tint(Theme.accent)
-                            .focused($focused)
-                            .submitLabel(.done)
-                            .frame(minHeight: 36)
-                            .onSubmit {
-                                add()
-                                focused = true
-                            }
-                            .accessibilityLabel("Add a task to \(item.title)")
-                            .accessibilityIdentifier("todos.plan.add.\(line)")
-                    }
-                }
-            } else if let rows, rows.isEmpty {
-                Text("Every task is part of the plan.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.ink3)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 8)
-            }
-        }
-        .padding(.bottom, 8)
+        Task { await store.renameLine(id, to: next) }
     }
 
-    private func add() {
+    private func addTask() {
         let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = ""
-        if title.isEmpty { return }
+        guard !title.isEmpty, let item else { return }
+        let id = item.id
         Task {
-            let saved = await store.addPlanTask(title, to: line)
+            let saved = await store.addPlanTask(title, to: id)
             // could not be saved: give the words back to the box
-            if !saved && draft.isEmpty { draft = title }
+            if !saved && draft.isEmpty && adding { draft = title }
         }
     }
 }

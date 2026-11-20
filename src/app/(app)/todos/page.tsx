@@ -1,6 +1,6 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, Pencil, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -198,8 +198,6 @@ function Todos() {
       // as above
     }
   };
-  // the lines of the plan that are open; kept here so they are still open on coming back from a task
-  const [openLines, setOpenLines] = useState<string[]>([]);
   const show = (key: string) => (setView(key), setOpenId(null));
 
   // The rail links here with ?open=<task id> to show one task, also while this screen is already up.
@@ -280,7 +278,7 @@ function Todos() {
               {view === BIN ? (
                 <Bin />
               ) : view === PLAN ? (
-                <Plan plan={f?.plan} folders={f?.folders ?? []} today={f?.today} open={openLines} onOpenLines={setOpenLines} onOpen={setOpenId} />
+                <Plan plan={f?.plan} folders={f?.folders ?? []} today={f?.today} onOpen={setOpenId} />
               ) : (
                 <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} filter={filter} onFilter={setFilter} plan={f?.plan ?? []} focus={focus} onFocus={setFocus} onOpen={setOpenId} onCarry={setCarry} />
               )}
@@ -674,24 +672,68 @@ type PlanTools = {
   /** the line a carried task is held over, or null */
   onOver: (line: string | null) => void;
   refresh: () => void;
+  /** a change shown at once in the plan's copy of the tasks; null takes the task out of it */
+  edit: (id: string, change: Partial<Row> | null) => void;
+  /** a change to a task, saved, after which the lists catch up */
+  send: (id: string, body: Record<string, unknown>) => Promise<void>;
 };
+
+/** Where the lines the owner has opened or closed against their default are kept, on this device, for good. */
+const FLIPPED_KEY = "ss_plan_flipped";
 
 /**
  * The plan: the owner's priorities as a short outline, each with parts one level down, and the
  * tasks under each line. It is where they step back and look at everything; the day lists are
- * where the work is done. A line says "Nothing yet" while no unfinished task is part of it, which
- * is the one thing planning needs to see. Nothing is counted.
+ * where the work is done. Nothing is counted.
  *
- * Tapping a line opens its tasks in place. A task shows where it sits (Today, This week, Backlog)
- * and that word moves it; carrying a task onto another line makes it part of that line.
+ * Every priority and part starts open, with its tasks showing; "Not in the plan" starts closed. A
+ * line with something under it (tasks, or for a priority its parts) has a chevron that closes it,
+ * and what the owner closes or opens stays that way, across visits. A line with nothing under it
+ * has no chevron and says nothing more: it is just its name, and the plus beneath.
+ *
+ * A task shows where it sits (Today, This week, Backlog) and that word moves it; carrying a task
+ * onto another line makes it part of that line.
  */
-function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: PlanItem[]; folders: Folder[]; today?: string; open: string[]; onOpenLines: (ids: string[]) => void; onOpen: (id: string) => void }) {
+function Plan({ plan, folders, today, onOpen }: { plan?: PlanItem[]; folders: Folder[]; today?: string; onOpen: (id: string) => void }) {
   const { mutate: globalMutate } = useSWRConfig();
   const refresh = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
+  // every task, once, sorted onto its line here: one request however many lines are open
+  const { data, mutate } = useSWR<{ todos: Row[]; today: string }>("todos?view=all", fetcher, { refreshInterval: 15_000 });
   const [over, setOver] = useState<string | null>(null);
   const [priority, setPriority] = useState("");
-  const tools: PlanTools = { today, folders, onOpen, onOver: setOver, refresh };
-  const toggle = (id: string) => onOpenLines(open.includes(id) ? open.filter((x) => x !== id) : [...open, id]);
+  // the lines turned the other way from how they start (priorities and parts open, "Not in the plan" closed)
+  const [flipped, setFlippedNow] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const kept: unknown = JSON.parse(localStorage.getItem(FLIPPED_KEY) ?? "[]");
+      if (Array.isArray(kept)) setFlippedNow(kept.filter((x): x is string => typeof x === "string"));
+    } catch {
+      // no storage: every line starts as it would the first time
+    }
+  }, []);
+  const setFlipped = (next: string[]) => {
+    setFlippedNow(next);
+    try {
+      localStorage.setItem(FLIPPED_KEY, JSON.stringify(next));
+    } catch {
+      // a private window may refuse; the choice then lasts while the page is up
+    }
+  };
+  // open: a line of the plan unless the owner closed it; "Not in the plan" only if they opened it
+  const turned = (key: string) => (key !== "none") !== flipped.includes(key);
+  const toggle = (key: string) => setFlipped(flipped.includes(key) ? flipped.filter((x) => x !== key) : [...flipped, key]);
+  const reveal = (key: string) => !turned(key) && toggle(key);
+
+  const rowsOf = (key: string) => (data?.todos ?? []).filter((r) => (key === "none" ? !r.plan_id : r.plan_id === key));
+  const edit = (id: string, change: Partial<Row> | null) => mutate((cur) => (cur ? { ...cur, todos: change ? cur.todos.map((r) => (r.id === id ? { ...r, ...change } : r)) : cur.todos.filter((r) => r.id !== id) } : cur), false);
+  async function send(id: string, body: Record<string, unknown>) {
+    try {
+      await api(`todos/${id}`, { method: "PATCH", body });
+    } finally {
+      refresh();
+    }
+  }
+  const tools: PlanTools = { today: data?.today ?? today, folders, onOpen, onOver: setOver, refresh, edit, send };
 
   async function addLine(title: string, parent?: string) {
     if (!title.trim()) return;
@@ -700,6 +742,8 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
   }
   const tops = (plan ?? []).filter((i) => !i.parent_id);
   const partsOf = (id: string) => (plan ?? []).filter((i) => i.parent_id === id);
+  // something under it: its own tasks (before they arrive, the count the server gave) or, for a priority, parts
+  const kids = (item: PlanItem, parts: PlanItem[] = []) => parts.length > 0 || (data ? rowsOf(item.id).length > 0 : item.open > 0);
 
   return (
     <div data-plan>
@@ -710,13 +754,21 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
 
       {tops.map((top) => {
         const parts = partsOf(top.id);
+        const has = kids(top, parts);
+        // a line with nothing under it cannot be closed: there is nothing to hide
+        const open = !has || turned(top.id);
         return (
           <div key={top.id} className="mb-3">
-            <PlanLine item={top} empty={top.open + parts.reduce((n, p) => n + p.open, 0) === 0} open={open.includes(top.id)} over={over === top.id} onToggle={() => toggle(top.id)} tools={tools} />
-            {parts.map((p) => (
-              <PlanLine key={p.id} item={p} empty={p.open === 0} open={open.includes(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} tools={tools} />
-            ))}
-            <PlanAdd top={top} onPart={(title) => addLine(title, top.id)} onTask={() => (open.includes(top.id) || onOpenLines([...open, top.id]), refresh())} />
+            <PlanLine item={top} rows={rowsOf(top.id)} kids={has} open={open} over={over === top.id} onToggle={() => toggle(top.id)} tools={tools} />
+            {open && (
+              <>
+                {parts.map((p) => {
+                  const partKids = kids(p);
+                  return <PlanLine key={p.id} item={p} rows={rowsOf(p.id)} kids={partKids} open={!partKids || turned(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} onReveal={() => reveal(p.id)} tools={tools} />;
+                })}
+                <PlanAdd top={top} onPart={(title) => addLine(title, top.id)} onTask={() => (reveal(top.id), refresh())} />
+              </>
+            )}
           </div>
         );
       })}
@@ -729,7 +781,7 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
 
       {tops.length > 0 && (
         <div className="mt-6">
-          <PlanLine item={null} empty={false} open={open.includes("none")} over={over === "none"} onToggle={() => toggle("none")} tools={tools} />
+          <PlanLine item={null} rows={rowsOf("none")} kids={rowsOf("none").length > 0} open={turned("none")} over={over === "none"} onToggle={() => toggle("none")} tools={tools} />
         </div>
       )}
     </div>
@@ -801,39 +853,55 @@ function PlanAdd({ top, onPart, onTask }: { top: PlanItem; onPart: (title: strin
 }
 
 /**
- * One line of the plan with, once opened, its tasks. Without an item it is "Not in the plan": the
- * tasks that are part of nothing.
+ * One line of the plan and, while it is open, its tasks. Without an item it is "Not in the plan":
+ * the tasks that are part of nothing.
  *
- * An open line's name is a field: tap the words and type, as with a task's name. The bin that
- * takes the line out of the plan sits beside it. With a pointer over a closed line a pencil shows
- * at its end, which opens the line with the name ready to type over.
+ * A line's name is a field, as a task's name is: tap the words and type, and return or leaving
+ * saves. The bin that takes the line out of the plan shows beside it while a pointer is over the
+ * line or the name is being edited. The chevron is there only when the line has something under
+ * it. A part has a small plus at its end that adds a task to it.
  */
-function PlanLine({ item, empty, open, over, onToggle, tools }: { item: PlanItem | null; empty: boolean; open: boolean; over: boolean; onToggle: () => void; tools: PlanTools }) {
+function PlanLine({ item, rows, kids, open, over, onToggle, onReveal, tools }: { item: PlanItem | null; rows: Row[]; kids: boolean; open: boolean; over: boolean; onToggle: () => void; /** opens the line if it is closed (a part, as a task is added to it) */ onReveal?: () => void; tools: PlanTools }) {
   const key = item?.id ?? "none";
+  const title = item?.title ?? "Not in the plan";
   // what is being typed over the name; null while it shows the saved one
   const [name, setName] = useState<string | null>(null);
-  const field = useRef<HTMLTextAreaElement>(null);
-  const focusNext = useRef(false);
+  // a part's own field for a new task, open from its plus
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
   const top = !!item && !item.parent_id;
+  const part = !!item?.parent_id;
   const type = top ? "text-[17px] font-semibold tracking-[-0.015em]" : "text-[15.5px]";
-  useEffect(() => {
-    if (open && focusNext.current) (field.current?.focus(), field.current?.select());
-    focusNext.current = false;
-  }, [open]);
   async function rename() {
-    const title = name?.trim();
+    const next = name?.trim();
     setName(null);
-    if (!item || !title || title === item.title) return;
-    await api(`plan/${item.id}`, { method: "PATCH", body: { title } });
+    if (!item || !next || next === item.title) return;
+    await api(`plan/${item.id}`, { method: "PATCH", body: { title: next } });
     tools.refresh();
   }
+  async function addTask(stay: boolean) {
+    const t = draft.trim();
+    setDraft("");
+    if (!stay || !t) setAdding(false);
+    if (!t || !item) return;
+    try {
+      // planning is not scheduling: a task added here waits in the backlog until it is given a place
+      await api("todos", { body: { title: t, view: "backlog", plan: item.id } });
+      onReveal?.();
+      tools.refresh();
+    } catch {
+      setDraft(t);
+      setAdding(true);
+    }
+  }
+  // shown with a pointer over the line, while its name is being edited, and always where nothing can hover
+  const onHover = "opacity-0 pointer-events-none group-hover/line:opacity-100 group-hover/line:pointer-events-auto group-focus-within/line:opacity-100 group-focus-within/line:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto";
   return (
-    <div data-plan-line={key} data-plan-title={item?.title ?? "Not in the plan"} data-over={over || undefined} className={`-mx-2 rounded-2xl px-2 transition-colors ${over ? "drop-target" : ""}`}>
-      <div className={`group/line flex min-h-10 items-center gap-1 ${top || !item ? "" : "pl-5"}`}>
-        {open && item ? (
+    <div data-plan-line={key} data-plan-title={title} data-over={over || undefined} className={`-mx-2 rounded-2xl px-2 transition-colors ${over ? "drop-target" : ""}`}>
+      <div className={`group/line flex min-h-10 items-center gap-1 ${part ? "pl-5" : ""}`}>
+        {item ? (
           <textarea
             ref={(el) => {
-              field.current = el;
               if (el) (el.style.height = "0px"), (el.style.height = el.scrollHeight + "px");
             }}
             rows={1}
@@ -843,87 +911,58 @@ function PlanLine({ item, empty, open, over, onToggle, tools }: { item: PlanItem
             onChange={(e) => setName(e.target.value.replace(/\n/g, ""))}
             onBlur={rename}
             onKeyDown={(e) => (e.key === "Enter" ? (e.preventDefault(), e.currentTarget.blur()) : e.key === "Escape" && (setName(null), e.currentTarget.blur()))}
-            className={`min-w-0 flex-1 resize-none overflow-hidden rounded-lg px-1 py-[7px] leading-[1.35] transition-colors hover:bg-fill focus:bg-fill ${type}`}
+            className={`min-w-0 flex-1 resize-none overflow-hidden rounded-lg px-1 py-[7px] leading-[1.35] transition-colors hover:bg-fill focus:bg-fill ${over ? "text-accent" : ""} ${type}`}
           />
         ) : (
-          <button onClick={onToggle} className={`min-w-0 flex-1 break-words px-1 py-[7px] text-left leading-[1.35] transition-colors ${over ? "text-accent" : item ? "" : "text-ink2"} ${type}`}>
-            {item?.title ?? "Not in the plan"}
+          <button onClick={onToggle} className={`min-w-0 flex-1 break-words px-1 py-[7px] text-left leading-[1.35] transition-colors ${over ? "text-accent" : "text-ink2"} ${type}`}>
+            {title}
           </button>
         )}
-        {empty && <span data-plan-empty className="flex-none whitespace-nowrap px-1 text-[12.5px] text-ink2">Nothing yet</span>}
-        {item && !open && (
-          <button
-            aria-label={`Rename ${item.title}`}
-            onClick={() => ((focusNext.current = true), onToggle())}
-            className="pointer-events-none grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 opacity-0 transition-opacity hover:bg-fill hover:text-ink2 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/line:pointer-events-auto group-hover/line:opacity-100"
-          >
-            <Pencil size={14} />
+        {item && (
+          // pressing the bin must not take the keys from the name, or the bin would go before the press lands
+          <span onMouseDown={(e) => e.preventDefault()} className={`flex-none transition-opacity ${onHover}`}>
+            <ConfirmDelete label={`Remove ${item.title} from the plan`} confirm="Remove" size={15} onConfirm={async () => (await api(`plan/${item.id}`, { method: "DELETE" }), tools.refresh())} />
+          </span>
+        )}
+        {part && (
+          <button aria-label={`Add a task to ${item!.title}`} onClick={() => (setDraft(""), setAdding(true))} className={`grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 transition-opacity hover:bg-fill hover:text-ink2 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 ${onHover}`}>
+            <Plus size={15} />
           </button>
         )}
-        {item && open && <ConfirmDelete label={`Remove ${item.title} from the plan`} confirm="Remove" size={15} onConfirm={async () => (await api(`plan/${item.id}`, { method: "DELETE" }), tools.refresh())} />}
-        <button onClick={onToggle} aria-expanded={open} aria-label={`${open ? "Close" : "Open"} ${item?.title ?? "Not in the plan"}`} className="grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink2">
-          <ChevronRight size={14} className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
-        </button>
+        {kids && (
+          <button onClick={onToggle} aria-expanded={open} aria-label={`${open ? "Close" : "Open"} ${title}`} className="grid h-8 w-8 flex-none place-items-center rounded-full text-ink3 transition-colors hover:bg-fill hover:text-ink2">
+            <ChevronRight size={14} className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+          </button>
+        )}
+        {/* the chevron's place, kept empty, so the bins and pluses of lines with and without one line up */}
+        {!kids && item && <span className="h-8 w-8 flex-none" />}
       </div>
-      {open && <PlanTasks line={key} item={item} tools={tools} />}
-    </div>
-  );
-}
-
-/** The tasks of one opened line, soonest first, and for a part the field that adds one (a priority adds through the plus under it). */
-function PlanTasks({ line, item, tools }: { line: string; item: PlanItem | null; tools: PlanTools }) {
-  const { data, mutate } = useSWR<{ todos: Row[]; today: string }>(`todos?view=all&plan=${line}`, fetcher, { refreshInterval: 15_000 });
-  const [draft, setDraft] = useState("");
-  // a priority's own list holds only its own tasks: those of its parts are under the parts
-  const rows = data?.todos.filter((r) => (item ? r.plan_id === item.id : !r.plan_id));
-  const today = data?.today ?? tools.today;
-  const edit = (id: string, change: Partial<Row> | null) => mutate((cur) => (cur ? { ...cur, todos: change ? cur.todos.map((r) => (r.id === id ? { ...r, ...change } : r)) : cur.todos.filter((r) => r.id !== id) } : cur), false);
-  async function send(id: string, body: Record<string, unknown>) {
-    try {
-      await api(`todos/${id}`, { method: "PATCH", body });
-    } finally {
-      tools.refresh();
-    }
-  }
-  async function add() {
-    const title = draft.trim();
-    if (!title || !item) return;
-    setDraft("");
-    try {
-      // planning is not scheduling: a task added here waits in the backlog until it is given a place
-      await api("todos", { body: { title, view: "backlog", plan: item.id } });
-      tools.refresh();
-    } catch {
-      setDraft(title);
-    }
-  }
-  return (
-    <div className={`pb-2 ${item?.parent_id ? "pl-5" : ""}`}>
-      <ul>
-        {rows?.map((r) => (
-          <PlanRow
-            key={r.id}
-            r={r}
-            line={line}
-            today={today}
-            folders={tools.folders}
-            onOpen={() => tools.onOpen(r.id)}
-            onOver={tools.onOver}
-            onToggle={() => (edit(r.id, { done: !r.done }), send(r.id, { done: !r.done }))}
-            onPlace={(view) => send(r.id, { view })}
-            onDropped={(to) => (edit(r.id, null), send(r.id, { plan: to === "none" ? null : to }))}
-          />
-        ))}
-      </ul>
-      {item?.parent_id && (
-        <div className="flex items-center gap-3 px-1">
-          <span className="check flex-none opacity-40" />
-          <form onSubmit={(e) => (e.preventDefault(), add())} className="min-w-0 flex-1">
-            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task" aria-label={`Add a task to ${item.title}`} className="w-full py-[9px] text-[16px]" />
-          </form>
+      {open && (rows.length > 0 || adding) && (
+        <div className={`pb-2 ${part ? "pl-5" : ""}`}>
+          <ul>
+            {rows.map((r) => (
+              <PlanRow
+                key={r.id}
+                r={r}
+                line={key}
+                today={tools.today}
+                folders={tools.folders}
+                onOpen={() => tools.onOpen(r.id)}
+                onOver={tools.onOver}
+                onToggle={() => (tools.edit(r.id, { done: !r.done }), tools.send(r.id, { done: !r.done }))}
+                onPlace={(view) => tools.send(r.id, { view })}
+                onDropped={(to) => (tools.edit(r.id, null), tools.send(r.id, { plan: to === "none" ? null : to }))}
+              />
+            ))}
+          </ul>
+          {adding && item && (
+            <form onSubmit={(e) => (e.preventDefault(), addTask(true))} className="flex items-center gap-3 px-1">
+              <span className="check flex-none opacity-40" />
+              <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => addTask(false)} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setAdding(false))} placeholder="New task" aria-label={`New task for ${item.title}`} className="min-w-0 flex-1 py-[9px] text-[16px]" />
+            </form>
+          )}
         </div>
       )}
-      {!item && rows && !rows.length && <p className="px-1 py-2 text-[14px] text-ink3">Every task is part of the plan.</p>}
     </div>
   );
 }
