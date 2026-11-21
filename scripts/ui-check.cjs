@@ -827,8 +827,8 @@ async function run(profile) {
     await settle(1500);
   });
   await step("todos plan", async () => {
-    // The plan: priorities, their parts and the tasks under each. A line with no unfinished task
-    // says "Nothing yet"; nothing is counted. A task is carried onto a line to become part of it,
+    // The plan: priorities, their parts and the tasks under each. Nothing is counted, and a
+    // line with no tasks is not marked. A task is carried onto a line to become part of it,
     // and any list can be narrowed to a line.
     const nav = page.getByRole("navigation", { name: "Lists" });
     const get = (url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url);
@@ -844,9 +844,7 @@ async function run(profile) {
     await page.locator("h1", { hasText: /^Plans$/ }).waitFor({ timeout: 4000 });
     await line("Start the year with a clear plan").waitFor({ timeout: 5000 });
     await settle(800);
-    if (!(await line("A budget we both agree on").locator("[data-plan-empty]").count())) fail("todos plan: a line with no tasks does not say Nothing yet");
-    if (await line("Goals for the first quarter").locator("[data-plan-empty]").count()) fail("todos plan: a line with an unfinished task says Nothing yet");
-    if (await line("Start the year with a clear plan").locator("[data-plan-empty]").count()) fail("todos plan: a priority whose part has a task says Nothing yet");
+    if (/nothing yet/i.test(await line("A budget we both agree on").innerText())) fail("todos plan: a line with no tasks says Nothing yet");
     if (/\d/.test(await page.locator("[data-plan]").innerText())) fail("todos plan: the plan shows a number; it counts nothing");
     // under each priority a plus adds a task; "Part" is offered beside it only on request, so parts never look required
     const plus = (n) => page.getByRole("button", { name: `Add a task to ${n}`, exact: true });
@@ -858,9 +856,14 @@ async function run(profile) {
     await shot("todos-plan");
 
     // tapping a line opens its tasks in place, each saying where it sits
+    const navLeft = () => nav.evaluate((el) => Math.round(el.getBoundingClientRect().left));
+    const gutter = await page.locator("main").evaluate((el) => getComputedStyle(el).scrollbarGutter);
+    if (gutter !== "stable") fail(`todos plan: the page keeps no room for its scrollbar (${gutter}), so it moves sideways when a line opens`);
+    const leftBefore = await navLeft();
     await press(line("Goals for the first quarter").locator("[aria-expanded]"));
     await task("Draft Q1 goals").waitFor({ timeout: 5000 });
     await settle(500);
+    if ((await navLeft()) !== leftBefore) fail(`todos plan: opening a line moved the lists sideways (${leftBefore}px to ${await navLeft()}px)`);
     await reachable(task("Draft Q1 goals").locator("[data-place]"), "todos plan: where a task sits");
     if ((await placeOf("Draft Q1 goals")) !== "This week") fail("todos plan: a task set for the week does not say This week");
     await press(line("Goals for the first quarter").locator("[aria-expanded]"));
@@ -874,7 +877,6 @@ async function run(profile) {
     await page.keyboard.press("Enter");
     await line(name).waitFor({ timeout: 5000 });
     await settle(600);
-    if (!(await line(name).locator("[data-plan-empty]").count())) fail("todos plan: a new priority does not say Nothing yet");
     // with a pointer the plus offers "Part" beside it; without one the first tap shows the two
     if (profile.touch) await press(plus(name));
     else await plus(name).hover();
@@ -894,7 +896,6 @@ async function run(profile) {
     await task(title).waitFor({ timeout: 5000 });
     await settle(800);
     if ((await placeOf(title)) !== "Backlog") fail("todos plan: a task added under a line is not in the backlog");
-    if (await line(name).locator("[data-plan-empty]").count()) fail("todos plan: a line still says Nothing yet after a task was added to it");
     // an open line's name is a field: typed over, it is saved, and the line keeps its tasks
     const nameField = line(name).locator("[data-plan-name]");
     await reachable(nameField, "todos plan: the name of an open line");

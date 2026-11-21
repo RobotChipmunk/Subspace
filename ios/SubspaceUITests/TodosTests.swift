@@ -86,12 +86,11 @@ final class TodosTests: SubspaceTestCase {
         folder("plan").tap()
         expect(planLine("Start the year with a clear plan"), "a priority in the plan")
         let gap = expect(planLine("A budget we both agree on"), "a part with no tasks")
-        XCTAssertTrue(gap.label.contains("Nothing yet"), "A line with no unfinished task should say Nothing yet, not \(gap.label)")
+        XCTAssertFalse(gap.label.contains("Nothing yet"), "A line with no tasks should not be marked, but reads \(gap.label)")
         shot("17-todos-plan")
 
         // Tapping a line opens its tasks in place, each saying where it sits.
         let goals = expect(planLine("Goals for the first quarter"), "a part with a task")
-        XCTAssertFalse(goals.label.contains("Nothing yet"), "A line with an unfinished task should say nothing at its end")
         goals.tap()
         expect(planRow("Draft Q1 goals"), "the task under the opened line")
         // Open, its name is a field to type over, with the bin beside it.
@@ -107,7 +106,6 @@ final class TodosTests: SubspaceTestCase {
         bringIntoView(adder)
         enter(name + "\n", into: adder, "the field that adds a priority")
         let line = expect(planLine(name), "the new priority")
-        XCTAssertTrue(line.label.contains("Nothing yet"), "A new priority should say Nothing yet")
 
         // Opened, its name can be typed over; return saves it.
         bringIntoView(line)
