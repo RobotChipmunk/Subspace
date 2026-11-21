@@ -22,7 +22,9 @@ struct TodosPlanView: View {
     var body: some View {
         let priorities = tops
         VStack(alignment: .leading, spacing: 0) {
-            PageHeader("Plans", sub: "What you are working towards, and the tasks under each.")
+            PageHeader("Plans", sub: "What you are working towards, and the tasks under each.") {
+                TodosHideDone(store: store)
+            }
             TodosProblem(text: store.problem)
             ForEach(priorities) { top in
                 VStack(alignment: .leading, spacing: 0) {
@@ -182,7 +184,8 @@ private struct TodosPlanTasks: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        let rows = store.planTasks[line]
+        // with finished tasks hidden, the unfinished and whichever were ticked a moment ago
+        let rows = store.planTasks[line].map { store.seen($0) }
         VStack(alignment: .leading, spacing: 0) {
             ForEach(rows ?? []) { row in
                 TodosPlanRow(row: row, line: line, store: store)

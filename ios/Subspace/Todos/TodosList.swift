@@ -7,14 +7,17 @@ struct TodosListView: View {
 
     var body: some View {
         let loaded = store.rows != nil
-        let empty = store.shownRows?.isEmpty ?? false
+        let empty = store.seenRows?.isEmpty ?? false
+        // every task here is finished, and finished tasks are hidden
+        let allDone = empty && !(store.shownRows?.isEmpty ?? true)
         let chosen = store.filter
         let line: String? = store.focusedLine?.title
         // what an empty list says, naming whatever it is narrowed to
-        let nothing: String = !chosen.isEmpty ? "Nothing tagged " + chosen.joined(separator: " and ") + " here." : (line == nil ? "Nothing here." : "Nothing for " + (line ?? "") + " here.")
+        let nothing: String = allDone ? "Everything here is done." : !chosen.isEmpty ? "Nothing tagged " + chosen.joined(separator: " and ") + " here." : (line == nil ? "Nothing here." : "Nothing for " + (line ?? "") + " here.")
         VStack(alignment: .leading, spacing: 0) {
             PageHeader(store.folder?.label ?? "", sub: store.listSub) {
                 HStack(spacing: 0) {
+                    TodosHideDone(store: store)
                     // only on a list with tasks that are part of the plan, or while a choice is still in force
                     if !store.viewLines.isEmpty {
                         TodosPlanFilter(store: store)
@@ -42,6 +45,38 @@ struct TodosListView: View {
             }
         }
         .onDrop(of: [UTType.text], delegate: TodosDrop(entered: {}, dropped: { store.endDrag() }))
+    }
+}
+
+/// Hides the finished tasks, in every list and in the plan. It sits with the filters at the right
+/// of the heading and is built like them: quiet until it is on, then accent, saying "Done hidden".
+/// Where the heading is narrow (a phone) it is the eye alone.
+struct TodosHideDone: View {
+    var store: TodosStore
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let on = store.hideDone
+        Button {
+            store.setHideDone(!on)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: on ? "eye.slash" : "eye")
+                if sizeClass != .compact {
+                    Text(on ? "Done hidden" : "Hide done").lineLimit(1).fixedSize()
+                }
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(on ? Theme.accent : Theme.ink3)
+            .padding(.horizontal, 10)
+            .frame(minWidth: 36, minHeight: 36)
+            .background(on ? Theme.accentSoft : Color.clear, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Hide done")
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityIdentifier("todos.hideDone")
     }
 }
 
