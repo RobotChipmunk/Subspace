@@ -326,9 +326,11 @@ function FeedGrid({ posts, cols, anchor, children }: { posts: Post[]; cols: numb
         if (c === undefined) lanes.current.set(id, (c = tops[0] <= tops[1] ? 0 : 1));
         const y = tops[c];
         tops[c] += tall[i] + GUTTER;
-        const cell = cells.get(id)!;
         const before = was.current.get(id);
-        cell.style.transition = !resized && before !== undefined && y < before - 0.5 ? "transform 0.45s var(--ease)" : "none";
+        // a post that has not moved is left alone, so a glide already under way runs its course
+        if (!resized && before !== undefined && Math.abs(y - before) < 0.5) return;
+        const cell = cells.get(id)!;
+        cell.style.transition = !resized && before !== undefined && y < before ? "transform 0.45s var(--ease)" : "none";
         cell.style.transform = `translate(${c * (w + GUTTER)}px, ${y}px)`;
         was.current.set(id, y);
       });
