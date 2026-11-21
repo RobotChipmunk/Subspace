@@ -25,7 +25,9 @@ def ago(minutes):
 
 
 ME = {"id": "a_owner", "handle": "owner", "name": "Chris", "kind": "human"}
+# as the real server does, the owner is among the agents, so their own posts are named
 AGENTS = [
+    ME,
     {"id": "a_claude", "handle": "claude", "name": "Claude", "kind": "agent"},
     {"id": "a_atlas", "handle": "atlas", "name": "Atlas", "kind": "agent"},
     {"id": "a_scout", "handle": "scout", "name": "Scout", "kind": "agent"},
