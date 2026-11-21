@@ -316,7 +316,10 @@ final class TodosTests: SubspaceTestCase {
         Thread.sleep(forTimeInterval: 1.5)
 
         // Finished tasks can be hidden; the control sits with the filters and says when it is on.
+        // It sits in the heading, which adding a task at the end of the long backlog scrolled away:
+        // bring it back first, or the tap lands on a task and opens it.
         let hide = expect(app.buttons["todos.hideDone"], "the control that hides finished tasks")
+        bringIntoView(hide, down: false)
         XCTAssertFalse(hide.isSelected, "Finished tasks should show until hiding them is asked for")
         hide.tap()
         // The list redraws as finished tasks leave; wait for the control rather than read it at once.
@@ -327,6 +330,7 @@ final class TodosTests: SubspaceTestCase {
 
         // A task ticked now stays for a moment, shown as done, then goes with the rest.
         let check = expect(app.buttons[row(title).identifier.replacingOccurrences(of: "todos.row.", with: "todos.check.")], "the task's circle")
+        bringIntoView(check)
         check.tap()
         Thread.sleep(forTimeInterval: 0.8)
         XCTAssertTrue(row(title).exists, "A task ticked while finished tasks are hidden should stay for a moment")
@@ -341,7 +345,9 @@ final class TodosTests: SubspaceTestCase {
 
         // Taken off, the finished task is back.
         folder("backlog").tap()
-        expect(app.buttons["todos.hideDone"], "the control, back in the list").tap()
+        let again = expect(app.buttons["todos.hideDone"], "the control, back in the list")
+        bringIntoView(again, down: false)
+        again.tap()
         expect(row(title), "the finished task, showing again")
     }
 
