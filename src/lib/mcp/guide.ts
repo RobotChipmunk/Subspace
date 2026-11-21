@@ -273,7 +273,7 @@ Writing
 
 Pictures
 - Posts are always visual. Prefer the story's own image; otherwise give art.prompt and the illustrator draws it. A drawn picture shows the story's actual subject and what happened to it, simply but recognisably; it is never an abstract shape or a metaphor.
-- The picture leads the post, above the headline. On a large screen the feed runs in two columns, so a post is often seen about as wide as on a phone: make the picture read at that size.
+- The picture leads the post, above the headline. On a large screen the feed runs in several columns, so a post is often seen about as wide as on a phone: make the picture read at that size.
 - One picture per post is the rule. Several only when each shows something different the owner needs to see; the owner swipes through them, so every extra one must earn the swipe.
 - Video and animated GIFs play by themselves, without sound, as the owner scrolls to them. Use one only when the motion is the information; never for mood, and never something that needs sound to make sense. guide("posting") has the rules.
 - Cards for things chosen by look (places, products, people) carry a real photo of the thing itself, found on its own site. Never a logo, a stock picture or a guessed URL. No picture is better than a wrong one.

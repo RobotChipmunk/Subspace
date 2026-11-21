@@ -263,24 +263,32 @@ async function run(profile) {
     await shot("feed");
   });
   await step("feed columns", async () => {
-    // Two columns wherever each can be at least as wide as a post on a phone, one otherwise. Posts
-    // never overlap, the newest leads, and a post does not carry the topic it belongs to.
-    await settle(1200);
-    const room = await page.locator("[data-feed]").evaluate((el) => el.clientWidth);
-    const cards = await page.locator("main article[data-post]").evaluateAll((els) =>
-      els.map((e) => ((r) => ({ left: Math.round(r.left), top: r.top, bottom: r.bottom, width: r.width }))(e.getBoundingClientRect())),
-    );
-    if (cards.length < 4) return fail(`feed columns: only ${cards.length} posts showing`);
-    const lanes = [...new Set(cards.map((c) => c.left))].length;
-    const want = room >= 696 ? 2 : 1;
-    if (lanes !== want) fail(`feed columns: ${lanes} columns in ${room}px of room, expected ${want}`);
-    if (cards.some((c) => c.width < 330)) fail(`feed columns: a post is ${Math.round(Math.min(...cards.map((c) => c.width)))}px wide, narrower than on a phone`);
-    for (let i = 0; i < cards.length; i++)
-      for (let j = i + 1; j < cards.length; j++) {
-        const a = cards[i], b = cards[j];
-        if (a.left === b.left && a.top < b.bottom - 1 && b.top < a.bottom - 1) fail(`feed columns: posts ${i + 1} and ${j + 1} overlap`);
-      }
-    if (cards.some((c) => c.top < cards[0].top - 1)) fail("feed columns: the newest post is not at the top");
+    // As many columns as fit at least a phone's width each (340px) with 16px between, inside the
+    // page's margins; one where not even two fit. Posts never overlap, the newest leads, the page
+    // keeps its margins, and a post does not carry the topic it belongs to.
+    const columns = async (where) => {
+      await settle(1200);
+      const room = await page.locator("[data-feed]").evaluate((el) => el.clientWidth);
+      const cards = await page.locator("main article[data-post]").evaluateAll((els) =>
+        els.map((e) => ((r) => ({ left: Math.round(r.left), top: r.top, bottom: r.bottom, right: r.right, width: r.width }))(e.getBoundingClientRect())),
+      );
+      if (cards.length < 4) return fail(`feed columns${where}: only ${cards.length} posts showing`);
+      const lanes = [...new Set(cards.map((c) => c.left))].length;
+      const want = Math.max(1, Math.floor((room + 16) / 356));
+      if (lanes !== want) fail(`feed columns${where}: ${lanes} columns in ${room}px of room, expected ${want}`);
+      if (cards.some((c) => c.width < 330)) fail(`feed columns${where}: a post is ${Math.round(Math.min(...cards.map((c) => c.width)))}px wide, narrower than on a phone`);
+      for (let i = 0; i < cards.length; i++)
+        for (let j = i + 1; j < cards.length; j++) {
+          const a = cards[i], b = cards[j];
+          if (a.left === b.left && a.top < b.bottom - 1 && b.top < a.bottom - 1) fail(`feed columns${where}: posts ${i + 1} and ${j + 1} overlap`);
+        }
+      if (cards.some((c) => c.top < cards[0].top - 1)) fail(`feed columns${where}: the newest post is not at the top`);
+      // the outer columns keep the page's margin from the navigation and from the edge (or the rail)
+      const edges = await page.locator("[data-feed]").evaluate((el) => ((r) => [r.left, r.right])(el.getBoundingClientRect()));
+      if (cards.some((c) => c.left < edges[0] - 1 || c.right > edges[1] + 1)) fail(`feed columns${where}: a post runs outside the feed's room`);
+      return lanes;
+    };
+    await columns("");
     if (await page.locator("main article .chip").count()) fail("feed: a post still shows the topic it belongs to");
     // the picture leads the post, then the words, then who posted it
     const order = await page.locator("main article", { hasText: "Figure raised" }).first().evaluate((a) => {
@@ -290,6 +298,16 @@ async function run(profile) {
     if (!(order[0] >= 0 && order[0] < order[1] && order[1] < order[2])) fail(`feed: a post is not picture, words, then byline (${order.map(Math.round)})`);
     await noSidewaysScroll("feed columns");
     await shot("feed-columns");
+    // a large screen fills with more columns, as many as fit
+    if (profile.name.startsWith("desktop")) {
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      const lanes = await columns(" at 1920px");
+      if (lanes < 3) fail(`feed columns: a 1920px screen shows only ${lanes} columns`);
+      await noSidewaysScroll("feed wide");
+      await shot("feed-wide");
+      await page.setViewportSize(profile.viewport);
+      await settle(1200);
+    }
   });
   await step("feed is read-only", async () => {
     if (await page.getByPlaceholder("Tell your agents something").count()) fail("feed: the owner's composer is still there");

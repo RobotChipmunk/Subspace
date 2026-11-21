@@ -28,23 +28,29 @@ struct TodosListView: View {
                     }
                 }
             }
-            TodosProblem(text: store.problem)
-            ForEach(store.groups) { group in
-                TodosGroupView(group: group, store: store)
+            // A carried task let go anywhere over the tasks ends the carry. The heading stays out of
+            // that drop target: inside it, the first button there (Hide done) was reported to
+            // VoiceOver and the UI tests as the size of the whole list, so activating it opened
+            // whichever task sat in the middle.
+            VStack(alignment: .leading, spacing: 0) {
+                TodosProblem(text: store.problem)
+                ForEach(store.groups) { group in
+                    TodosGroupView(group: group, store: store)
+                }
+                if empty {
+                    Text(nothing)
+                        .font(.ssBody)
+                        .foregroundStyle(Theme.ink3)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 20)
+                }
+                if loaded && store.canAdd {
+                    TodosAddField(store: store)
+                        .padding(.top, 4)
+                }
             }
-            if empty {
-                Text(nothing)
-                    .font(.ssBody)
-                    .foregroundStyle(Theme.ink3)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 20)
-            }
-            if loaded && store.canAdd {
-                TodosAddField(store: store)
-                    .padding(.top, 4)
-            }
+            .onDrop(of: [UTType.text], delegate: TodosDrop(entered: {}, dropped: { store.endDrag() }))
         }
-        .onDrop(of: [UTType.text], delegate: TodosDrop(entered: {}, dropped: { store.endDrag() }))
     }
 }
 

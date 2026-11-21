@@ -190,7 +190,7 @@ function Feed() {
   }, [activeAt, beside]);
 
   return (
-    <div ref={room} data-feed data-cols={cols} className="mx-auto w-full max-w-[1140px]">
+    <div ref={room} data-feed data-cols={cols} className="w-full">
       {/* one column keeps the reading width it always had; two use the room they were given */}
       <div className={cols > 1 ? "" : "mx-auto max-w-[620px]"}>
         <PageHeader
@@ -246,18 +246,22 @@ function Feed() {
 const READ_LINE = 0.38;
 /** Width from which comments sit beside the feed. Narrower, they slide over it. */
 const BESIDE = "(min-width: 768px)";
-/** Room from which the feed runs in two columns: each is then at least as wide as a post on a phone. */
-const TWO_COLUMNS = 696;
-/** The space between posts in two columns, across and down. One column keeps its 12px. */
+/** The narrowest a post is shown in columns: about its width on a phone. */
+const POST_MIN = 340;
+/** The space between posts in columns, across and down. One column keeps its 12px. */
 const GUTTER = 16;
 
-/** How many columns the feed has room for, measured on the space it is given (the rail and the comments take their share). */
+/**
+ * How many columns the feed has room for: as many as fit side by side at least `POST_MIN` wide,
+ * with a gutter between each, in the space it is given. That space is inside the page's own
+ * margins and what the docked rail or the comments take, so those always stay.
+ */
 function useColumns(room: RefObject<HTMLElement | null>) {
   const [cols, setCols] = useState(1);
   useLayoutEffect(() => {
     const el = room.current;
     if (!el) return;
-    const measure = () => setCols(el.clientWidth >= TWO_COLUMNS ? 2 : 1);
+    const measure = () => setCols(Math.max(1, Math.floor((el.clientWidth + GUTTER) / (POST_MIN + GUTTER))));
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -267,20 +271,21 @@ function useColumns(room: RefObject<HTMLElement | null>) {
 }
 
 /**
- * The posts, in one column or two. One column is the page's own flow. In two, each post goes to
- * the shorter column when it first appears and stays there, so nothing changes sides as pictures
- * load or posts come and go. The page keeps the posts newest first, the order the keyboard and
- * screen readers meet them in; only where each sits on screen is worked out here. A post moving up
- * into room another has left glides there; any other move is made at once, so that cards never
- * slide over one another.
+ * The posts, in one column or several. One column is the page's own flow. In several, each post
+ * goes to the shortest column when it first appears and stays there, so nothing changes sides as
+ * pictures load or posts come and go. The page keeps the posts newest first, the order the
+ * keyboard and screen readers meet them in; only where each sits on screen is worked out here. A
+ * post moving up into room another has left glides there; any other move is made at once, so that
+ * cards never slide over one another.
  */
 function FeedGrid({ view, posts, cols, anchor, children }: { /** which list this is: another one is placed afresh */ view: string; posts: Post[]; cols: number; /** the post to keep still on screen when the number of columns changes */ anchor: () => string | null; children: (post: Post, index: number) => ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const live = useRef({ ids: [] as string[], cols });
   live.current = { ids: posts.map((p) => p.id), cols };
-  // the column each post sits in, and how much has been added to the top of each since
-  const lanes = useRef(new Map<string, number>());
-  const added = useRef([0, 0]);
+  // For each number of columns: the column each post sits in, and how much has been added to the
+  // top of each since. Each count keeps its own, so going from two to three and back to two
+  // returns every post to where it was.
+  const layouts = useRef(new Map<number, { lanes: Map<string, number>; added: number[] }>());
   // where each post was put last time, and the width and columns that was for
   const was = useRef(new Map<string, number>());
   const last = useRef({ width: 0, cols: 0 });
@@ -289,8 +294,7 @@ function FeedGrid({ view, posts, cols, anchor, children }: { /** which list this
   const list = useRef(view);
   if (list.current !== view) {
     list.current = view;
-    lanes.current.clear();
-    added.current = [0, 0];
+    layouts.current.clear();
     was.current.clear();
   }
   // The post kept still while the number of columns changes, and where it was on screen before.
@@ -317,22 +321,27 @@ function FeedGrid({ view, posts, cols, anchor, children }: { /** which list this
         was.current.clear();
       }
     } else {
-      const w = (width - GUTTER) / 2;
+      const w = (width - (cols - 1) * GUTTER) / cols;
+      let layout = layouts.current.get(cols);
+      if (!layout) layouts.current.set(cols, (layout = { lanes: new Map(), added: Array<number>(cols).fill(0) }));
+      const { lanes, added } = layout;
+      // the leftmost of the columns with the least in them
+      const least = (xs: number[]) => xs.indexOf(Math.min(...xs));
       const order = ids.filter((id) => cells.has(id));
       // every height first, then every move, so the page is laid out once
       const tall = order.map((id) => cells.get(id)!.offsetHeight);
       // Posts above all those already placed came in at the top. Oldest first, each goes to the top
-      // of whichever column has had less added there, so new posts take turns between the two.
-      const known = order.findIndex((id) => lanes.current.has(id));
+      // of whichever column has had least added there, so new posts take turns between them.
+      const known = order.findIndex((id) => lanes.has(id));
       for (let i = known - 1; i >= 0; i--) {
-        const c = added.current[0] <= added.current[1] ? 0 : 1;
-        lanes.current.set(order[i], c);
-        added.current[c] += tall[i] + GUTTER;
+        const c = least(added);
+        lanes.set(order[i], c);
+        added[c] += tall[i] + GUTTER;
       }
-      const tops = [0, 0];
+      const tops = Array<number>(cols).fill(0);
       order.forEach((id, i) => {
-        let c = lanes.current.get(id);
-        if (c === undefined) lanes.current.set(id, (c = tops[0] <= tops[1] ? 0 : 1));
+        let c = lanes.get(id);
+        if (c === undefined) lanes.set(id, (c = least(tops)));
         const y = tops[c];
         tops[c] += tall[i] + GUTTER;
         const before = was.current.get(id);
@@ -343,7 +352,7 @@ function FeedGrid({ view, posts, cols, anchor, children }: { /** which list this
         cell.style.transform = `translate(${c * (w + GUTTER)}px, ${y}px)`;
         was.current.set(id, y);
       });
-      el.style.height = `${Math.max(0, tops[0], tops[1]) - (order.length ? GUTTER : 0)}px`;
+      el.style.height = `${Math.max(0, ...tops) - (order.length ? GUTTER : 0)}px`;
     }
     last.current = { width, cols };
     // the post being read stays where it was on screen while everything else rearranges round it
@@ -382,7 +391,7 @@ function FeedGrid({ view, posts, cols, anchor, children }: { /** which list this
     <div ref={box} data-feed-grid className={cols > 1 ? "relative" : "flex flex-col gap-3"}>
       <AnimatePresence initial={false}>
         {posts.map((p, i) => (
-          <div key={p.id} data-cell={p.id} className={cols > 1 ? "absolute left-0 top-0" : "relative"} style={cols > 1 ? { width: `calc((100% - ${GUTTER}px) / 2)` } : undefined}>
+          <div key={p.id} data-cell={p.id} className={cols > 1 ? "absolute left-0 top-0" : "relative"} style={cols > 1 ? { width: `calc((100% - ${(cols - 1) * GUTTER}px) / ${cols})` } : undefined}>
             {children(p, i)}
           </div>
         ))}
@@ -393,7 +402,7 @@ function FeedGrid({ view, posts, cols, anchor, children }: { /** which list this
 
 function Skeletons({ cols }: { cols: number }) {
   return (
-    <div className={cols > 1 ? "grid grid-cols-2 gap-4" : "flex flex-col gap-3"}>
+    <div className={cols > 1 ? "grid gap-4" : "flex flex-col gap-3"} style={cols > 1 ? { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` } : undefined}>
       {Array.from({ length: cols * 2 }, (_, i) => (
         <div key={i} className="glass rounded-[26px] p-1.5">
           <div className="shimmer aspect-[2/1] w-full rounded-[20px]" />

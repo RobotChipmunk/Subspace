@@ -60,21 +60,25 @@ final class FeedModel {
     @ObservationIgnored private var scheduled = false
     @ObservationIgnored private var loadingMore = false
     /// Posts that arrived while the owner was reading further down. They wait out of sight until
-    /// the feed is back at the top: added at the top of two columns, one would push a column down
-    /// under the reader.
+    /// the feed is back at the top: added at the top of one of several columns, one would push
+    /// that column down under the reader.
     @ObservationIgnored private var waiting: [Post]?
-    /// The column each post sits in when the feed runs in two, and how much has been added to the
-    /// top of each since.
-    @ObservationIgnored private var lanes: [String: Int] = [:]
-    @ObservationIgnored private var addedAtTop: [CGFloat] = [0, 0]
+    /// For each number of columns: the column each post sits in, and how much has been added to the
+    /// top of each since. Each count keeps its own, so going from two to three and back to two
+    /// returns every post to where it was.
+    @ObservationIgnored private var layouts: [Int: (lanes: [String: Int], added: [CGFloat])] = [:]
 
     // Columns
-    /// Room from which the feed runs in two columns: each is then at least as wide as a post on a phone.
-    static let twoColumns: CGFloat = 696
-    /// The space between posts in two columns, across and down.
+    /// The narrowest a post is shown in columns: about its width on a phone.
+    static let postMin: CGFloat = 340
+    /// The space between posts in columns, across and down.
     static let gutter: CGFloat = 16
-    /// The widest the two columns are together.
-    static let widest: CGFloat = 1140
+
+    /// How many columns fit in this much room (inside the page's margins): as many as are at least
+    /// `postMin` wide with a gutter between each, and never fewer than one.
+    static func columnCount(_ room: CGFloat) -> Int {
+        max(1, Int((room + gutter) / (postMin + gutter)))
+    }
 
     var posts: [Post] {
         let ids = Set(first.map { $0.id })
@@ -238,8 +242,7 @@ final class FeedModel {
             older = []
         }
         waiting = nil
-        lanes = [:]
-        addedAtTop = [0, 0]
+        layouts = [:]
         done = false
         loaded = false
         await refresh()
@@ -299,31 +302,36 @@ final class FeedModel {
 
     // MARK: Columns
 
-    /// The posts shared between two columns, like masonry: each goes to the shorter column when it
-    /// first appears and stays there, so nothing changes sides as pictures load or posts come and
-    /// go. Posts that came in at the top take turns between the columns, oldest first.
-    func columns(width: CGFloat) -> [[Post]] {
+    /// The posts shared between `count` columns, like masonry: each goes to the shortest column
+    /// when it first appears and stays there, so nothing changes sides as pictures load or posts
+    /// come and go. Posts that came in at the top take turns between the columns, oldest first.
+    func columns(_ count: Int, width: CGFloat) -> [[Post]] {
         let all = posts
-        if let known = all.firstIndex(where: { lanes[$0.id] != nil }), known > 0 {
+        guard count > 1 else { return [all] }
+        var layout = layouts[count] ?? (lanes: [:], added: Array(repeating: 0, count: count))
+        /// The leftmost of the columns with the least in them.
+        func least(_ xs: [CGFloat]) -> Int { xs.indices.min { xs[$0] < xs[$1] } ?? 0 }
+        if let known = all.firstIndex(where: { layout.lanes[$0.id] != nil }), known > 0 {
             for p in all[..<known].reversed() {
-                let c = addedAtTop[0] <= addedAtTop[1] ? 0 : 1
-                lanes[p.id] = c
-                addedAtTop[c] += height(p, width) + Self.gutter
+                let c = least(layout.added)
+                layout.lanes[p.id] = c
+                layout.added[c] += height(p, width) + Self.gutter
             }
         }
-        var out: [[Post]] = [[], []]
-        var tops: [CGFloat] = [0, 0]
+        var out: [[Post]] = Array(repeating: [], count: count)
+        var tops: [CGFloat] = Array(repeating: 0, count: count)
         for p in all {
             let c: Int
-            if let lane = lanes[p.id] {
+            if let lane = layout.lanes[p.id], lane < count {
                 c = lane
             } else {
-                c = tops[0] <= tops[1] ? 0 : 1
-                lanes[p.id] = c
+                c = least(tops)
+                layout.lanes[p.id] = c
             }
             out[c].append(p)
             tops[c] += height(p, width) + Self.gutter
         }
+        layouts[count] = layout
         return out
     }
 
@@ -405,7 +413,7 @@ final class FeedModel {
 
     /// The post being read: the one crossing a line a little above the middle of the screen. The
     /// line slides to the top or bottom edge as the feed reaches its ends. While comments are open
-    /// only the column of the post they show counts, so in two columns they follow down the
+    /// only the column of the post they show counts, so in columns they follow down the
     /// column the owner is reading.
     func reading() -> String? {
         let vh = viewport

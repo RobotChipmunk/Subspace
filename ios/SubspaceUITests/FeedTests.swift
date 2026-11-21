@@ -9,14 +9,18 @@ final class FeedTests: SubspaceTestCase {
     func testFeedShowsSeededPostsAndScrolls() {
         launchSignedIn()
         expect(body("Italian place for Saturday"), "the newest seeded post")
-        // An iPad has room for two columns of posts, each about as wide as on a phone; a phone has one.
-        // Counted once the posts have finished arriving (they scale in), by the clear gaps between
-        // their left edges.
+        // As many columns as fit, each at least as wide as a post on a phone: one on a phone, two or
+        // more on an iPad. Counted from where the words of every post on screen start (the same
+        // distance inside every card), once the posts have settled, by the clear gaps between them.
         Thread.sleep(forTimeInterval: 1.2)
-        let cards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'feed.post.' AND NOT (identifier BEGINSWITH 'feed.post.body.')"))
-        let lefts = (0..<min(4, cards.count)).map { cards.element(boundBy: $0).frame.minX }.sorted()
+        let words = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'feed.post.body.'"))
+        let lefts = words.allElementsBoundByIndex.map { $0.frame.minX }.sorted()
         let columns = lefts.isEmpty ? 0 : 1 + zip(lefts, lefts.dropFirst()).filter { $1 - $0 > 60 }.count
-        XCTAssertEqual(columns, isPad ? 2 : 1, (isPad ? "On an iPad the feed should run in two columns" : "On a phone the feed should be one column") + "; posts start at \(lefts.map { Int($0) })")
+        if isPad {
+            XCTAssertGreaterThanOrEqual(columns, 2, "On an iPad the feed should run in columns; the posts' words start at \(lefts.map { Int($0) })")
+        } else {
+            XCTAssertEqual(columns, 1, "On a phone the feed should be one column; the posts' words start at \(lefts.map { Int($0) })")
+        }
         // No post shows the topic it belongs to (the seeded topics are labelled these).
         XCTAssertFalse(app.staticTexts["Robotics"].exists || app.staticTexts["West Seattle"].exists, "A post should not carry its topic's label")
         shot("50-feed-top")

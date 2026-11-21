@@ -210,5 +210,16 @@ being true. Read this list before starting work.
   until its `values` prop is a new array. The todo list ignored the request while a carried row
   was away to the side, so `values` never changed and rows stopped trading places for that drag
   and every later one. An `onReorder` that turns an order down must still pass a fresh array.
+- SwiftUI: `.onDrop` on a container made the first `Button` inside it report the whole container's
+  frame to accessibility, so VoiceOver and the UI tests activated the middle of the list: tapping
+  "Hide done" opened a task (Nov 2026). Put a drop target on the rows' own container, never on one
+  that also holds a heading's controls.
+- iOS: the feed's columns are an `HStack` of `LazyVStack`s, so accessibility and XCUITest queries
+  list one whole column, then the next. Cards carry `accessibilitySortPriority` by age so VoiceOver
+  reads newest first across them; a test that measures columns must read every element's frame,
+  not the first few (it once saw only the left column and reported one column).
+- iOS UI tests can run on the owner's Mac against `ios/scripts/standin-server.py` (localhost:3000,
+  any password): one test takes under a minute instead of a CI run. Its demo data is not the seed,
+  so tests that rely on seeded content fail there; use it to reproduce a layout or tap problem.
 - When a command chain ends in `git commit && git push`, make the build's own exit status gate it
   (`xcodebuild ... | grep` returns grep's status, so a failed build was committed and pushed once).

@@ -73,28 +73,31 @@ struct FeedScreen: View {
     }
 }
 
-/// The scrolling posts: one column, or two where each can be at least as wide as a post on a phone.
+/// The scrolling posts: as many columns as fit, each at least as wide as a post on a phone; one
+/// where not even two fit.
 private struct FeedList: View {
     var model: FeedModel
     /// The width the feed has, its margins included.
     var room: CGFloat
 
     var body: some View {
-        let space = min(room - 32, FeedModel.widest)
-        let columns = space >= FeedModel.twoColumns ? 2 : 1
+        // as many columns as fit inside the page's margins, each at least as wide as on a phone
+        let space = room - 32
+        let columns = FeedModel.columnCount(space)
+        let laneWidth = (space - CGFloat(columns - 1) * FeedModel.gutter) / CGFloat(columns)
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
                     PageHeader("Feed") {
                         FeedBookmarkedToggle(model: model)
                     }
-                    FeedListBody(model: model, columns: columns, laneWidth: (space - FeedModel.gutter) / 2)
+                    FeedListBody(model: model, columns: columns, laneWidth: laneWidth)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 24)
                 .padding(.bottom, 24)
-                // one column keeps the reading width it always had; two use the room they are given
-                .column(columns > 1 ? FeedModel.widest + 32 : 652)
+                // one column keeps the reading width it always had; several use the room they are given
+                .column(columns > 1 ? .infinity : 652)
                 .background {
                     FeedFrameReporter { frame in model.contentMoved(frame) }
                 }
@@ -133,25 +136,30 @@ private struct FeedList: View {
 private struct FeedListBody: View {
     var model: FeedModel
     var columns: Int
-    /// How wide each column is when there are two.
+    /// How wide each column is when there are several.
     var laneWidth: CGFloat
 
     var body: some View {
         let posts = model.posts
         if columns > 1 && !posts.isEmpty {
-            // Two columns, laid out like masonry (`FeedModel.columns`). Each ends in its own mark
+            // Several columns, laid out like masonry (`FeedModel.columns`). Each ends in its own mark
             // that asks for older posts, so whichever runs out first fetches them.
-            let lanes = model.columns(width: laneWidth)
+            let lanes = model.columns(columns, width: laneWidth)
+            // VoiceOver meets the posts newest first, across the columns, as on the web, rather than
+            // one whole column and then the next.
+            let newness = Dictionary(posts.enumerated().map { ($1.id, Double(posts.count - $0)) }, uniquingKeysWith: { first, _ in first })
             HStack(alignment: .top, spacing: FeedModel.gutter) {
                 ForEach(lanes.indices, id: \.self) { c in
                     LazyVStack(spacing: FeedModel.gutter) {
                         ForEach(lanes[c], id: \.id) { post in
                             FeedListCard(post: post, model: model)
+                                .accessibilitySortPriority(newness[post.id] ?? 0)
                         }
                         FeedMoreMark(model: model)
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
         } else {
             FeedOneColumn(model: model, columns: columns)
         }
