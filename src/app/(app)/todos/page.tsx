@@ -883,7 +883,7 @@ function PlanAdd({ top, onPart, onTask }: { top: PlanItem; onPart: (title: strin
     return (
       <form onSubmit={(e) => (e.preventDefault(), add(mode === "task"))} className="mt-1 flex items-center gap-3 px-1">
         {mode === "task" && <span className="check flex-none opacity-40" />}
-        <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => add(false)} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setMode(null))} placeholder={mode === "task" ? "New task" : "New part"} aria-label={mode === "task" ? `New task for ${top.title}` : `New part of ${top.title}`} className={`min-w-0 flex-1 ${mode === "task" ? "py-[9px] text-[16px]" : "py-[7px] pl-5 text-[15.5px]"}`} />
+        <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => add(false)} onKeyDown={(e) => e.key === "Escape" && (setDraft(""), setMode(null))} placeholder={mode === "task" ? "New task" : "New part"} aria-label={mode === "task" ? `New task for ${top.title}` : `New part of ${top.title}`} className={`min-w-0 flex-1 ${mode === "task" ? "py-[9px] text-[16px]" : "py-[7px] text-[15.5px]"}`} />
       </form>
     );
   const shown = mode === "choose";
@@ -937,7 +937,7 @@ function PlanLine({ item, open, over, onToggle, tools }: { item: PlanItem | null
   }
   return (
     <div data-plan-line={key} data-plan-title={item?.title ?? "Not in the plan"} data-over={over || undefined} className={`-mx-2 rounded-2xl px-2 transition-colors ${over ? "drop-target" : ""}`}>
-      <div className={`group/line flex min-h-10 items-center gap-1 ${top || !item ? "" : "pl-5"}`}>
+      <div className="group/line flex min-h-10 items-center gap-1">
         {open && item ? (
           <textarea
             ref={(el) => {
@@ -1007,7 +1007,7 @@ function PlanTasks({ line, item, tools }: { line: string; item: PlanItem | null;
     }
   }
   return (
-    <div className={`pb-2 ${item?.parent_id ? "pl-5" : ""}`}>
+    <div className="pb-2">
       <ul>
         {rows?.map((r) => (
           <PlanRow
