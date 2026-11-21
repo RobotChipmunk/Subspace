@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, urlparse
 
 NOW = datetime.now(timezone.utc)
 TODAY = datetime.now().strftime("%Y-%m-%d")
+_today = datetime.now()
+NEXT_MONDAY = (_today + timedelta(days=7 - _today.weekday())).strftime("%Y-%m-%d")
 
 
 def ago(minutes):
@@ -95,6 +97,7 @@ def folders():
         "folders": [
             {"key": "week", "label": "This week", "count": open_today},
             {"key": "today", "label": "Today", "count": open_today},
+            {"key": "next_week", "label": "Next week", "count": sum(1 for t in TODOS if t["scope"] == "week" and not t["done"])},
             {"key": "backlog", "label": "Backlog", "count": backlog},
             {"key": "all", "label": "All", "count": open_today + backlog},
         ],
@@ -109,6 +112,8 @@ def todos_for(view, plan=None):
         rows = [t for t in TODOS if t["scope"] == "day" and t["date"] == TODAY]
     elif view == "backlog":
         rows = [t for t in TODOS if t["scope"] == "backlog"]
+    elif view == "next_week":
+        rows = [t for t in TODOS if t["scope"] == "week" and t["date"] == NEXT_MONDAY]
     else:
         rows = list(TODOS)
     if plan:
@@ -180,6 +185,10 @@ class Handler(BaseHTTPRequestHandler):
                 if "done" in b:
                     t["done"] = bool(b["done"])
                     t["done_at"] = ago(0) if t["done"] else None
+                # moved to another list: the places this stand-in knows
+                places = {"today": ("day", TODAY), "next_week": ("week", NEXT_MONDAY), "backlog": ("backlog", None)}
+                if b.get("view") in places:
+                    t["scope"], t["date"] = places[b["view"]]
             return self.reply(200, {**t, "notes": ""})
         if path == "plan":
             return self.reply(200, {"plan": FOLDERS_PLAN})
