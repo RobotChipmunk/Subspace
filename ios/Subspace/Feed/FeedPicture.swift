@@ -1,41 +1,52 @@
 import SwiftUI
 
-/// A post's picture. Video plays in place as it scrolls into view; anything else opens the source when tapped.
+/// The corners of a post's picture: 6 points inside the card's 26, so the two curves run together.
+let feedPictureRadius: CGFloat = 20
+
+/// A post's picture, at the top of its card. Video plays in place as it scrolls into view;
+/// anything else opens the source when tapped.
 struct FeedPicture: View {
     var post: Post
     var model: FeedModel
 
+    /// Whether the post has a picture of some kind (its own, a clip, or a drawing).
+    static func shows(_ post: Post) -> Bool {
+        if let media = post.media, media.type == "image" || media.type == "video" { return true }
+        if let art = post.art, (art.status ?? "none") != "none" { return true }
+        return false
+    }
+
     var body: some View {
         if let media = post.media, media.type == "image" {
             if let images = media.images, images.count > 1 {
-                FeedPictures(post: post, images: images).padding(.top, 12)
+                FeedPictures(post: post, images: images)
             } else {
-                FeedSinglePicture(post: post, media: media).padding(.top, 12)
+                FeedSinglePicture(post: post, media: media)
             }
         } else if let media = post.media, media.type == "video" {
-            FeedClip(post: post, media: media, model: model).padding(.top, 12)
+            FeedClip(post: post, media: media, model: model)
         } else if let art = post.art, (art.status ?? "none") != "none" {
             FeedArtPanel(art: art)
                 .aspectRatio(2, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: feedPictureRadius, style: .continuous))
                 .modifier(FeedToSource(source: post.source))
-                .padding(.top, 12)
                 .accessibilityHidden(true)
         }
     }
 }
 
-/// One picture, in its own shape.
+/// One picture, in its own shape (from a wide 2.4 to an upright 3:4, and never taller than 520
+/// points). Until it has loaded it holds a landscape shape, so the posts around it hardly move.
 private struct FeedSinglePicture: View {
     var post: Post
     var media: Media
     @State private var ratio: CGFloat = 1.6
 
     var body: some View {
-        let shape = min(3, max(0.5, ratio))
+        let shape = min(2.4, max(0.75, ratio))
         RemoteImage(media.url, onRatio: { r in ratio = r })
             .aspectRatio(shape, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: feedPictureRadius, style: .continuous))
             .frame(maxHeight: 520)
             .modifier(FeedToSource(source: post.source))
             .accessibilityElement(children: .ignore)
@@ -68,7 +79,7 @@ private struct FeedPictures: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .background(Theme.fill)
             .aspectRatio(shape, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: feedPictureRadius, style: .continuous))
             .animation(.ssSoft, value: shape)
             FeedDots(count: images.count, at: at)
         }

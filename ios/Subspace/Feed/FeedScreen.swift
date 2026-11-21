@@ -16,8 +16,10 @@ struct FeedScreen: View {
             // Comments sit beside the feed when there is room for both; otherwise they are a sheet.
             let beside = sizeClass == .regular && geo.size.width >= 680
             let panelWidth = min(408, max(324, geo.size.width * 0.36)) - 28
+            // The feed's own room, once the comments beside it have taken theirs.
+            let room = geo.size.width - (beside && model.commentsOpen ? panelWidth + 16 : 0)
             HStack(spacing: 0) {
-                FeedList(model: model)
+                FeedList(model: model, room: room)
                 if beside && model.commentsOpen {
                     FeedCommentsPanel(model: model, sheet: false)
                         .frame(width: panelWidth)
@@ -71,23 +73,28 @@ struct FeedScreen: View {
     }
 }
 
-/// The scrolling column of posts.
+/// The scrolling posts: one column, or two where each can be at least as wide as a post on a phone.
 private struct FeedList: View {
     var model: FeedModel
+    /// The width the feed has, its margins included.
+    var room: CGFloat
 
     var body: some View {
+        let space = min(room - 32, FeedModel.widest)
+        let columns = space >= FeedModel.twoColumns ? 2 : 1
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
                     PageHeader("Feed") {
                         FeedBookmarkedToggle(model: model)
                     }
-                    FeedListBody(model: model)
+                    FeedListBody(model: model, columns: columns, laneWidth: (space - FeedModel.gutter) / 2)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 24)
                 .padding(.bottom, 24)
-                .column(652)
+                // one column keeps the reading width it always had; two use the room they are given
+                .column(columns > 1 ? FeedModel.widest + 32 : 652)
                 .background {
                     FeedFrameReporter { frame in model.contentMoved(frame) }
                 }
@@ -95,6 +102,17 @@ private struct FeedList: View {
             .coordinateSpace(name: feedScrollSpace)
             .refreshable { await model.refresh() }
             .onChange(of: model.bringToken) { _, _ in bring(proxy) }
+            .onChange(of: columns) { _, _ in keep(proxy) }
+        }
+    }
+
+    /// When the number of columns changes, the post being read stays in view.
+    private func keep(_ proxy: ScrollViewProxy) {
+        guard let id = (model.commentsOpen ? model.activeID : nil) ?? model.reading() else { return }
+        Task { @MainActor in
+            // let the new columns be laid out first
+            try? await Task.sleep(for: .seconds(0.05))
+            proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: 0.3))
         }
     }
 
@@ -114,14 +132,66 @@ private struct FeedList: View {
 
 private struct FeedListBody: View {
     var model: FeedModel
+    var columns: Int
+    /// How wide each column is when there are two.
+    var laneWidth: CGFloat
+
+    var body: some View {
+        let posts = model.posts
+        if columns > 1 && !posts.isEmpty {
+            // Two columns, laid out like masonry (`FeedModel.columns`). Each ends in its own mark
+            // that asks for older posts, so whichever runs out first fetches them.
+            let lanes = model.columns(width: laneWidth)
+            HStack(alignment: .top, spacing: FeedModel.gutter) {
+                ForEach(lanes.indices, id: \.self) { c in
+                    LazyVStack(spacing: FeedModel.gutter) {
+                        ForEach(lanes[c], id: \.id) { post in
+                            FeedListCard(post: post, model: model)
+                        }
+                        FeedMoreMark(model: model)
+                    }
+                }
+            }
+        } else {
+            FeedOneColumn(model: model, columns: columns)
+        }
+    }
+}
+
+private struct FeedListCard: View {
+    var post: Post
+    var model: FeedModel
+
+    var body: some View {
+        FeedPostCard(post: post, model: model)
+            .id(post.id)
+            .transition(.opacity.combined(with: .scale(scale: 0.97)))
+    }
+}
+
+/// Reaching the end asks for older posts.
+private struct FeedMoreMark: View {
+    var model: FeedModel
+
+    var body: some View {
+        Color.clear
+            .frame(height: 32)
+            .onAppear {
+                Task { await model.loadMore() }
+            }
+    }
+}
+
+/// One column of posts, and what the feed says while it has none to show.
+private struct FeedOneColumn: View {
+    var model: FeedModel
+    var columns: Int
 
     var body: some View {
         let posts = model.posts
         LazyVStack(spacing: 12) {
             ForEach(posts, id: \.id) { post in
-                FeedPostCard(post: post, model: model)
-                    .id(post.id)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                FeedListCard(post: post, model: model)
             }
             if model.loaded && posts.isEmpty && model.onlyBookmarked {
                 Text("Nothing bookmarked yet.")
@@ -135,7 +205,7 @@ private struct FeedListBody: View {
             }
             if !model.loaded {
                 if model.problem.isEmpty {
-                    FeedSkeletons()
+                    FeedSkeletons(columns: columns)
                 } else {
                     Text(model.problem)
                         .font(.ssSecondary)
@@ -146,12 +216,7 @@ private struct FeedListBody: View {
                         .accessibilityIdentifier("feed.error")
                 }
             }
-            // Reaching the end asks for older posts.
-            Color.clear
-                .frame(height: 32)
-                .onAppear {
-                    Task { await model.loadMore() }
-                }
+            FeedMoreMark(model: model)
         }
     }
 }
@@ -209,12 +274,18 @@ private struct FeedEmptyState: View {
     }
 }
 
-/// Two quiet placeholder cards while the first posts load.
+/// Quiet placeholder cards, two to a column, while the first posts load.
 private struct FeedSkeletons: View {
+    var columns: Int
+
     var body: some View {
-        VStack(spacing: 12) {
-            FeedSkeletonCard()
-            FeedSkeletonCard()
+        HStack(alignment: .top, spacing: FeedModel.gutter) {
+            ForEach(0..<max(1, columns), id: \.self) { _ in
+                VStack(spacing: columns > 1 ? FeedModel.gutter : 12) {
+                    FeedSkeletonCard()
+                    FeedSkeletonCard()
+                }
+            }
         }
         .accessibilityHidden(true)
     }
@@ -222,18 +293,24 @@ private struct FeedSkeletons: View {
 
 private struct FeedSkeletonCard: View {
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle().fill(Theme.fill).frame(width: 40, height: 40)
+        VStack(alignment: .leading, spacing: 0) {
+            RoundedRectangle(cornerRadius: feedPictureRadius, style: .continuous)
+                .fill(Theme.fill)
+                .aspectRatio(2, contentMode: .fit)
             VStack(alignment: .leading, spacing: 10) {
-                Capsule().fill(Theme.fill).frame(width: 128, height: 12)
                 Capsule().fill(Theme.fill).frame(height: 12)
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Theme.fill)
-                    .aspectRatio(2, contentMode: .fit)
+                Capsule().fill(Theme.fill).frame(width: 160, height: 12)
+                HStack(spacing: 8) {
+                    Circle().fill(Theme.fill).frame(width: 22, height: 22)
+                    Capsule().fill(Theme.fill).frame(width: 112, height: 12)
+                }
+                .padding(.top, 6)
             }
-            .padding(.top, 4)
+            .padding(.horizontal, 10)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
         }
-        .padding(16)
+        .padding(6)
         .glass(radius: 26)
     }
 }

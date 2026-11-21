@@ -1,26 +1,27 @@
 import SwiftUI
 
-/// One post in the feed: who said it, when, the words, the picture, and the way into its comments.
+/// One post in the feed: its picture first, then the words, then one line saying who posted it,
+/// when and where it came from, with the bookmark and the way into its comments at its end. The
+/// same card at every width, so a post reads alike in one column, in two and on a phone.
 struct FeedPostCard: View {
     var post: Post
     var model: FeedModel
-    @Environment(AppModel.self) private var app
 
     var body: some View {
         let open = model.commentsOpen && model.activeID == post.id
-        HStack(alignment: .top, spacing: 12) {
-            AvatarView(agent: app.agent(post.author))
+        VStack(alignment: .leading, spacing: 0) {
+            FeedPicture(post: post, model: model)
             VStack(alignment: .leading, spacing: 0) {
-                FeedPostHeader(post: post)
                 FeedPostBody(post: post)
                 if let page = post.page {
                     PageCard(page: page).padding(.top, 10)
                 }
-                FeedPicture(post: post, model: model)
-                FeedPostFooter(post: post, model: model, open: open)
+                FeedByline(post: post, model: model, open: open)
             }
+            .padding(.horizontal, 10)
+            .padding(.top, FeedPicture.shows(post) ? 12 : 10)
         }
-        .padding(16)
+        .padding(6)
         .glass(radius: 26, lifted: open)
         .background {
             FeedFrameReporter { frame in model.cardMoved(post.id, frame) }
@@ -28,31 +29,6 @@ struct FeedPostCard: View {
         .onDisappear { model.cardGone(post.id) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("feed.post.\(post.id)")
-    }
-}
-
-private struct FeedPostHeader: View {
-    var post: Post
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        let author = app.agent(post.author)
-        HStack(spacing: 6) {
-            Text(author?.name ?? "Unknown")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-                .lineLimit(1)
-            Text(ago(post.created_at))
-                .font(.system(size: 13.5))
-                .foregroundStyle(Theme.ink3)
-                .lineLimit(1)
-                .fixedSize()
-            Spacer(minLength: 0)
-            if let tracker = app.tracker(post.tracker_id) {
-                TrackerChip(tracker: tracker)
-            }
-        }
-        .frame(minHeight: 24)
     }
 }
 
@@ -75,7 +51,6 @@ private struct FeedPostBody: View {
             .lineLimit(4)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 2)
             .modifier(FeedToSource(source: post.source))
             .accessibilityIdentifier("feed.post.body.\(post.id)")
     }
@@ -97,21 +72,38 @@ struct FeedToSource: ViewModifier {
     }
 }
 
-/// The last line of a card: the source's name, save to links, and the comment button.
-private struct FeedPostFooter: View {
+/// The last line of a card: who posted it and how long ago, the source's name, save to links,
+/// and the comment button. The source gives way first when the line is short of room.
+private struct FeedByline: View {
     var post: Post
     var model: FeedModel
     var open: Bool
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        HStack(spacing: 12) {
+        let author = app.agent(post.author)
+        HStack(spacing: 8) {
+            AvatarView(agent: author, size: 22)
+            Text(author?.name ?? "Unknown")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Text(ago(post.created_at))
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink3)
+                .lineLimit(1)
+                .fixedSize()
             if let source = post.source {
+                Text("·")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.ink3)
+                    .accessibilityHidden(true)
                 Button {
                     app.open(source.url)
                 } label: {
                     Text(source.name)
-                        .font(.system(size: 12.5))
+                        .font(.system(size: 13))
                         .underline(true, color: Theme.line)
                         .foregroundStyle(Theme.ink3)
                         .lineLimit(1)
@@ -130,7 +122,6 @@ private struct FeedPostFooter: View {
         }
         .frame(minHeight: 36)
         .padding(.top, 6)
-        .padding(.bottom, -6)
         .padding(.trailing, -6)
     }
 }

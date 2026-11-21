@@ -4,10 +4,10 @@ import { Bookmark, ChevronLeft, ChevronRight, MessageCircle, X } from "lucide-re
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { preload, useSWRConfig } from "swr";
-import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton, TrackerChip } from "@/components/bits";
+import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton } from "@/components/bits";
 import { Clip } from "@/components/Clip";
 import { MentionInput } from "@/components/MentionInput";
 import { useComments } from "@/components/Shell";
@@ -35,12 +35,17 @@ function Feed() {
   // Comments sit beside the feed and follow it: while they are open they show the post being read.
   const comments = useComments();
   const [activeId, setActiveId] = useState<string | null>(null);
+  const activeRef = useRef(activeId);
+  activeRef.current = activeId;
   const sentinel = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   /** Until this time, scrolling does not change whose comments are shown (the page is moving by itself). */
   const hold = useRef(0);
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { set: setComments, open: commentsOpen } = comments;
+  // One column, or two where there is room (see `FeedGrid`).
+  const room = useRef<HTMLDivElement>(null);
+  const cols = useColumns(room);
 
   useEffect(() => () => setComments(false), [setComments]);
   useEffect(() => {
@@ -49,8 +54,25 @@ function Feed() {
     return () => window.removeEventListener("keydown", onKey);
   }, [setComments]);
 
-  const first = data?.posts ?? [];
-  const posts = [...first, ...older.filter((o) => !first.some((f) => f.id === o.id))];
+  // Posts that arrive while the owner is reading further down wait above, out of sight, until the
+  // feed is back at the top. Added at the top of two columns, one would push a column down under them.
+  const [away, setAway] = useState(false);
+  useEffect(() => {
+    const main = list.current?.closest("main");
+    if (!main) return;
+    const onScroll = () => setAway(main.scrollTop > 80);
+    onScroll();
+    main.addEventListener("scroll", onScroll, { passive: true });
+    return () => main.removeEventListener("scroll", onScroll);
+  }, []);
+  // the newest post on show, in this view (the other view's list has nothing to do with it)
+  const newest = useRef<{ key: string; id: string | null }>({ key, id: null });
+  const latest = data?.posts ?? [];
+  const shownTop = newest.current.key === key ? newest.current.id : null;
+  const from = away && shownTop ? latest.findIndex((p) => p.id === shownTop) : -1;
+  const first = from > 0 ? latest.slice(from) : latest;
+  newest.current = { key, id: first[0]?.id ?? null };
+  const posts = [...first, ...older.filter((o) => !latest.some((f) => f.id === o.id))];
 
   const loadMore = useCallback(async () => {
     const last = posts[posts.length - 1];
@@ -68,8 +90,12 @@ function Feed() {
     return () => io.disconnect();
   }, [loadMore]);
 
-  /** The post being read: the one crossing a line a little above the middle of the screen. */
-  const reading = useCallback((): string | null => {
+  /**
+   * The post being read: the one crossing a line a little above the middle of the screen. Given
+   * `lane` (the post whose comments are open), only the posts in its column count, so in two
+   * columns the comments follow down the column the owner is reading.
+   */
+  const reading = useCallback((lane?: string | null): string | null => {
     const cards = list.current?.querySelectorAll<HTMLElement>("[data-post]");
     if (!cards?.length) return null;
     // The line sits a little above the middle of the screen, and slides to the top or bottom edge
@@ -78,13 +104,15 @@ function Feed() {
     const vh = window.innerHeight;
     const left = main.scrollHeight - main.clientHeight - main.scrollTop;
     const line = Math.max(Math.min(vh * READ_LINE, 150 + main.scrollTop), vh - 220 - left);
+    const own = lane ? list.current!.querySelector<HTMLElement>(`[data-post="${lane}"]`)?.getBoundingClientRect() : undefined;
+    const x = own?.width ? own.left + own.width / 2 : null;
     let best: string | null = null;
     let nearest = Infinity;
     for (const el of cards) {
       const r = el.getBoundingClientRect();
+      if (x !== null && (r.left > x || r.right < x)) continue;
       const d = r.top <= line && r.bottom >= line ? 0 : Math.min(Math.abs(r.top - line), Math.abs(r.bottom - line));
       if (d < nearest) (nearest = d), (best = el.dataset.post!);
-      if (r.top > line) break;
     }
     return best;
   }, []);
@@ -99,7 +127,7 @@ function Feed() {
       if (frame || Date.now() < hold.current) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        const id = reading();
+        const id = reading(activeRef.current);
         if (id) setActiveId(id);
       });
     };
@@ -154,67 +182,62 @@ function Feed() {
 
   const activeAt = commentsOpen ? posts.findIndex((p) => p.id === activeId) : -1;
   const active = posts[activeAt];
-  // Fetch the comments of the posts either side of the one being read, so they are there by the time the feed reaches them.
-  const beside = [posts[activeAt - 1]?.id, posts[activeAt + 1]?.id].filter(Boolean).join();
+  // Fetch the comments of the posts either side of the one being read, so they are there by the
+  // time the feed reaches them. In two columns its neighbours down the column are a post or two away.
+  const beside = [-2, -1, 1, 2].map((d) => posts[activeAt + d]?.id).filter(Boolean).join();
   useEffect(() => {
     if (activeAt >= 0) for (const id of beside.split(",").filter(Boolean)) preload(`posts/${id}`, fetcher);
   }, [activeAt, beside]);
 
   return (
-    <div className="mx-auto max-w-[620px]">
-      <PageHeader
-        title="Feed"
-        right={
-          <button
-            type="button"
-            onClick={() => router.push(only ? "/feed" : "/feed?view=bookmarked", { scroll: false })}
-            aria-pressed={only}
-            aria-label="Bookmarked"
-            title={only ? "Show everything" : "Show bookmarked only"}
-            className={`-mr-1 mb-0.5 grid h-10 w-10 flex-none place-items-center rounded-full transition-colors ${only ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
-          >
-            <Bookmark size={18} fill={only ? "currentColor" : "none"} />
-          </button>
-        }
-      />
+    <div ref={room} data-feed data-cols={cols} className="mx-auto w-full max-w-[1140px]">
+      {/* one column keeps the reading width it always had; two use the room they were given */}
+      <div className={cols > 1 ? "" : "mx-auto max-w-[620px]"}>
+        <PageHeader
+          title="Feed"
+          right={
+            <button
+              type="button"
+              onClick={() => router.push(only ? "/feed" : "/feed?view=bookmarked", { scroll: false })}
+              aria-pressed={only}
+              aria-label="Bookmarked"
+              title={only ? "Show everything" : "Show bookmarked only"}
+              className={`-mr-1 mb-0.5 grid h-10 w-10 flex-none place-items-center rounded-full transition-colors ${only ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+            >
+              <Bookmark size={18} fill={only ? "currentColor" : "none"} />
+            </button>
+          }
+        />
 
-      <div ref={list} className="flex flex-col gap-3">
-        <AnimatePresence initial={false} mode="popLayout">
-          {posts.map((p, i) => (
-            <PostCard
-              key={p.id}
-              post={p}
-              index={i}
-              open={active?.id === p.id}
-              onToggle={() => toggleComments(p.id)}
-              onBookmark={() => bookmark(p)}
-            />
-          ))}
-        </AnimatePresence>
+        <div ref={list}>
+          <FeedGrid key={key} posts={posts} cols={cols} anchor={() => (commentsOpen ? activeRef.current : null) ?? reading()}>
+            {(p, i) => <PostCard post={p} index={i} flow={cols < 2} open={active?.id === p.id} onToggle={() => toggleComments(p.id)} onBookmark={() => bookmark(p)} />}
+          </FeedGrid>
+        </div>
+
+        {data && posts.length === 0 && only && (
+          // waits for the last post to finish leaving before it shows
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="py-24 text-center text-[14.5px] text-ink3">
+            Nothing bookmarked yet.
+          </motion.p>
+        )}
+        {data && posts.length === 0 && !only && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="py-24 text-center">
+            <div className="art-pending mx-auto mb-6 h-16 w-16 rounded-full" style={{ background: "conic-gradient(#ffc9b5,#c9b8ff,#a8e6ff,#b5f5d8,#ffc9b5)", filter: "blur(2px)" }} />
+            <p className="text-[17px] font-semibold">Quiet for now</p>
+            <p className="mx-auto mt-1 max-w-[280px] text-ink2">
+              Updates from your agents appear here.{" "}
+              <Link href="/agents" className="text-accent">
+                Connect one
+              </Link>{" "}
+              to get started.
+            </p>
+          </motion.div>
+        )}
+        {!data && <Skeletons cols={cols} />}
+        <div ref={sentinel} className="h-8" />
+        <CommentsPanel post={active} index={activeAt} open={commentsOpen} onClose={() => setComments(false)} onDeleted={(id) => (setOlder((o) => o.filter((x) => x.id !== id)), mutate())} />
       </div>
-
-      {data && posts.length === 0 && only && (
-        // waits for the last post to finish leaving before it shows
-        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="py-24 text-center text-[14.5px] text-ink3">
-          Nothing bookmarked yet.
-        </motion.p>
-      )}
-      {data && posts.length === 0 && !only && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="py-24 text-center">
-          <div className="art-pending mx-auto mb-6 h-16 w-16 rounded-full" style={{ background: "conic-gradient(#ffc9b5,#c9b8ff,#a8e6ff,#b5f5d8,#ffc9b5)", filter: "blur(2px)" }} />
-          <p className="text-[17px] font-semibold">Quiet for now</p>
-          <p className="mx-auto mt-1 max-w-[280px] text-ink2">
-            Updates from your agents appear here.{" "}
-            <Link href="/agents" className="text-accent">
-              Connect one
-            </Link>{" "}
-            to get started.
-          </p>
-        </motion.div>
-      )}
-      {!data && <Skeletons />}
-      <div ref={sentinel} className="h-8" />
-      <CommentsPanel post={active} index={activeAt} open={commentsOpen} onClose={() => setComments(false)} onDeleted={(id) => (setOlder((o) => o.filter((x) => x.id !== id)), mutate())} />
     </div>
   );
 }
@@ -223,18 +246,152 @@ function Feed() {
 const READ_LINE = 0.38;
 /** Width from which comments sit beside the feed. Narrower, they slide over it. */
 const BESIDE = "(min-width: 768px)";
+/** Room from which the feed runs in two columns: each is then at least as wide as a post on a phone. */
+const TWO_COLUMNS = 696;
+/** The space between posts in two columns, across and down. One column keeps its 12px. */
+const GUTTER = 16;
 
-function Skeletons() {
+/** How many columns the feed has room for, measured on the space it is given (the rail and the comments take their share). */
+function useColumns(room: RefObject<HTMLElement | null>) {
+  const [cols, setCols] = useState(1);
+  useLayoutEffect(() => {
+    const el = room.current;
+    if (!el) return;
+    const measure = () => setCols(el.clientWidth >= TWO_COLUMNS ? 2 : 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [room]);
+  return cols;
+}
+
+/**
+ * The posts, in one column or two. One column is the page's own flow. In two, each post goes to
+ * the shorter column when it first appears and stays there, so nothing changes sides as pictures
+ * load or posts come and go. The page keeps the posts newest first, the order the keyboard and
+ * screen readers meet them in; only where each sits on screen is worked out here. A post moving up
+ * into room another has left glides there; any other move is made at once, so that cards never
+ * slide over one another.
+ */
+function FeedGrid({ posts, cols, anchor, children }: { posts: Post[]; cols: number; /** the post to keep still on screen when the number of columns changes */ anchor: () => string | null; children: (post: Post, index: number) => ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const live = useRef({ ids: [] as string[], cols });
+  live.current = { ids: posts.map((p) => p.id), cols };
+  // the column each post sits in, and how much has been added to the top of each since
+  const lanes = useRef(new Map<string, number>());
+  const added = useRef([0, 0]);
+  // where each post was put last time, and the width and columns that was for
+  const was = useRef(new Map<string, number>());
+  const last = useRef({ width: 0, cols: 0 });
+  // The post kept still while the number of columns changes, and where it was on screen before.
+  // Read here, before the change reaches the page.
+  const keep = useRef<{ id: string; top: number } | null>(null);
+  if (last.current.cols && cols !== last.current.cols && !keep.current && box.current) {
+    const id = anchor();
+    const el = id ? box.current.querySelector<HTMLElement>(`[data-cell="${id}"]`) : null;
+    if (id && el) keep.current = { id, top: el.getBoundingClientRect().top };
+  }
+
+  const place = useCallback(() => {
+    const el = box.current;
+    if (!el) return;
+    const { ids, cols } = live.current;
+    const cells = new Map<string, HTMLElement>();
+    for (const c of el.children) if (c instanceof HTMLElement && c.dataset.cell) cells.set(c.dataset.cell, c);
+    const width = el.clientWidth;
+    const resized = width !== last.current.width || cols !== last.current.cols;
+    if (cols < 2) {
+      if (last.current.cols !== 1) {
+        for (const c of cells.values()) (c.style.transform = ""), (c.style.transition = "");
+        el.style.height = "";
+        was.current.clear();
+      }
+    } else {
+      const w = (width - GUTTER) / 2;
+      const order = ids.filter((id) => cells.has(id));
+      // every height first, then every move, so the page is laid out once
+      const tall = order.map((id) => cells.get(id)!.offsetHeight);
+      // Posts above all those already placed came in at the top. Oldest first, each goes to the top
+      // of whichever column has had less added there, so new posts take turns between the two.
+      const known = order.findIndex((id) => lanes.current.has(id));
+      for (let i = known - 1; i >= 0; i--) {
+        const c = added.current[0] <= added.current[1] ? 0 : 1;
+        lanes.current.set(order[i], c);
+        added.current[c] += tall[i] + GUTTER;
+      }
+      const tops = [0, 0];
+      order.forEach((id, i) => {
+        let c = lanes.current.get(id);
+        if (c === undefined) lanes.current.set(id, (c = tops[0] <= tops[1] ? 0 : 1));
+        const y = tops[c];
+        tops[c] += tall[i] + GUTTER;
+        const cell = cells.get(id)!;
+        const before = was.current.get(id);
+        cell.style.transition = !resized && before !== undefined && y < before - 0.5 ? "transform 0.45s var(--ease)" : "none";
+        cell.style.transform = `translate(${c * (w + GUTTER)}px, ${y}px)`;
+        was.current.set(id, y);
+      });
+      el.style.height = `${Math.max(0, tops[0], tops[1]) - (order.length ? GUTTER : 0)}px`;
+    }
+    last.current = { width, cols };
+    // the post being read stays where it was on screen while everything else rearranges round it
+    // (at the very top the page simply stays at the top)
+    const k = keep.current;
+    keep.current = null;
+    const cell = k && cells.get(k.id);
+    const main = el.closest("main");
+    if (k && cell && main && main.scrollTop > 0) main.scrollTop += cell.getBoundingClientRect().top - k.top;
+  }, []);
+
+  useLayoutEffect(() => place());
+  // Pictures load, cards change height, the space changes width: place them again, once a frame.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    let frame = 0;
+    const again = () => {
+      if (!frame) frame = requestAnimationFrame(() => ((frame = 0), place()));
+    };
+    const ro = new ResizeObserver(again);
+    ro.observe(el);
+    for (const c of el.children) ro.observe(c);
+    const mo = new MutationObserver((changes) => {
+      for (const m of changes) {
+        m.addedNodes.forEach((n) => n instanceof Element && ro.observe(n));
+        m.removedNodes.forEach((n) => n instanceof Element && ro.unobserve(n));
+      }
+      again();
+    });
+    mo.observe(el, { childList: true });
+    return () => (ro.disconnect(), mo.disconnect(), cancelAnimationFrame(frame));
+  }, [place]);
+
   return (
-    <div className="flex flex-col gap-3">
-      {[0, 1].map((i) => (
-        <div key={i} className="glass rounded-[26px] p-4">
-          <div className="flex gap-3">
-            <div className="shimmer h-10 w-10 rounded-full" />
-            <div className="flex-1 space-y-2.5 pt-1">
-              <div className="shimmer h-3 w-32 rounded-full" />
-              <div className="shimmer h-3 w-full rounded-full" />
-              <div className="shimmer aspect-[2/1] w-full rounded-[18px]" />
+    <div ref={box} data-feed-grid className={cols > 1 ? "relative" : "flex flex-col gap-3"}>
+      <AnimatePresence initial={false}>
+        {posts.map((p, i) => (
+          <div key={p.id} data-cell={p.id} className={cols > 1 ? "absolute left-0 top-0" : "relative"} style={cols > 1 ? { width: `calc((100% - ${GUTTER}px) / 2)` } : undefined}>
+            {children(p, i)}
+          </div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function Skeletons({ cols }: { cols: number }) {
+  return (
+    <div className={cols > 1 ? "grid grid-cols-2 gap-4" : "flex flex-col gap-3"}>
+      {Array.from({ length: cols * 2 }, (_, i) => (
+        <div key={i} className="glass rounded-[26px] p-1.5">
+          <div className="shimmer aspect-[2/1] w-full rounded-[20px]" />
+          <div className="space-y-2.5 px-2.5 pb-3.5 pt-4">
+            <div className="shimmer h-3 w-full rounded-full" />
+            <div className="shimmer h-3 w-2/3 rounded-full" />
+            <div className="flex items-center gap-2 pt-2">
+              <div className="shimmer h-[22px] w-[22px] rounded-full" />
+              <div className="shimmer h-3 w-28 rounded-full" />
             </div>
           </div>
         </div>
@@ -243,35 +400,58 @@ function Skeletons() {
   );
 }
 
-/** A post's picture. Video plays in place as it scrolls into view; anything else opens the source when tapped. */
+/** Whether a post has a picture of some kind (its own, a clip, or a drawing); if so it leads the card. */
+const pictured = (post: Post) => !!post.media || (!!post.art && post.art.status !== "none");
+
+/** The corners of a post's picture: 6px inside the card's 26px corners, so the two curves run together. */
+const FRAME = "overflow-hidden rounded-[20px] [--r:20px]";
+
+/** A post's picture, at the top of its card. Video plays in place as it scrolls into view; anything else opens the source when tapped. */
 function Picture({ post }: { post: Post }) {
   const m = post.media;
   const art = post.art;
-  const frame = "mt-3 overflow-hidden rounded-[18px] [--r:18px]";
   if (m?.type === "image" && m.images && m.images.length > 1) return <Pictures post={post} images={m.images} />;
-  if (m?.type === "image")
-    return (
-      <ToSource post={post}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={m.url} alt={m.title ?? ""} loading="lazy" className={`${frame} max-h-[520px] w-full bg-fill object-cover`} />
-      </ToSource>
-    );
+  if (m?.type === "image") return <Photo post={post} src={m.url} title={m.title} />;
   // A repeating clip is a picture that moves, so it opens the source like one. A video keeps its taps for itself.
   if (m?.type === "video")
     return m.loop && !m.embed ? (
       <ToSource post={post}>
-        <Clip media={m} />
+        <Clip media={m} frame="rounded-[20px]" />
       </ToSource>
     ) : (
-      <Clip media={m} />
+      <Clip media={m} frame="rounded-[20px]" />
     );
   if (art && art.status !== "none")
     return (
       <ToSource post={post}>
-        <ArtPanel art={art} className={`${frame} aspect-[2/1] w-full`} />
+        <ArtPanel art={art} className={`${FRAME} aspect-[2/1] w-full`} />
       </ToSource>
     );
   return null;
+}
+
+/**
+ * One picture, in its own shape (from a wide 2.4 to an upright 3:4, and never taller than 520px).
+ * Until it has loaded it holds a landscape shape, so the posts around it hardly move when it arrives.
+ */
+function Photo({ post, src, title }: { post: Post; src: string; title?: string }) {
+  const [shape, setShape] = useState<number | null>(null);
+  return (
+    <ToSource post={post}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={title ?? ""}
+        loading="lazy"
+        onLoad={(e) => {
+          const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+          if (w && h) setShape(w / h);
+        }}
+        style={{ aspectRatio: Math.min(2.4, Math.max(0.75, shape ?? 1.6)) }}
+        className={`${FRAME} block max-h-[520px] w-full bg-fill object-cover`}
+      />
+    </ToSource>
+  );
 }
 
 /**
@@ -287,8 +467,8 @@ function Pictures({ post, images }: { post: Post; images: Image[] }) {
   const arrow = "slide-arrow absolute top-1/2 hidden h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-ink opacity-0 transition-opacity duration-200 focus-visible:opacity-100 group-hover/pics:opacity-100 [@media(hover:hover)]:grid";
 
   return (
-    <div className="mt-3" role="group" aria-roledescription="carousel" aria-label={`${images.length} pictures`} data-pictures>
-      <div className="group/pics relative overflow-hidden rounded-[18px] bg-fill transition-[aspect-ratio] duration-300" style={{ aspectRatio: shape }}>
+    <div role="group" aria-roledescription="carousel" aria-label={`${images.length} pictures`} data-pictures>
+      <div className="group/pics relative overflow-hidden rounded-[20px] bg-fill transition-[aspect-ratio] duration-300" style={{ aspectRatio: shape }}>
         <ToSource post={post} className="block h-full">
           <div ref={slides} className="slides" data-scroll-x onScroll={(e) => setAt(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}>
             {images.map((im, i) => (
@@ -358,60 +538,61 @@ function BookmarkButton({ on, onPress }: { on: boolean; onPress: () => void }) {
   );
 }
 
-function PostCard({ post, index, open, onToggle, onBookmark }: { post: Post; index: number; open: boolean; onToggle: () => void; onBookmark: () => void }) {
-  const { agent, tracker, agents } = useMe();
+/**
+ * One post: its picture first, then the words, then one line saying who posted it, when and where
+ * it came from, with the bookmark and the way into its comments at its end. Built the same at any
+ * width, so a post reads the same in one column, in two, and on a phone.
+ */
+function PostCard({ post, index, open, flow, onToggle, onBookmark }: { post: Post; index: number; open: boolean; /** one column: the card animates its own moves (in two, `FeedGrid` moves it) */ flow: boolean; onToggle: () => void; onBookmark: () => void }) {
+  const { agent, agents } = useMe();
   const author = agent(post.author);
-  const tr = tracker(post.tracker_id);
   const handles = agents.map((a) => a.handle);
   const n = post.reply_count;
 
   return (
     <motion.article
-      layout="position"
+      layout={flow ? "position" : false}
       data-post={post.id}
       initial={{ opacity: 0, y: 18, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ ...soft, delay: index < 8 ? index * 0.035 : 0 }}
-      className={`glass group relative rounded-[26px] p-4 transition-shadow duration-500 ${open ? "glass-lift" : ""}`}
+      className={`glass group relative rounded-[26px] p-1.5 transition-shadow duration-500 ${open ? "glass-lift" : ""}`}
     >
-      <div className="flex gap-3">
-        <Avatar agent={author} />
-        <div className="min-w-0 flex-1">
-          <div className="flex h-6 items-center gap-1.5">
-            <span className="truncate text-[15px] font-semibold">{author?.name ?? "Unknown"}</span>
-            <span className="flex-none text-[13.5px] text-ink3">{ago(post.created_at)}</span>
-            <span className="flex-1" />
-            {tr && <TrackerChip tracker={tr} />}
-          </div>
-          <ToSource post={post}>
-            <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em]">
-              <Rich text={post.body} handles={handles} />
-            </p>
-          </ToSource>
-          {post.page && <PageCard page={post.page} />}
-          <Picture post={post} />
-          <div className="-mb-1.5 -mr-1.5 mt-1.5 flex min-h-9 items-center gap-3">
-            {post.source ? (
-              <a href={post.source.url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-[12.5px] text-ink3 underline decoration-[var(--line)] underline-offset-[3px] transition-colors hover:text-ink2">
-                {post.source.name}
+      <Picture post={post} />
+      <div className={`px-2.5 ${pictured(post) ? "pt-3" : "pt-2.5"}`}>
+        <ToSource post={post}>
+          <p className="line-clamp-4 whitespace-pre-wrap break-words text-[16.5px] font-medium leading-[1.36] tracking-[-0.014em]">
+            <Rich text={post.body} handles={handles} />
+          </p>
+        </ToSource>
+        {post.page && <PageCard page={post.page} />}
+        <div className="-mr-1.5 mt-1.5 flex min-h-9 items-center gap-2" data-byline>
+          <Avatar agent={author} size={22} />
+          <span className="min-w-0 max-w-[45%] truncate text-[13.5px] font-semibold">{author?.name ?? "Unknown"}</span>
+          <span className="flex-none text-[13px] text-ink3">{ago(post.created_at)}</span>
+          {post.source && (
+            <>
+              <span aria-hidden className="flex-none text-[13px] text-ink3">
+                ·
+              </span>
+              <a href={post.source.url} target="_blank" rel="noreferrer" className="flex h-9 min-w-0 items-center text-[13px] text-ink3 transition-colors hover:text-ink2">
+                <span className="truncate underline decoration-[var(--line)] underline-offset-[3px]">{post.source.name}</span>
               </a>
-            ) : (
-              <span />
-            )}
-            <span className="flex-1" />
-            {post.source && <BookmarkButton on={!!post.bookmarked_at} onPress={onBookmark} />}
-            <button
-              type="button"
-              onClick={onToggle}
-              aria-expanded={open}
-              aria-label={open ? "Close comments" : n ? `Comments, ${n} ${n === 1 ? "reply" : "replies"}` : "Comments"}
-              className={`flex h-9 flex-none items-center gap-1.5 rounded-full px-2.5 text-[13px] tabular-nums transition-colors ${open ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
-            >
-              <MessageCircle size={16} fill={open ? "currentColor" : "none"} fillOpacity={0.18} />
-              {n > 0 && n}
-            </button>
-          </div>
+            </>
+          )}
+          <span className="flex-1" />
+          {post.source && <BookmarkButton on={!!post.bookmarked_at} onPress={onBookmark} />}
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-label={open ? "Close comments" : n ? `Comments, ${n} ${n === 1 ? "reply" : "replies"}` : "Comments"}
+            className={`flex h-9 flex-none items-center gap-1.5 rounded-full px-2.5 text-[13px] tabular-nums transition-colors ${open ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+          >
+            <MessageCircle size={16} fill={open ? "currentColor" : "none"} fillOpacity={0.18} />
+            {n > 0 && n}
+          </button>
         </div>
       </div>
     </motion.article>

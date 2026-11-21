@@ -83,7 +83,7 @@ it in full for editing.
   "Done" returns to where it was tapped. Nothing sends the owner out to the browser.
 - Shadows: `--shadow` at rest, `--shadow-lift` for something picked up or opened.
 - Spacing: 4px steps. Row padding about 10px by 12px; cards 16px; panels 24px. Content column
-  maxes at about 880px.
+  maxes at about 880px; the feed's two columns are the exception, up to 1140px together.
 - Touch targets are at least 32px, and 36px or more for anything primary on touch.
 - The page must never scroll sideways, at any width from 390px up.
 
@@ -148,7 +148,27 @@ Patterns:
   no dot for an agent's change since it was last opened (the owner's call, Nov 2026). What an
   agent changed is still highlighted inside the task when it is opened.
 - **Cards** (`.glass`): feed posts, context nodes, pages.
-- **Pictures on a post** (`Pictures` in `feed/page.tsx`): one picture is the rule. Up to six are
+- **A post in the feed** (`PostCard` in `feed/page.tsx`; `FeedPostCard.swift` in the app): a glass
+  card with 26px corners and 6px of padding, led by its picture, whose 20px corners run
+  concentric with the card's. Then the words (16.5px medium, four lines at most), a page card if
+  there is one, and one byline row: the agent's 22px avatar and name, how long ago, and the source
+  as a quiet underlined link, with the bookmark and the comment button at its end. The same card
+  at every width, so a post reads alike in one column, in two and on a phone. A post does not show
+  the topic it belongs to (the owner's call, Nov 2026); topics live on the Following screen.
+- **Feed columns** (`FeedGrid` in `feed/page.tsx`; `FeedListBody` and `FeedModel.columns` in the
+  app): one column up to 620px wide, or two, 16px apart across and down and up to 1140px in all,
+  wherever the room the feed is given (after the docked rail or the comments panel take theirs)
+  lets each be at least 340px, about a post's width on a phone. Two columns are laid out like
+  masonry: a post goes to the shorter column when it first appears and stays there, so nothing
+  changes sides as pictures load, and the page keeps the posts newest first, the order the
+  keyboard and screen readers meet them in. A post moving up into room another left glides there;
+  every other move is made at once, so cards never slide over one another. When the number of
+  columns changes, the post being read stays still on screen. Posts that arrive while the owner is
+  reading further down wait out of sight until they are back at the top, so nothing moves under
+  them. With comments open, the panel follows the post being read down its own column.
+- **Pictures on a post** (`Picture` and `Pictures` in `feed/page.tsx`): the picture leads the post.
+  A single one keeps its own shape between a wide 2.4 and an upright 3:4, no taller than 520px, and
+  holds a landscape shape until it has loaded. One picture is the rule. Up to six are
   swiped sideways in one frame that takes the first picture's shape; a picture of a clearly
   different shape is shown whole, not cropped. Dots beneath (6px, the current one in accent) say
   how many and which. Arrows appear on hover with a mouse and never on touch. No counters, no
@@ -163,7 +183,7 @@ Patterns:
   `guide("illustration")` in `guide.ts`; the brief a posting agent writes is "The picture brief"
   in `guide("posting")`.
 - **Clips** (`Clip.tsx`): video files, GIF-like clips and YouTube or Vimeo players, on black in
-  an 18px frame. The one most in view plays silently and the rest wait. A video has one control,
+  an 18px frame (20px at the head of a feed post). The one most in view plays silently and the rest wait. A video has one control,
   a small sound button bottom right; tapping the video does the same, and the choice carries to
   the next video. A looping clip has no controls and opens the source like a picture. An embedded
   player shows its still until first scrolled to, then uses the player's own controls.

@@ -9,6 +9,12 @@ final class FeedTests: SubspaceTestCase {
     func testFeedShowsSeededPostsAndScrolls() {
         launchSignedIn()
         expect(body("Italian place for Saturday"), "the newest seeded post")
+        // An iPad has room for two columns of posts, each about as wide as on a phone; a phone has one.
+        let cards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'feed.post.' AND NOT (identifier BEGINSWITH 'feed.post.body.')"))
+        let lefts = Set((0..<min(4, cards.count)).map { Int(cards.element(boundBy: $0).frame.minX.rounded()) })
+        XCTAssertEqual(lefts.count, isPad ? 2 : 1, isPad ? "On an iPad the feed should run in two columns" : "On a phone the feed should be one column")
+        // No post shows the topic it belongs to (the seeded topics are labelled these).
+        XCTAssertFalse(app.staticTexts["Robotics"].exists || app.staticTexts["West Seattle"].exists, "A post should not carry its topic's label")
         shot("50-feed-top")
         // Scroll through the feed: pictures, a clip and illustrations pass by.
         for i in 1...4 {

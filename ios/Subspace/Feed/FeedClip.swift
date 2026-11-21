@@ -57,7 +57,7 @@ private struct FeedFileClip: View {
             }
         }
         .aspectRatio(ratio, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: feedPictureRadius, style: .continuous))
         .frame(maxHeight: 560)
         .background {
             FeedFrameReporter { frame in model.clipMoved(post.id, frame) }
@@ -328,7 +328,7 @@ private struct FeedEmbedClip: View {
         .frame(maxWidth: limit)
         .frame(maxWidth: .infinity)
         .background(Color.black)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: feedPictureRadius, style: .continuous))
         .onDisappear { loaded = false }
         .accessibilityIdentifier("feed.embed.\(post.id)")
     }
