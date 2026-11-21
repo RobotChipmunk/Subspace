@@ -312,6 +312,7 @@ private struct TodosPlanRow: View {
         .fixedSize(horizontal: false, vertical: true)
         .contentShape(Rectangle())
         .onDrag {
+            store.draggingID = nil
             store.planDragging = (id: id, line: line)
             return NSItemProvider(object: id as NSString)
         }

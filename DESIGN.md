@@ -409,8 +409,11 @@ Patterns:
   the window. Its tasks come soonest first. A task there shows where it sits ("Today" in accent, "This week", "Backlog") and
   that word moves it to another list; tapping the task opens it. A task typed under a line goes
   to the backlog: planning is not scheduling. Carrying a task onto another line makes it part of
-  that line (the line lights as a list does); let go anywhere else it returns, since the order
-  here is the lists' own. In the app the same word also offers the lines, as the system menu.
+  that line (the line lights as a list does). Carrying it onto a list in the sidebar gives it that
+  list's day, exactly as the word at its end would, and it stays part of its line and under it in
+  the plan (the list lights and the row steps back, as when a task is carried between lists; the
+  lists it can go to are the "Move to" ones, so not "This week", "Later" or "All"). Let go
+  anywhere else it returns, since the order here is the lists' own. In the app the same word also offers the lines, as the system menu.
   An open line's name is a field, like a task's name: tap the words and type, and return or
   leaving it saves. The bin (`ConfirmDelete`, "Remove") sits beside the name while the line is
   open; removing a line leaves its tasks in their lists. With a pointer over a closed line a

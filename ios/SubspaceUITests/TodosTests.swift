@@ -131,24 +131,42 @@ final class TodosTests: SubspaceTestCase {
         XCTAssertTrue(place.label.hasPrefix("Backlog"), "A task added in the plan should wait in the backlog, not \(place.label)")
         shot("17-todos-plan-added")
 
+        // Carried onto a list in the folders, it takes that list's day and stays under its line.
+        // A loaded simulator sometimes does not lift the row, so the carry is tried again. Where
+        // the folders and the task are not on screen together it is left in the backlog.
+        var home = "backlog"
+        var other = "Replace the hallway light"
+        if folder("today").isHittable && planRow(task).isHittable {
+            for attempt in 1...3 {
+                planRow(task).press(forDuration: 1.5, thenDragTo: folder("today"), withVelocity: .slow, thenHoldForDuration: 0.8)
+                Thread.sleep(forTimeInterval: 2)
+                if first("todos.plan.place.").label.hasPrefix("Today") || attempt == 3 { break }
+            }
+            expect(planRow(task), "the task, still under its line after being carried to Today")
+            XCTAssertTrue(first("todos.plan.place.").label.hasPrefix("Today"), "A task carried onto Today should say Today, not \(first("todos.plan.place.").label)")
+            shot("17-todos-plan-carried-to-list")
+            home = "today"
+            other = "Book parent-teacher conference"
+        }
+
         // Back in the lists the task carries its line, and the list can be narrowed to it.
-        folder("backlog").tap()
-        expect(row(task), "the task, in the backlog")
+        folder(home).tap()
+        expect(row(task), "the task, in its list")
         expect(element("todos.plan.filter"), "the priority filter, on a list with tasks in the plan").tap()
         expect(app.buttons[renamed], "the new priority among the lines to choose from").tap()
-        waitToVanish(row("Replace the hallway light"), "a task that is not part of the chosen line")
+        waitToVanish(row(other), "a task that is not part of the chosen line")
         expect(row(task), "the task that is part of the chosen line")
         XCTAssertEqual(element("todos.plan.filter").label, "Priority: \(renamed)", "The filter should name the chosen line")
         shot("17-todos-plan-filter")
         element("todos.plan.filter").tap()
         expect(app.buttons["Show all"], "Show all in the priority menu").tap()
-        expect(row("Replace the hallway light"), "every task again, once the choice is off")
+        expect(row(other), "every task again, once the choice is off")
 
         // An open task says what it is part of.
         row(task).tap()
         let partOf = expect(element("todos.detail.partOf"), "the Part of pill on the task")
         XCTAssertEqual(partOf.label, "Part of. Now: \(renamed)", "The task should say which line it is part of")
-        // Deleted, so the next test finds the backlog as it was.
+        // Deleted, so the next test finds the list as it was.
         let delete = element("todos.detail.delete")
         expect(delete, "the delete control").tap()
         delete.tap()

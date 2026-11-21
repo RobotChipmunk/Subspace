@@ -349,7 +349,7 @@ function Todos() {
               {view === BIN ? (
                 <Bin />
               ) : view === PLAN ? (
-                <Plan plan={f?.plan} folders={f?.folders ?? []} today={f?.today} hideDone={hideDone} onHideDone={setHideDone} open={openLines} onOpenLines={setOpenLines} onOpen={setOpenId} />
+                <Plan plan={f?.plan} folders={f?.folders ?? []} today={f?.today} hideDone={hideDone} onHideDone={setHideDone} open={openLines} onOpenLines={setOpenLines} onOpen={setOpenId} onCarry={setCarry} />
               ) : (
                 <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} filter={filter} onFilter={setFilter} plan={f?.plan ?? []} focus={focus} onFocus={setFocus} hideDone={hideDone} onHideDone={setHideDone} onOpen={setOpenId} onCarry={setCarry} />
               )}
@@ -744,6 +744,8 @@ type PlanTools = {
   onOpen: (id: string) => void;
   /** the line a carried task is held over, or null */
   onOver: (line: string | null) => void;
+  /** the list in the sidebar a carried task is held over, or null */
+  onCarry: (folder: string | null) => void;
   refresh: () => void;
 };
 
@@ -756,12 +758,12 @@ type PlanTools = {
  * Tapping a line opens its tasks in place. A task shows where it sits (Today, This week, Backlog)
  * and that word moves it; carrying a task onto another line makes it part of that line.
  */
-function Plan({ plan, folders, today, hideDone, onHideDone, open, onOpenLines, onOpen }: { plan?: PlanItem[]; folders: Folder[]; today?: string; hideDone: boolean; onHideDone: (on: boolean) => void; open: string[]; onOpenLines: (ids: string[]) => void; onOpen: (id: string) => void }) {
+function Plan({ plan, folders, today, hideDone, onHideDone, open, onOpenLines, onOpen, onCarry }: { plan?: PlanItem[]; folders: Folder[]; today?: string; hideDone: boolean; onHideDone: (on: boolean) => void; open: string[]; onOpenLines: (ids: string[]) => void; onOpen: (id: string) => void; /** a carried task is held over that list in the sidebar */ onCarry: (folder: string | null) => void }) {
   const { mutate: globalMutate } = useSWRConfig();
   const refresh = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
   const [over, setOver] = useState<string | null>(null);
   const [priority, setPriority] = useState("");
-  const tools: PlanTools = { today, hideDone, folders, onOpen, onOver: setOver, refresh };
+  const tools: PlanTools = { today, hideDone, folders, onOpen, onOver: setOver, onCarry, refresh };
   const toggle = (id: string) => onOpenLines(open.includes(id) ? open.filter((x) => x !== id) : [...open, id]);
 
   async function addLine(title: string, parent?: string) {
@@ -984,6 +986,7 @@ function PlanTasks({ line, item, tools }: { line: string; item: PlanItem | null;
             folders={tools.folders}
             onOpen={() => tools.onOpen(r.id)}
             onOver={tools.onOver}
+            onCarry={tools.onCarry}
             onToggle={() => (r.done ? linger.drop(r.id) : linger.hold(r.id), edit(r.id, { done: !r.done }), send(r.id, { done: !r.done }))}
             onPlace={(view) => send(r.id, { view })}
             onDropped={(to) => (edit(r.id, null), send(r.id, { plan: to === "none" ? null : to }))}
@@ -1007,16 +1010,22 @@ function PlanTasks({ line, item, tools }: { line: string; item: PlanItem | null;
  * A task under a line of the plan. Tapping it opens it; the word at its end says where it sits and
  * moves it to another list. It lifts the way a task in a list does (at once with a mouse, after a
  * short rest or a sideways pull with a finger) and, let go over another line, becomes part of it.
- * Let go anywhere else it returns to where it was: the order here is the lists' own.
+ * Let go over a list in the sidebar it is given that list's day, as the word at its end would do,
+ * and stays part of the line it is under. Let go anywhere else it returns to where it was: the
+ * order here is the lists' own.
  */
-function PlanRow({ r, line, today, folders, onToggle, onOpen, onOver, onPlace, onDropped }: { r: Row; line: string; today?: string; folders: Folder[]; onToggle: () => void; onOpen: () => void; onOver: (line: string | null) => void; onPlace: (view: string) => void; onDropped: (line: string) => void }) {
+function PlanRow({ r, line, today, folders, onToggle, onOpen, onOver, onCarry, onPlace, onDropped }: { r: Row; line: string; today?: string; folders: Folder[]; onToggle: () => void; onOpen: () => void; onOver: (line: string | null) => void; onCarry: (folder: string | null) => void; onPlace: (view: string) => void; onDropped: (line: string) => void }) {
   const controls = useDragControls();
   const el = useRef<HTMLLIElement>(null);
   const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number; start: PointerEvent } | null>(null);
   const lifted = useRef(false);
   const dragging = useRef(false);
   const over = useRef<string | null>(null);
+  // the list in the sidebar it is held over
+  const overFolder = useRef<string | null>(null);
   const [up, setUp] = useState(false);
+  // held over a list it can land in, it steps back so the list shows through, as a row in a list does
+  const [out, setOut] = useState(false);
 
   useEffect(() => {
     const node = el.current;
@@ -1058,7 +1067,7 @@ function PlanRow({ r, line, today, folders, onToggle, onOpen, onOver, onPlace, o
       dragControls={controls}
       dragSnapToOrigin
       dragElastic={0}
-      animate={{ scale: up ? 1.02 : 1, boxShadow: up ? "var(--shadow-lift)" : "0 0 0 rgba(0,0,0,0)", backgroundColor: up ? "var(--surface-solid)" : "rgba(0,0,0,0)", zIndex: up ? 5 : 0 }}
+      animate={{ opacity: out ? 0.18 : 1, scale: up ? 1.02 : 1, boxShadow: up ? "var(--shadow-lift)" : "0 0 0 rgba(0,0,0,0)", backgroundColor: up ? "var(--surface-solid)" : "rgba(0,0,0,0)", zIndex: up ? 5 : 0 }}
       whileDrag={{ scale: 1.02, boxShadow: "var(--shadow-lift)", backgroundColor: "var(--surface-solid)", zIndex: 5 }}
       transition={soft}
       onPointerDown={(e) => {
@@ -1086,17 +1095,27 @@ function PlanRow({ r, line, today, folders, onToggle, onOpen, onOver, onPlace, o
       onDrag={(e) => {
         const at = e as PointerEvent;
         const under = document.elementsFromPoint(at.clientX, at.clientY).filter((n) => !el.current?.contains(n));
-        const key = under.map((n) => n.closest("[data-plan-line]")).find(Boolean)?.getAttribute("data-plan-line") ?? null;
+        // a list in the sidebar: the same ones the word at its end offers
+        const folderKey = under.map((n) => n.closest("[data-folder]")).find(Boolean)?.getAttribute("data-folder") ?? null;
+        const folder = folderKey && movable(folders, r.guest_id).some((x) => x.key === folderKey) ? folderKey : null;
+        if (folder !== overFolder.current) (onCarry((overFolder.current = folder)), setOut(!!folder));
+        const key = folder ? null : (under.map((n) => n.closest("[data-plan-line]")).find(Boolean)?.getAttribute("data-plan-line") ?? null);
         const to = key && key !== line ? key : null;
         if (to !== over.current) onOver((over.current = to));
       }}
       onDragEnd={() => {
         const to = over.current;
+        const folder = overFolder.current;
         over.current = null;
+        overFolder.current = null;
         onOver(null);
+        onCarry(null);
+        setOut(false);
         release();
         setTimeout(() => (dragging.current = false), 50);
-        if (to) onDropped(to);
+        // onto a list it takes that list's day and stays part of this line; onto a line it becomes part of that one
+        if (folder) onPlace(folder);
+        else if (to) onDropped(to);
       }}
       className="todo-row relative -mx-1 flex cursor-grab touch-pan-y select-none items-start gap-3 rounded-2xl px-2 active:cursor-grabbing"
     >
