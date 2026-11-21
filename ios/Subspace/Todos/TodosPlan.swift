@@ -3,8 +3,8 @@ import UniformTypeIdentifiers
 
 /// The plan: the owner's priorities as a short outline, each with parts one level down, and the
 /// tasks under each line. It is where they step back and look at everything; the day lists are
-/// where the work is done. A line says "Nothing yet" while no unfinished task is part of it, which
-/// is the one thing planning needs to see. Nothing is counted.
+/// where the work is done. A line shows nothing at its end but the way to open it: nothing is
+/// counted, and a line with no tasks is not marked.
 ///
 /// Tapping a line opens its tasks in place. A task shows where it sits (Today, This week,
 /// Backlog), and that word offers the other lists and the other lines it can go to.
@@ -19,13 +19,6 @@ struct TodosPlanView: View {
         store.plan.filter { $0.parent_id == id }
     }
 
-    /// Nothing unfinished is part of this line, nor (for a priority) of any of its parts.
-    private func empty(_ item: TodosPlanItem) -> Bool {
-        var open = item.open ?? 0
-        for part in parts(of: item.id) { open += part.open ?? 0 }
-        return open == 0
-    }
-
     var body: some View {
         let priorities = tops
         VStack(alignment: .leading, spacing: 0) {
@@ -33,9 +26,9 @@ struct TodosPlanView: View {
             TodosProblem(text: store.problem)
             ForEach(priorities) { top in
                 VStack(alignment: .leading, spacing: 0) {
-                    TodosPlanLine(item: top, empty: empty(top), store: store)
+                    TodosPlanLine(item: top, store: store)
                     ForEach(parts(of: top.id)) { part in
-                        TodosPlanLine(item: part, empty: empty(part), store: store)
+                        TodosPlanLine(item: part, store: store)
                     }
                     TodosPlanAdd(parent: top, store: store)
                 }
@@ -52,7 +45,7 @@ struct TodosPlanView: View {
             TodosPlanAddPriority(store: store)
                 .padding(.top, 4)
             if !priorities.isEmpty {
-                TodosPlanLine(item: nil, empty: false, store: store)
+                TodosPlanLine(item: nil, store: store)
                     .padding(.top, 24)
             }
         }
@@ -67,7 +60,6 @@ struct TodosPlanView: View {
 /// takes the line out of the plan sits beside it.
 private struct TodosPlanLine: View {
     var item: TodosPlanItem?
-    var empty: Bool
     var store: TodosStore
     @State private var over = false
     @State private var name = ""
@@ -115,16 +107,8 @@ private struct TodosPlanLine: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(title + (empty ? ". Nothing yet" : ""))
+                    .accessibilityLabel(title)
                     .accessibilityIdentifier("todos.plan.line.\(key)")
-                }
-                if empty {
-                    Text("Nothing yet")
-                        .font(.ssMeta)
-                        .foregroundStyle(Theme.ink2)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .accessibilityHidden(!open)
                 }
                 if open, item != nil {
                     ConfirmDelete(label: "Remove \(title) from the plan", confirm: "Remove", size: 15) {

@@ -402,10 +402,11 @@ Patterns:
   a short outline, with the tasks under each. It is a view across the lists, listed with "All",
   and it is where the owner steps back and looks at everything; the day lists stay as they are.
   A priority is a line in 17px semibold; its parts sit under it, set in a little, one level and
-  no further. No numbers anywhere: a line shows nothing at its end unless no unfinished task is
-  part of it (for a priority, of it or any of its parts), where it says "Nothing yet" in `ink2`,
-  because a gap is the one thing planning needs to see. Tapping a line opens its tasks in place,
-  soonest first. A task there shows where it sits ("Today" in accent, "This week", "Backlog") and
+  no further. No numbers anywhere, and a line shows nothing at its end but the way to open it: a
+  line with no tasks is not marked (the owner had "Nothing yet" taken off, Nov 2026). Tapping a
+  line opens its tasks in place, without moving anything sideways: the page keeps room for its
+  scrollbar (`scrollbar-gutter: stable` on `.scroll`) so the lists stay put when it grows past
+  the window. Its tasks come soonest first. A task there shows where it sits ("Today" in accent, "This week", "Backlog") and
   that word moves it to another list; tapping the task opens it. A task typed under a line goes
   to the backlog: planning is not scheduling. Carrying a task onto another line makes it part of
   that line (the line lights as a list does); let go anywhere else it returns, since the order

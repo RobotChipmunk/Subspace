@@ -222,6 +222,9 @@ html[data-typing] .art-mesh {
 
 .scroll {
   overflow-y: auto;
+  /* room for the scrollbar is kept whether or not it shows, so a page that grows past the window
+     (a plan line opened, a list filling) does not move sideways when the bar arrives */
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--fill-strong) transparent;

@@ -679,8 +679,8 @@ type PlanTools = {
 /**
  * The plan: the owner's priorities as a short outline, each with parts one level down, and the
  * tasks under each line. It is where they step back and look at everything; the day lists are
- * where the work is done. A line says "Nothing yet" while no unfinished task is part of it, which
- * is the one thing planning needs to see. Nothing is counted.
+ * where the work is done. A line shows nothing at its end but the way to open it: nothing is
+ * counted, and a line with no tasks is not marked.
  *
  * Tapping a line opens its tasks in place. A task shows where it sits (Today, This week, Backlog)
  * and that word moves it; carrying a task onto another line makes it part of that line.
@@ -712,9 +712,9 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
         const parts = partsOf(top.id);
         return (
           <div key={top.id} className="mb-3">
-            <PlanLine item={top} empty={top.open + parts.reduce((n, p) => n + p.open, 0) === 0} open={open.includes(top.id)} over={over === top.id} onToggle={() => toggle(top.id)} tools={tools} />
+            <PlanLine item={top} open={open.includes(top.id)} over={over === top.id} onToggle={() => toggle(top.id)} tools={tools} />
             {parts.map((p) => (
-              <PlanLine key={p.id} item={p} empty={p.open === 0} open={open.includes(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} tools={tools} />
+              <PlanLine key={p.id} item={p} open={open.includes(p.id)} over={over === p.id} onToggle={() => toggle(p.id)} tools={tools} />
             ))}
             <PlanAdd top={top} onPart={(title) => addLine(title, top.id)} onTask={() => (open.includes(top.id) || onOpenLines([...open, top.id]), refresh())} />
           </div>
@@ -729,7 +729,7 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
 
       {tops.length > 0 && (
         <div className="mt-6">
-          <PlanLine item={null} empty={false} open={open.includes("none")} over={over === "none"} onToggle={() => toggle("none")} tools={tools} />
+          <PlanLine item={null} open={open.includes("none")} over={over === "none"} onToggle={() => toggle("none")} tools={tools} />
         </div>
       )}
     </div>
@@ -808,7 +808,7 @@ function PlanAdd({ top, onPart, onTask }: { top: PlanItem; onPart: (title: strin
  * takes the line out of the plan sits beside it. With a pointer over a closed line a pencil shows
  * at its end, which opens the line with the name ready to type over.
  */
-function PlanLine({ item, empty, open, over, onToggle, tools }: { item: PlanItem | null; empty: boolean; open: boolean; over: boolean; onToggle: () => void; tools: PlanTools }) {
+function PlanLine({ item, open, over, onToggle, tools }: { item: PlanItem | null; open: boolean; over: boolean; onToggle: () => void; tools: PlanTools }) {
   const key = item?.id ?? "none";
   // what is being typed over the name; null while it shows the saved one
   const [name, setName] = useState<string | null>(null);
@@ -850,7 +850,6 @@ function PlanLine({ item, empty, open, over, onToggle, tools }: { item: PlanItem
             {item?.title ?? "Not in the plan"}
           </button>
         )}
-        {empty && <span data-plan-empty className="flex-none whitespace-nowrap px-1 text-[12.5px] text-ink2">Nothing yet</span>}
         {item && !open && (
           <button
             aria-label={`Rename ${item.title}`}
