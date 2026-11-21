@@ -654,6 +654,7 @@ final class TodosStore {
     // MARK: Reordering
 
     func beginDrag(_ id: String) {
+        planDragging = nil
         draggingID = id
         dragAt = Date()
         targetGroup = nil
@@ -698,6 +699,11 @@ final class TodosStore {
     /// Whether the row being carried can be put on this list. The same rule as the web: not the
     /// list it is on, not "This week" or "Later", and a guest's list only for that guest's own task.
     func accepts(_ key: String) -> Bool {
+        // from the plan: the lists the word at the task's end offers
+        if isPlan {
+            guard let carried = planDragging, let row = (planTasks[carried.line] ?? []).first(where: { $0.id == carried.id }) else { return false }
+            return moveOptions(guest: row.guest_id).contains { $0.key == key }
+        }
         guard let id = draggingID, !id.hasPrefix("new_"), key != view, key != "week", key != "later", key != Self.allKey else { return false }
         guard let row = (rows ?? []).first(where: { $0.id == id }), let folder = folders.first(where: { $0.key == key }) else { return false }
         return folder.guest == nil || folder.guest == row.guest_id
@@ -707,6 +713,18 @@ final class TodosStore {
     /// at once and is saved behind; if that fails it comes back. A person's list keeps its tasks
     /// whatever day they are given, so there the row stays and only its day changes.
     func dropOnFolder(_ key: String) {
+        // A task carried out of the plan takes that list's day and stays part of its line.
+        if isPlan {
+            let ok = accepts(key)
+            let carried = planDragging
+            planDragging = nil
+            guard ok, let carried else { return }
+            Task {
+                await movePlanTask(carried.id, to: key)
+                await refreshFolders()
+            }
+            return
+        }
         guard accepts(key), let id = draggingID, let api = app?.api else {
             endDrag()
             return

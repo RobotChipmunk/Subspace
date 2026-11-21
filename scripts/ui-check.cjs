@@ -964,31 +964,61 @@ async function run(profile) {
     await noSidewaysScroll("todos plan open");
     await shot("todos-plan-open");
 
-    // carried onto another line, the task becomes part of that line
     const mid = (loc) => loc.evaluate((e) => ((r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left }))(e.getBoundingClientRect()));
-    const from = await mid(task(title));
-    from.x = from.left + 110;
-    const to = await mid(line(part));
-    const at = (i) => [from.x + ((to.x - from.x) * i) / 24, from.y + ((to.y - from.y) * i) / 24];
-    let cdp;
-    const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
-    if (profile.touch) {
-      cdp = await page.context().newCDPSession(page);
-      await touch("touchStart", from.x, from.y);
-      // straight up or down is a scroll until the row has been held
-      await page.waitForTimeout(450);
-      for (let i = 1; i <= 24; i++) (await touch("touchMove", ...at(i)), await page.waitForTimeout(25));
-    } else {
-      await page.mouse.move(from.x, from.y);
-      await page.mouse.down();
-      for (let i = 1; i <= 24; i++) (await page.mouse.move(...at(i)), await page.waitForTimeout(20));
+    /** Lifts the task and holds it over `target`; `held` runs before it is let go. */
+    async function carryTask(target, held) {
+      const from = await mid(task(title));
+      from.x = from.left + 110;
+      const to = await mid(target);
+      const at = (i) => [from.x + ((to.x - from.x) * i) / 24, from.y + ((to.y - from.y) * i) / 24];
+      let cdp;
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] });
+      if (profile.touch) {
+        cdp = await page.context().newCDPSession(page);
+        await touch("touchStart", from.x, from.y);
+        // straight up or down is a scroll until the row has been held
+        await page.waitForTimeout(450);
+        for (let i = 1; i <= 24; i++) (await touch("touchMove", ...at(i)), await page.waitForTimeout(25));
+      } else {
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        for (let i = 1; i <= 24; i++) (await page.mouse.move(...at(i)), await page.waitForTimeout(20));
+      }
+      await page.waitForTimeout(400);
+      await held();
+      if (profile.touch) (await touch("touchEnd", 0, 0), await cdp.detach());
+      else await page.mouse.up();
+      await settle(1500);
     }
-    await page.waitForTimeout(400);
-    if ((await line(part).getAttribute("data-over")) !== "true") fail("todos plan: holding a task over another line did not light it");
-    await shot("todos-plan-carry");
-    if (profile.touch) (await touch("touchEnd", 0, 0), await cdp.detach());
-    else await page.mouse.up();
-    await settle(1500);
+
+    // carried onto a list in the sidebar, the task takes that list's day and stays part of its line.
+    // Both must be on screen at once, which a long plan on a small screen may not allow.
+    const todayBtn = nav.locator("[data-folder=today]");
+    await task(title).evaluate((e) => e.scrollIntoView({ block: "end" }));
+    await settle(500);
+    const inView = (loc) => loc.evaluate((e) => ((r) => r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth)(e.getBoundingClientRect()));
+    if ((await inView(todayBtn)) && (await inView(task(title)))) {
+      await carryTask(todayBtn, async () => {
+        if ((await todayBtn.getAttribute("data-over")) !== "true") fail("todos plan: holding a task over a list in the sidebar did not light it");
+        await shot("todos-plan-carry-list");
+      });
+      if (await page.getByLabel("Task name").count()) fail("todos plan: letting go of a task carried to a list opened it");
+      if (!(await page.locator("h1", { hasText: /^Plans$/ }).count())) fail("todos plan: carrying a task to a list left the plan");
+      const moved = (await get("/api/v1/todos?view=today")).todos.find((t) => t.title === title);
+      if (!moved) fail("todos plan: a task dropped on Today in the sidebar was not given today");
+      else if (moved.plan_id !== top?.id) fail("todos plan: a task carried to a list is no longer part of its line");
+      if ((await placeOf(title)) !== "Today") fail("todos plan: a task carried to Today does not say Today under its line");
+      // back to the backlog by the word at its end, for the steps that follow
+      await task(title).locator("[data-place] select").selectOption("backlog");
+      await settle(1500);
+      if ((await placeOf(title)) !== "Backlog") fail("todos plan: the word at a task's end did not send it back to the backlog");
+    } else console.log(`  (${profile.name}: the sidebar and the task do not fit on screen together; carrying to a list not tried)`);
+
+    // carried onto another line, the task becomes part of that line
+    await carryTask(line(part), async () => {
+      if ((await line(part).getAttribute("data-over")) !== "true") fail("todos plan: holding a task over another line did not light it");
+      await shot("todos-plan-carry");
+    });
     if (await page.getByLabel("Task name").count()) fail("todos plan: letting go of a carried task opened it");
     const made = (await get("/api/v1/todos?view=backlog")).todos.find((t) => t.title === title);
     if (!made) fail("todos plan: the task added under a line is not in the backlog");
