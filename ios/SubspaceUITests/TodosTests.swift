@@ -319,12 +319,21 @@ final class TodosTests: SubspaceTestCase {
         // Finished tasks can be hidden; the control sits with the filters and says when it is on.
         let hide = expect(app.buttons["todos.hideDone"], "the control that hides finished tasks")
         XCTAssertFalse(hide.isSelected, "Finished tasks should show until hiding them is asked for")
+        // what the tap is aimed at, to explain it if something else answers
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.row.'"))
+        let aim = "Hide done at \(hide.frame) hittable \(hide.isHittable) in \(app.windows.firstMatch.frame); rows " + (0..<min(6, rows.count)).map { i in
+            let r = rows.element(boundBy: i)
+            return "\(r.label.prefix(24))@\(Int(r.frame.minY))-\(Int(r.frame.maxY))"
+        }.joined(separator: ", ")
         hide.tap()
         // The list redraws as finished tasks leave; wait for the control rather than read it at once.
         let on = NSPredicate(format: "isSelected == true")
         let lit = XCTWaiter().wait(for: [expectation(for: on, evaluatedWith: app.buttons["todos.hideDone"])], timeout: 10)
-        if lit != .completed { expect(app.buttons["todos.hideDone"], "the control, once tapped") }
-        XCTAssertEqual(lit, .completed, "The control should say finished tasks are hidden")
+        if lit != .completed {
+            let opened = app.descendants(matching: .any)["todos.detail.title"]
+            XCTFail("Tapping Hide done did not turn it on. " + aim + ". Open now: " + (opened.exists ? "\(opened.value ?? opened.label)" : "nothing"))
+            return
+        }
 
         // A task ticked now stays for a moment, shown as done, then goes with the rest.
         let check = expect(app.buttons[row(title).identifier.replacingOccurrences(of: "todos.row.", with: "todos.check.")], "the task's circle")
