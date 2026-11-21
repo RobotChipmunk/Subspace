@@ -83,6 +83,7 @@ final class AppModel {
             Keychain.write("token", nil)
             defaults.removeObject(forKey: "server")
             defaults.removeObject(forKey: "direct_seen")
+            defaults.removeObject(forKey: TodosStore.hideDoneKey)
         }
         // UI tests that are not about sign-in start with a session already in hand.
         #if DEBUG

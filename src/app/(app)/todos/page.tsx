@@ -1,6 +1,6 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Flag, Pencil, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Eye, EyeOff, Flag, Pencil, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -144,6 +144,57 @@ function FromTag({ id }: { id: string | null }) {
 const FILTER_KEY = "ss_todo_tags";
 /** And the line of the plan they are narrowed to. */
 const FOCUS_KEY = "ss_todo_plan";
+/** Whether finished tasks are hidden. Unlike the two above it is kept for good, on this device. */
+const HIDE_KEY = "ss_todo_hide_done";
+/** How long a task just ticked stays in view, shown as done, while finished tasks are hidden. */
+const LINGER_MS = 3000;
+
+/**
+ * The tasks ticked a moment ago. While finished tasks are hidden, one that has just been ticked
+ * stays where it is, shown as done, for three seconds: long enough to see it land and to untick a
+ * slip. Then it goes with the rest.
+ */
+function useLinger() {
+  const [held, setHeld] = useState<string[]>([]);
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // only the timers are cleared: this also runs on a component that carries on living (development mounts twice)
+  useEffect(() => {
+    const all = timers.current;
+    return () => (all.forEach((t) => clearTimeout(t)), all.clear());
+  }, []);
+  const drop = (id: string) => {
+    clearTimeout(timers.current.get(id));
+    timers.current.delete(id);
+    setHeld((h) => h.filter((x) => x !== id));
+  };
+  const hold = (id: string) => {
+    clearTimeout(timers.current.get(id));
+    timers.current.set(id, setTimeout(() => drop(id), LINGER_MS));
+    setHeld((h) => (h.includes(id) ? h : [...h, id]));
+  };
+  return { held, hold, drop };
+}
+
+/**
+ * Hides the finished tasks, in every list and in the plan. It sits with the filters at the right
+ * of the heading and is built like them: quiet until it is on, then accent, saying "Done hidden".
+ * Where the heading is narrow it is the eye alone.
+ */
+function HideDone({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button
+      aria-pressed={on}
+      aria-label="Hide done"
+      title={on ? "Show finished tasks" : "Hide finished tasks"}
+      data-hide-done
+      onClick={() => onChange(!on)}
+      className={`flex h-8 flex-none items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium transition-colors ${on ? "bg-accent-soft text-accent" : "text-ink3 hover:bg-fill hover:text-ink2"}`}
+    >
+      {on ? <EyeOff size={14} className="flex-none" /> : <Eye size={14} className="flex-none" />}
+      <span className="whitespace-nowrap max-md:hidden">{on ? "Done hidden" : "Hide done"}</span>
+    </button>
+  );
+}
 
 export default function TodosPage() {
   // the address is read (?open=), which needs a boundary above it
@@ -194,6 +245,24 @@ function Todos() {
     try {
       if (id) sessionStorage.setItem(FOCUS_KEY, id);
       else sessionStorage.removeItem(FOCUS_KEY);
+    } catch {
+      // as above
+    }
+  };
+  // whether finished tasks are hidden; the choice is kept on this device until it is changed
+  const [hideDone, setHideDoneNow] = useState(false);
+  useEffect(() => {
+    try {
+      setHideDoneNow(localStorage.getItem(HIDE_KEY) === "1");
+    } catch {
+      // no storage: finished tasks show
+    }
+  }, []);
+  const setHideDone = (on: boolean) => {
+    setHideDoneNow(on);
+    try {
+      if (on) localStorage.setItem(HIDE_KEY, "1");
+      else localStorage.removeItem(HIDE_KEY);
     } catch {
       // as above
     }
@@ -280,9 +349,9 @@ function Todos() {
               {view === BIN ? (
                 <Bin />
               ) : view === PLAN ? (
-                <Plan plan={f?.plan} folders={f?.folders ?? []} today={f?.today} open={openLines} onOpenLines={setOpenLines} onOpen={setOpenId} />
+                <Plan plan={f?.plan} folders={f?.folders ?? []} today={f?.today} hideDone={hideDone} onHideDone={setHideDone} open={openLines} onOpenLines={setOpenLines} onOpen={setOpenId} />
               ) : (
-                <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} filter={filter} onFilter={setFilter} plan={f?.plan ?? []} focus={focus} onFocus={setFocus} onOpen={setOpenId} onCarry={setCarry} />
+                <List view={view} folder={folder} folders={f?.folders ?? []} today={f?.today} filter={filter} onFilter={setFilter} plan={f?.plan ?? []} focus={focus} onFocus={setFocus} hideDone={hideDone} onHideDone={setHideDone} onOpen={setOpenId} onCarry={setCarry} />
               )}
             </motion.div>
           )}
@@ -669,6 +738,8 @@ const PLAN_MENU_W = 256;
 
 type PlanTools = {
   today?: string;
+  /** finished tasks are hidden */
+  hideDone: boolean;
   folders: Folder[];
   onOpen: (id: string) => void;
   /** the line a carried task is held over, or null */
@@ -685,12 +756,12 @@ type PlanTools = {
  * Tapping a line opens its tasks in place. A task shows where it sits (Today, This week, Backlog)
  * and that word moves it; carrying a task onto another line makes it part of that line.
  */
-function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: PlanItem[]; folders: Folder[]; today?: string; open: string[]; onOpenLines: (ids: string[]) => void; onOpen: (id: string) => void }) {
+function Plan({ plan, folders, today, hideDone, onHideDone, open, onOpenLines, onOpen }: { plan?: PlanItem[]; folders: Folder[]; today?: string; hideDone: boolean; onHideDone: (on: boolean) => void; open: string[]; onOpenLines: (ids: string[]) => void; onOpen: (id: string) => void }) {
   const { mutate: globalMutate } = useSWRConfig();
   const refresh = () => globalMutate((k) => typeof k === "string" && k.startsWith("todos"));
   const [over, setOver] = useState<string | null>(null);
   const [priority, setPriority] = useState("");
-  const tools: PlanTools = { today, folders, onOpen, onOver: setOver, refresh };
+  const tools: PlanTools = { today, hideDone, folders, onOpen, onOver: setOver, refresh };
   const toggle = (id: string) => onOpenLines(open.includes(id) ? open.filter((x) => x !== id) : [...open, id]);
 
   async function addLine(title: string, parent?: string) {
@@ -703,9 +774,12 @@ function Plan({ plan, folders, today, open, onOpenLines, onOpen }: { plan?: Plan
 
   return (
     <div data-plan>
-      <header className="mb-5 px-1">
-        <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Plans</h1>
-        <p className="mt-0.5 text-[14px] text-ink2">What you are working towards, and the tasks under each.</p>
+      <header className="mb-5 flex items-end gap-3 px-1">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[30px] font-bold leading-tight tracking-[-0.03em]">Plans</h1>
+          <p className="mt-0.5 text-[14px] text-ink2">What you are working towards, and the tasks under each.</p>
+        </div>
+        <HideDone on={hideDone} onChange={onHideDone} />
       </header>
 
       {tops.map((top) => {
@@ -873,8 +947,10 @@ function PlanLine({ item, open, over, onToggle, tools }: { item: PlanItem | null
 function PlanTasks({ line, item, tools }: { line: string; item: PlanItem | null; tools: PlanTools }) {
   const { data, mutate } = useSWR<{ todos: Row[]; today: string }>(`todos?view=all&plan=${line}`, fetcher, { refreshInterval: 15_000 });
   const [draft, setDraft] = useState("");
-  // a priority's own list holds only its own tasks: those of its parts are under the parts
-  const rows = data?.todos.filter((r) => (item ? r.plan_id === item.id : !r.plan_id));
+  const linger = useLinger();
+  // a priority's own list holds only its own tasks: those of its parts are under the parts.
+  // With finished tasks hidden, one just ticked stays a moment (see `useLinger`).
+  const rows = data?.todos.filter((r) => (item ? r.plan_id === item.id : !r.plan_id) && (!tools.hideDone || !r.done || linger.held.includes(r.id)));
   const today = data?.today ?? tools.today;
   const edit = (id: string, change: Partial<Row> | null) => mutate((cur) => (cur ? { ...cur, todos: change ? cur.todos.map((r) => (r.id === id ? { ...r, ...change } : r)) : cur.todos.filter((r) => r.id !== id) } : cur), false);
   async function send(id: string, body: Record<string, unknown>) {
@@ -908,7 +984,7 @@ function PlanTasks({ line, item, tools }: { line: string; item: PlanItem | null;
             folders={tools.folders}
             onOpen={() => tools.onOpen(r.id)}
             onOver={tools.onOver}
-            onToggle={() => (edit(r.id, { done: !r.done }), send(r.id, { done: !r.done }))}
+            onToggle={() => (r.done ? linger.drop(r.id) : linger.hold(r.id), edit(r.id, { done: !r.done }), send(r.id, { done: !r.done }))}
             onPlace={(view) => send(r.id, { view })}
             onDropped={(to) => (edit(r.id, null), send(r.id, { plan: to === "none" ? null : to }))}
           />
@@ -1058,6 +1134,8 @@ function List({
   plan,
   focus,
   onFocus,
+  hideDone,
+  onHideDone,
   onOpen,
   onCarry,
 }: {
@@ -1072,6 +1150,9 @@ function List({
   /** the line of the plan this list is narrowed to, if any */
   focus: string | null;
   onFocus: (id: string | null) => void;
+  /** finished tasks are hidden, here and in every other list */
+  hideDone: boolean;
+  onHideDone: (on: boolean) => void;
   onOpen: (id: string) => void;
   onCarry: (folder: string | null) => void;
 }) {
@@ -1140,10 +1221,13 @@ function List({
     const scope = focus ? planScope(plan, focus) : null;
     return (rows ?? []).filter((r) => filter.every((t) => r.tags?.includes(t)) && (!scope || (!!r.plan_id && scope.has(r.plan_id))));
   }, [rows, filter, focus, plan]);
+  // with finished tasks hidden, what is left to see: the unfinished, and one just ticked for a moment (see `useLinger`)
+  const linger = useLinger();
+  const seen = useMemo(() => (hideDone ? shown.filter((r) => !r.done || linger.held.includes(r.id)) : shown), [shown, hideDone, linger.held]);
 
   const groups = useMemo(() => {
     const map = new Map<string, Row[]>();
-    for (const r of shown) {
+    for (const r of seen) {
       const k = groupOf(r);
       map.set(k, [...(map.get(k) ?? []), r]);
     }
@@ -1155,9 +1239,11 @@ function List({
     // plain order of the characters: digits (dates) before letters (the backlog, what waits)
     if (all) return [...map.entries()].sort(([a], [b]) => (rank(a) < rank(b) ? -1 : rank(a) > rank(b) ? 1 : 0));
     return [...map.entries()].sort(([a], [b]) => (a === "any" ? -1 : b === "any" ? 1 : a.localeCompare(b)));
-  }, [rows, shown, view, multi, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, seen, view, multi, today]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function toggle(r: Row) {
+    if (r.done) linger.drop(r.id);
+    else linger.hold(r.id);
     setRows((rs) => rs!.map((x) => (x.id === r.id ? { ...x, done: !r.done } : x)));
     await api(`todos/${r.id}`, { method: "PATCH", body: { done: !r.done } });
     mutate();
@@ -1318,6 +1404,7 @@ function List({
         </div>
         {/* only on a list that has tagged tasks, or while a choice is still in force */}
         {/* likewise, only on a list with tasks that are part of the plan */}
+        <HideDone on={hideDone} onChange={onHideDone} />
         {lines.length > 0 && <PlanFilter lines={lines} chosen={focus} onChange={onFocus} />}
         {tags.length > 0 && <TagFilter tags={tags} chosen={filter} onChange={onFilter} />}
       </header>
@@ -1360,7 +1447,7 @@ function List({
         </div>
       ))}
 
-      {rows && shown.length === 0 && adding === null && <p className="px-1 py-6 text-ink3">{filter.length ? `Nothing tagged ${filter.join(" and ")} here.` : focused ? `Nothing for ${focused.title} here.` : "Nothing here."}</p>}
+      {rows && seen.length === 0 && adding === null && <p data-list-empty className="px-1 py-6 text-ink3">{shown.length ? "Everything here is done." : filter.length ? `Nothing tagged ${filter.join(" and ")} here.` : focused ? `Nothing for ${focused.title} here.` : "Nothing here."}</p>}
 
       {/* a list without sections has one plus at its end; "Later" adds only through its days, as a task gets there by being given a date */}
       {!multi && adder("")}

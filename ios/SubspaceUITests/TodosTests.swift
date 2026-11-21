@@ -287,6 +287,43 @@ final class TodosTests: SubspaceTestCase {
         expect(row(title), "the restored task back in Backlog")
     }
 
+    func testHideDone() {
+        launchSignedIn()
+        go("todos")
+        folder("backlog").tap()
+        let title = "Return the parcel \(Int.random(in: 1000...9999))"
+        enter(title + "\n", into: app.textFields["todos.add"], "the add field")
+        expect(row(title), "the new task in the list")
+        // the task is saved under its real id a moment after it shows
+        Thread.sleep(forTimeInterval: 1.5)
+
+        // Finished tasks can be hidden; the control sits with the filters and says when it is on.
+        let hide = expect(app.buttons["todos.hideDone"], "the control that hides finished tasks")
+        XCTAssertFalse(hide.isSelected, "Finished tasks should show until hiding them is asked for")
+        hide.tap()
+        Thread.sleep(forTimeInterval: 0.6)
+        XCTAssertTrue(app.buttons["todos.hideDone"].isSelected, "The control should say finished tasks are hidden")
+
+        // A task ticked now stays for a moment, shown as done, then goes with the rest.
+        let check = expect(app.buttons[row(title).identifier.replacingOccurrences(of: "todos.row.", with: "todos.check.")], "the task's circle")
+        check.tap()
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertTrue(row(title).exists, "A task ticked while finished tasks are hidden should stay for a moment")
+        XCTAssertTrue(check.isSelected || check.label.contains("not done"), "While it stays it should read as done")
+        shot("12-todos-hide-done-lingering")
+        waitToVanish(row(title), "the ticked task, three seconds on")
+        shot("12-todos-hide-done")
+
+        // The plan has the same control, and shows the same choice.
+        folder("plan").tap()
+        XCTAssertTrue(expect(app.buttons["todos.hideDone"], "the control in the plan").isSelected, "The plan should show that finished tasks are hidden")
+
+        // Taken off, the finished task is back.
+        folder("backlog").tap()
+        expect(app.buttons["todos.hideDone"], "the control, back in the list").tap()
+        expect(row(title), "the finished task, showing again")
+    }
+
     func testDateCalendarAndRepeat() {
         launchSignedIn()
         go("todos")

@@ -826,6 +826,55 @@ async function run(profile) {
     await page.reload();
     await settle(1500);
   });
+  await step("todos hide done", async () => {
+    // Finished tasks can be hidden, and the choice is kept on the device. A task ticked while they
+    // are hidden stays where it is, shown as done, for three seconds, then goes with the rest.
+    const title = `Post the letter ${profile.name}`;
+    const send = (url, method, body) => page.evaluate(([u, m, b]) => fetch(u, { method: m, headers: { "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined }).then((r) => r.json()), [url, method, body]);
+    const task = await send("/api/v1/todos", "POST", { title, view: "today" });
+    try {
+      await page.reload();
+      await settle(1500);
+      const row = page.locator(".todo-row", { hasText: title });
+      const hide = page.locator("[data-hide-done]");
+      await row.waitFor({ timeout: 5000 });
+      await reachable(hide, "todos: Hide done");
+      if ((await hide.getAttribute("aria-pressed")) !== "false") fail("todos hide done: finished tasks are hidden before it was asked for");
+      await press(hide);
+      await settle(700);
+      if ((await hide.getAttribute("aria-pressed")) !== "true") fail("todos hide done: the control does not say it is on");
+      if (await page.locator('.todo-row [role="checkbox"][aria-checked="true"]').count()) fail("todos hide done: a finished task still shows");
+      await noSidewaysScroll("todos hide done");
+      await shot("todos-hide-done");
+      // ticked now, it stays for a moment in its finished state
+      await press(row.getByRole("checkbox"));
+      await settle(900);
+      if (!(await row.count()) || (await row.getByRole("checkbox").getAttribute("aria-checked")) !== "true") fail("todos hide done: a task ticked while done is hidden did not stay, shown as done");
+      await settle(3600);
+      if (await row.count()) fail("todos hide done: a ticked task is still showing four seconds later");
+      // the choice outlasts a reload
+      await page.reload();
+      await settle(1500);
+      if ((await hide.getAttribute("aria-pressed")) !== "true") fail("todos hide done: the choice was not kept over a reload");
+      if (await row.count()) fail("todos hide done: a finished task came back after a reload");
+      // and it applies to the plan too, which has the same control
+      await press(page.getByRole("navigation", { name: "Lists" }).locator("[data-folder=plan]"));
+      await settle(800);
+      if ((await hide.getAttribute("aria-pressed")) !== "true") fail("todos hide done: the plan does not show the choice");
+      await press(page.getByRole("navigation", { name: "Lists" }).getByRole("button", { name: /^Today/ }));
+      await settle(800);
+      // taken off, the finished task is back
+      await press(hide);
+      await settle(800);
+      if (!(await row.count())) fail("todos hide done: showing finished tasks again did not bring one back");
+    } finally {
+      await page.evaluate(() => localStorage.removeItem("ss_todo_hide_done"));
+      await send(`/api/v1/todos/${task.id}`, "DELETE");
+      await send(`/api/v1/todos/${task.id}?forever=1`, "DELETE");
+      await page.reload();
+      await settle(1500);
+    }
+  });
   await step("todos plan", async () => {
     // The plan: priorities, their parts and the tasks under each. Nothing is counted, and a
     // line with no tasks is not marked. A task is carried onto a line to become part of it,

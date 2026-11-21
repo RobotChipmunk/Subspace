@@ -28,6 +28,17 @@ final class TodosStore {
     /// The choice, held for as long as the app runs, so a new screen starts with it.
     @ObservationIgnored private static var keptFilter: [String] = []
 
+    /// Whether finished tasks are hidden, in every list and in the plan. Unlike the tags it is
+    /// kept for good, on this device.
+    var hideDone: Bool = UserDefaults.standard.bool(forKey: TodosStore.hideDoneKey)
+    nonisolated static let hideDoneKey = "todos_hide_done"
+    /// The tasks ticked a moment ago. While finished tasks are hidden, one that has just been
+    /// ticked stays where it is, shown as done, for three seconds: long enough to see it land and
+    /// to untick a slip. Then it goes with the rest.
+    var lingering: Set<String> = []
+    @ObservationIgnored private var lingerTasks: [String: Task<Void, Never>] = [:]
+    static let lingerSeconds: Double = 3
+
     /// The plan, in the owner's order: each priority followed by its parts.
     var plan: [TodosPlanItem] = []
     /// The line of the plan the lists are narrowed to, kept the way the tags are.
@@ -225,8 +236,43 @@ final class TodosStore {
         Self.keptFilter = []
     }
 
+    /// Those of some tasks that are in view: all of them, or with finished tasks hidden the
+    /// unfinished and whichever were ticked a moment ago.
+    func seen(_ rows: [Todo]) -> [Todo] {
+        guard hideDone else { return rows }
+        let held = lingering
+        return rows.filter { !$0.done || held.contains($0.id) }
+    }
+
+    /// The selected list's tasks that are in view.
+    var seenRows: [Todo]? { shownRows.map { seen($0) } }
+
+    func setHideDone(_ on: Bool) {
+        withAnimation(.ssSoft) { hideDone = on }
+        UserDefaults.standard.set(on, forKey: Self.hideDoneKey)
+    }
+
+    /// Keeps a task that was just ticked in view for a moment; see `lingering`.
+    private func linger(_ id: String) {
+        lingerTasks[id]?.cancel()
+        lingering.insert(id)
+        lingerTasks[id] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.lingerSeconds))
+            guard !Task.isCancelled, let self else { return }
+            self.lingerTasks[id] = nil
+            withAnimation(.ssSoft) { _ = self.lingering.remove(id) }
+        }
+    }
+
+    /// The task was unticked, or the tick could not be saved: it is no longer on its way out.
+    private func unlinger(_ id: String) {
+        lingerTasks[id]?.cancel()
+        lingerTasks[id] = nil
+        lingering.remove(id)
+    }
+
     var groups: [TodosGroup] {
-        guard let rows = shownRows else { return [] }
+        guard let rows = seenRows else { return [] }
         var order: [String] = []
         var map: [String: [Todo]] = [:]
         for row in rows {
@@ -492,11 +538,13 @@ final class TodosStore {
         guard let api = app?.api, !id.hasPrefix("new_") else { return }
         guard let was = rows?.first(where: { $0.id == id })?.done else { return }
         generation += 1
+        if was { unlinger(id) } else { linger(id) }
         withAnimation(.ssSpring) { setDone(id, !was) }
         do {
             try await api.send("PATCH", "todos/\(id)", body: ["done": !was])
             problem = nil
         } catch {
+            unlinger(id)
             withAnimation(.ssSpring) { setDone(id, was) }
             problem = error.localizedDescription
         }
@@ -856,6 +904,7 @@ final class TodosStore {
         guard let api = app?.api, var list = planTasks[line], let index = list.firstIndex(where: { $0.id == id }) else { return }
         let was = list[index].done
         list[index].done = !was
+        if was { unlinger(id) } else { linger(id) }
         withAnimation(.ssSpring) { planTasks[line] = list }
         do {
             try await api.send("PATCH", "todos/\(id)", body: ["done": !was])

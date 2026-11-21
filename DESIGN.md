@@ -440,6 +440,15 @@ Patterns:
   opens into a field offering the tags tasks already carry (at most six). In a list a task shows
   its first two tags at the end of its row as small `fill` chips with `ink2` text, and "+2" for
   the rest. Never coloured.
+- **Hide done** (`HideDone` in `todos/page.tsx`; `TodosHideDone` in the app): at the right of every
+  list's heading and of the plan's, before the filters and built like them: an eye and "Hide done"
+  in `ink3`, no surface; on, it is `accent-soft` with the eye struck through and says "Done
+  hidden". Where the heading is narrow (a phone) it is the eye alone. It is one choice for every
+  list and the plan, and unlike the filters it is kept for good, on the device (asked for by the
+  owner, Nov 2026). While it is on, a task that is ticked stays where it is, shown as done, for
+  three seconds, so the tick is seen to land and a slip can be unticked; then it leaves with the
+  rest. Counts and "All done" do not change, and a list whose every task is hidden says
+  "Everything here is done.".
 - **Tag filter** (`TagFilter` in `todos/page.tsx`): on any list that has tagged tasks, a quiet
   control at the right of the heading: a tag icon and "Tags" in `ink3`, no surface. Tapping it
   drops a menu of that list's tags with counts; each is ticked on and off, and the list shows the
