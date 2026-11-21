@@ -210,7 +210,7 @@ function Feed() {
         />
 
         <div ref={list}>
-          <FeedGrid key={key} posts={posts} cols={cols} anchor={() => (commentsOpen ? activeRef.current : null) ?? reading()}>
+          <FeedGrid view={key} posts={posts} cols={cols} anchor={() => (commentsOpen ? activeRef.current : null) ?? reading()}>
             {(p, i) => <PostCard post={p} index={i} flow={cols < 2} open={active?.id === p.id} onToggle={() => toggleComments(p.id)} onBookmark={() => bookmark(p)} />}
           </FeedGrid>
         </div>
@@ -274,7 +274,7 @@ function useColumns(room: RefObject<HTMLElement | null>) {
  * into room another has left glides there; any other move is made at once, so that cards never
  * slide over one another.
  */
-function FeedGrid({ posts, cols, anchor, children }: { posts: Post[]; cols: number; /** the post to keep still on screen when the number of columns changes */ anchor: () => string | null; children: (post: Post, index: number) => ReactNode }) {
+function FeedGrid({ view, posts, cols, anchor, children }: { /** which list this is: another one is placed afresh */ view: string; posts: Post[]; cols: number; /** the post to keep still on screen when the number of columns changes */ anchor: () => string | null; children: (post: Post, index: number) => ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const live = useRef({ ids: [] as string[], cols });
   live.current = { ids: posts.map((p) => p.id), cols };
@@ -284,6 +284,15 @@ function FeedGrid({ posts, cols, anchor, children }: { posts: Post[]; cols: numb
   // where each post was put last time, and the width and columns that was for
   const was = useRef(new Map<string, number>());
   const last = useRef({ width: 0, cols: 0 });
+  // Another list (bookmarked only, or everything again) is placed afresh. The posts of the one
+  // before leave the way any post does, so the same grid stays and only its placing starts over.
+  const list = useRef(view);
+  if (list.current !== view) {
+    list.current = view;
+    lanes.current.clear();
+    added.current = [0, 0];
+    was.current.clear();
+  }
   // The post kept still while the number of columns changes, and where it was on screen before.
   // Read here, before the change reaches the page.
   const keep = useRef<{ id: string; top: number } | null>(null);

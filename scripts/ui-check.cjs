@@ -425,9 +425,17 @@ async function run(profile) {
     const card = page.locator("article", { hasText: "Digit unloads" }).first();
     const clip = card.locator("[data-clip]");
     const state = () => clip.locator("video").evaluate((v) => ({ paused: v.paused, muted: v.muted, time: v.currentTime, ready: v.readyState }));
+    // Just out of view: 200px below the screen, or above it where the post is on the first screen
+    // (as it is in two columns), since the page cannot scroll up past its top.
+    const outOfView = () =>
+      card.evaluate((el) => {
+        const main = el.closest("main");
+        main.scrollTo({ top: 0 });
+        const r = el.getBoundingClientRect();
+        main.scrollBy({ top: r.top - innerHeight - 200 >= 0 ? r.top - innerHeight - 200 : r.bottom + 200 });
+      });
     // out of view it waits; scrolled into view it plays by itself, without sound
-    await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
-    await card.evaluate((el) => el.closest("main").scrollBy({ top: el.getBoundingClientRect().top - innerHeight - 200 }));
+    await outOfView();
     await settle(600);
     if (!(await state()).paused) fail("feed video: the video is playing while it is off screen");
     await card.scrollIntoViewIfNeeded();
@@ -447,8 +455,7 @@ async function run(profile) {
     await noSidewaysScroll("feed video");
     await shot("feed-video");
     // scrolled away again, it stops
-    await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
-    await card.evaluate((el) => el.closest("main").scrollBy({ top: el.getBoundingClientRect().top - innerHeight - 200 }));
+    await outOfView();
     await settle(700);
     if (!(await state()).paused) fail("feed video: the video kept playing after it was scrolled out of view");
   });
@@ -1745,6 +1752,7 @@ async function run(profile) {
     await press(filter);
     await page.waitForURL("**/feed?view=bookmarked");
     await page.locator("article", { hasText: "Three-Live" }).waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("feed: the bookmarked view still shows a post that is not bookmarked"));
+    await post().first().waitFor({ timeout: 6000 }).catch(() => {});
     if ((await post().count()) !== 1) fail("feed: the bookmarked view does not show the bookmarked post");
     if ((await filter.getAttribute("aria-pressed")) !== "true") fail("feed: the bookmarked toggle does not show as on");
     await noSidewaysScroll("feed bookmarked");
