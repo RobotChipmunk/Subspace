@@ -109,8 +109,10 @@ private struct FeedList: View {
         }
     }
 
-    /// When the number of columns changes, the post being read stays in view.
+    /// When the number of columns changes, the post being read stays in view. At the very top the
+    /// feed simply stays at the top, heading and all.
     private func keep(_ proxy: ScrollViewProxy) {
+        guard !model.nearTop || model.commentsOpen else { return }
         guard let id = (model.commentsOpen ? model.activeID : nil) ?? model.reading() else { return }
         Task { @MainActor in
             // let the new columns be laid out first

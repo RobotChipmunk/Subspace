@@ -298,7 +298,7 @@ final class FeedModel {
     }
 
     /// The feed is at its top, or close enough that a post added there is seen arriving.
-    private var nearTop: Bool { content.minY > -80 }
+    var nearTop: Bool { content.minY > -80 }
 
     // MARK: Columns
 
