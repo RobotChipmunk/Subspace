@@ -83,7 +83,7 @@ it in full for editing.
   "Done" returns to where it was tapped. Nothing sends the owner out to the browser.
 - Shadows: `--shadow` at rest, `--shadow-lift` for something picked up or opened.
 - Spacing: 4px steps. Row padding about 10px by 12px; cards 16px; panels 24px. Content column
-  maxes at about 880px; the feed's two columns are the exception, up to 1140px together.
+  maxes at about 880px; the feed's columns are the exception, filling the width they are given.
 - Touch targets are at least 32px, and 36px or more for anything primary on touch.
 - The page must never scroll sideways, at any width from 390px up.
 
@@ -156,12 +156,14 @@ Patterns:
   at every width, so a post reads alike in one column, in two and on a phone. A post does not show
   the topic it belongs to (the owner's call, Nov 2026); topics live on the Following screen.
 - **Feed columns** (`FeedGrid` in `feed/page.tsx`; `FeedListBody` and `FeedModel.columns` in the
-  app): one column up to 620px wide, or two, 16px apart across and down and up to 1140px in all,
-  wherever the room the feed is given (after the docked rail or the comments panel take theirs)
-  lets each be at least 340px, about a post's width on a phone. Two columns are laid out like
-  masonry: a post goes to the shorter column when it first appears and stays there, so nothing
-  changes sides as pictures load, and the page keeps the posts newest first, the order the
-  keyboard and screen readers meet them in. A post moving up into room another left glides there;
+  app): as many columns as fit side by side at least 340px wide each (about a post's width on a
+  phone), 16px apart across and down, filling the room the feed is given: inside the page's own
+  margins, and after the docked rail or the comments panel take theirs, so those always stay.
+  Where not even two fit, one column up to 620px wide. There is no upper limit; a large screen
+  simply shows more columns (owner's call, Nov 2026). Columns are laid out like masonry: a post
+  goes to the shortest column when it first appears and stays there, so nothing changes sides as
+  pictures load, and the page keeps the posts newest first, the order the keyboard and screen
+  readers meet them in. A post moving up into room another left glides there;
   every other move is made at once, so cards never slide over one another. When the number of
   columns changes, the post being read stays still on screen. Posts that arrive while the owner is
   reading further down wait out of sight until they are back at the top, so nothing moves under

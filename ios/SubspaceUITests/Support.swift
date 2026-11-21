@@ -96,6 +96,28 @@ class SubspaceTestCase: XCTestCase {
 
     private static var cachedToken: String?
 
+    /// Sends one request to the test server as the owner and returns its JSON reply, for a test
+    /// that needs something in place before the app opens (a task, without typing it in).
+    @discardableResult
+    static func request(_ method: String, _ path: String, _ body: [String: Any]? = nil) -> [String: Any]? {
+        guard let token = sessionToken(), let url = URL(string: server + "/api/v1/" + path) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        let done = DispatchSemaphore(value: 0)
+        var reply: [String: Any]?
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            if let data { reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any] }
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 20)
+        return reply
+    }
+
     private static func sessionToken() -> String? {
         if let cachedToken { return cachedToken }
         guard let url = URL(string: server + "/api/v1/auth/login") else { return nil }

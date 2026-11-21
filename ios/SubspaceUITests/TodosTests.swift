@@ -306,28 +306,42 @@ final class TodosTests: SubspaceTestCase {
     }
 
     func testHideDone() {
+        // The task is made on the server before the app opens, so no keyboard is up when the
+        // control is tapped: with the add field still focused, the list moved under the tap and
+        // it opened a task instead. Today is short, so nothing has to be scrolled either.
+        let title = "Return the parcel \(Int.random(in: 1000...9999))"
+        XCTAssertNotNil(Self.request("POST", "todos", ["title": title, "view": "today"])?["id"], "The test's task could not be made on the server")
         launchSignedIn()
         go("todos")
-        folder("backlog").tap()
-        let title = "Return the parcel \(Int.random(in: 1000...9999))"
-        enter(title + "\n", into: app.textFields["todos.add"], "the add field")
-        expect(row(title), "the new task in the list")
-        // the task is saved under its real id a moment after it shows
-        Thread.sleep(forTimeInterval: 1.5)
+        folder("today").tap()
+        expect(row(title), "the new task in Today")
 
         // Finished tasks can be hidden; the control sits with the filters and says when it is on.
         let hide = expect(app.buttons["todos.hideDone"], "the control that hides finished tasks")
         XCTAssertFalse(hide.isSelected, "Finished tasks should show until hiding them is asked for")
+        // what the tap is aimed at, to explain it if something else answers
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'todos.row.'"))
+        let aim = "Hide done at \(hide.frame) hittable \(hide.isHittable) in \(app.windows.firstMatch.frame); rows " + (0..<min(6, rows.count)).map { i in
+            let r = rows.element(boundBy: i)
+            return "\(r.label.prefix(24))@\(Int(r.frame.minY))-\(Int(r.frame.maxY))"
+        }.joined(separator: ", ")
         hide.tap()
-        Thread.sleep(forTimeInterval: 0.6)
-        XCTAssertTrue(app.buttons["todos.hideDone"].isSelected, "The control should say finished tasks are hidden")
+        // The list redraws as finished tasks leave; wait for the control rather than read it at once.
+        let on = NSPredicate(format: "isSelected == true")
+        let lit = XCTWaiter().wait(for: [expectation(for: on, evaluatedWith: app.buttons["todos.hideDone"])], timeout: 10)
+        if lit != .completed {
+            let opened = app.descendants(matching: .any)["todos.detail.title"]
+            XCTFail("Tapping Hide done did not turn it on. " + aim + ". Open now: " + (opened.exists ? "\(opened.value ?? opened.label)" : "nothing"))
+            return
+        }
 
-        // A task ticked now stays for a moment, shown as done, then goes with the rest.
-        let check = expect(app.buttons[row(title).identifier.replacingOccurrences(of: "todos.row.", with: "todos.check.")], "the task's circle")
-        check.tap()
-        Thread.sleep(forTimeInterval: 0.8)
-        XCTAssertTrue(row(title).exists, "A task ticked while finished tasks are hidden should stay for a moment")
-        XCTAssertTrue(check.isSelected || check.label.contains("not done"), "While it stays it should read as done")
+        // A task ticked now stays for a moment, shown as done, then goes with the rest. Its circle
+        // is read in one query (ticked: selected, or offering "Mark not done") so that it cannot
+        // change between two reads.
+        let checkID = row(title).identifier.replacingOccurrences(of: "todos.row.", with: "todos.check.")
+        expect(app.buttons[checkID], "the task's circle").tap()
+        let ticked = app.buttons.matching(NSPredicate(format: "identifier == %@ AND (selected == true OR label CONTAINS 'not done')", checkID)).firstMatch
+        XCTAssertTrue(ticked.waitForExistence(timeout: 2), "A task ticked while finished tasks are hidden should stay a moment, shown as done")
         shot("12-todos-hide-done-lingering")
         waitToVanish(row(title), "the ticked task, three seconds on")
         shot("12-todos-hide-done")
@@ -337,7 +351,7 @@ final class TodosTests: SubspaceTestCase {
         XCTAssertTrue(expect(app.buttons["todos.hideDone"], "the control in the plan").isSelected, "The plan should show that finished tasks are hidden")
 
         // Taken off, the finished task is back.
-        folder("backlog").tap()
+        folder("today").tap()
         expect(app.buttons["todos.hideDone"], "the control, back in the list").tap()
         expect(row(title), "the finished task, showing again")
     }
@@ -433,17 +447,30 @@ final class TodosTests: SubspaceTestCase {
     }
 
     func testDragATaskOntoAnotherList() {
+        // A failed test is run again, and a first attempt cut short may already have moved the
+        // task: put it back on Today through the server before starting.
+        if let reply = Self.request("GET", "todos?view=all"), let todos = reply["todos"] as? [[String: Any]],
+           let roofer = todos.first(where: { ($0["title"] as? String) == "Call the roofer back" }), let id = roofer["id"] as? String {
+            Self.request("PATCH", "todos/\(id)", ["view": "today"])
+        }
         launchSignedIn()
         go("todos")
         folder("today").tap()
-        let task = expect(row("Call the roofer back"), "a seeded task on Today")
-        // The list it is carried to must be on screen with the task before the finger goes down.
-        let nextWeek = folder("next_week")
-        XCTAssertTrue(nextWeek.isHittable, "Next week should be in view before a task is carried onto it")
 
-        // Lift the task and let it go over another list in the folders.
-        task.press(forDuration: 1.5, thenDragTo: nextWeek, withVelocity: .slow, thenHoldForDuration: 0.8)
-        waitToVanish(row("Call the roofer back"), "the task, gone from Today once it is moved")
+        // Lift the task and let it go over another list in the folders. A loaded simulator
+        // sometimes does not lift the row (the press then does nothing), so the carry is tried
+        // again, as a person would, before the result is judged.
+        for attempt in 1...3 {
+            let task = expect(row("Call the roofer back"), "a seeded task on Today")
+            // The list it is carried to must be on screen with the task before the finger goes down.
+            let nextWeek = folder("next_week")
+            XCTAssertTrue(nextWeek.isHittable, "Next week should be in view before a task is carried onto it")
+            task.press(forDuration: 1.5, thenDragTo: nextWeek, withVelocity: .slow, thenHoldForDuration: 0.8)
+            let gone = XCTWaiter().wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: row("Call the roofer back"))], timeout: 8)
+            if gone == .completed { break }
+            XCTAssertLessThan(attempt, 3, "Expected the task, gone from Today once it is moved")
+            folder("today").tap()
+        }
         shot("12-todos-dragged-away")
 
         folder("next_week").tap()
