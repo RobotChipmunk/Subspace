@@ -10,9 +10,13 @@ final class FeedTests: SubspaceTestCase {
         launchSignedIn()
         expect(body("Italian place for Saturday"), "the newest seeded post")
         // An iPad has room for two columns of posts, each about as wide as on a phone; a phone has one.
+        // Counted once the posts have finished arriving (they scale in), by the clear gaps between
+        // their left edges.
+        Thread.sleep(forTimeInterval: 1.2)
         let cards = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'feed.post.' AND NOT (identifier BEGINSWITH 'feed.post.body.')"))
-        let lefts = Set((0..<min(4, cards.count)).map { Int(cards.element(boundBy: $0).frame.minX.rounded()) })
-        XCTAssertEqual(lefts.count, isPad ? 2 : 1, isPad ? "On an iPad the feed should run in two columns" : "On a phone the feed should be one column")
+        let lefts = (0..<min(4, cards.count)).map { cards.element(boundBy: $0).frame.minX }.sorted()
+        let columns = lefts.isEmpty ? 0 : 1 + zip(lefts, lefts.dropFirst()).filter { $1 - $0 > 60 }.count
+        XCTAssertEqual(columns, isPad ? 2 : 1, (isPad ? "On an iPad the feed should run in two columns" : "On a phone the feed should be one column") + "; posts start at \(lefts.map { Int($0) })")
         // No post shows the topic it belongs to (the seeded topics are labelled these).
         XCTAssertFalse(app.staticTexts["Robotics"].exists || app.staticTexts["West Seattle"].exists, "A post should not carry its topic's label")
         shot("50-feed-top")
