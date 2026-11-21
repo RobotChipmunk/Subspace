@@ -273,7 +273,19 @@ function Todos() {
 
   // The rail links here with ?open=<task id> to show one task, also while this screen is already up.
   useEffect(() => {
-    if (wanted) (setOpenId(wanted), router.replace("/todos", { scroll: false }));
+    if (!wanted) return;
+    setOpenId(wanted);
+    router.replace("/todos", { scroll: false });
+    // Show the list the task is in, so its back button and the list behind it are its own. Left on
+    // whatever was showing (Today, say), closing a task dated tomorrow seemed to lose it.
+    Promise.all([api<Row>(`todos/${wanted}`), api<Folders>("todos/folders")])
+      .then(([t, fs]) => {
+        const key = folderOf(t, fs.folders, fs.today);
+        if (key) setView(key);
+      })
+      .catch(() => {
+        // it could not be read: it opens over the current list, as before
+      });
   }, [wanted, router]);
   const { data: f } = useSWR<Folders>("todos/folders", fetcher, { refreshInterval: 30_000 });
   const folder = f?.folders.find((x) => x.key === view);
@@ -417,6 +429,26 @@ function daySections(view: string, today?: string): string[] {
   const from = view === "next_week" ? 7 : view === "weekend" ? Math.max(5, dow) : dow;
   const to = view === "next_week" ? 13 : 6;
   return Array.from({ length: to - from + 1 }, (_, i) => plusDays(monday, from + i));
+}
+
+/**
+ * The list a task lives in, among the folders showing: its own day where that has a folder, else
+ * the list that holds it (Weekend, This week, Next week, Later). Used when a task is opened from
+ * elsewhere (the rail), so the lists behind it, and its back button, are the ones it is in.
+ */
+function folderOf(t: Pick<Row, "scope" | "date" | "guest_id">, folders: Folder[], today: string): string | null {
+  const has = (key: string) => folders.some((x) => x.key === key);
+  if (t.scope === "guest") return t.guest_id && has(`guest:${t.guest_id}`) ? `guest:${t.guest_id}` : null;
+  if (t.scope === "backlog") return "backlog";
+  if (!t.date) return null;
+  const monday = plusDays(today, -((new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7));
+  if (t.scope === "week") return t.date <= monday ? "week" : t.date === plusDays(monday, 7) ? "next_week" : has("later") ? "later" : null;
+  if (t.date === today) return "today";
+  if (has(t.date)) return t.date;
+  if (t.date < today) return "today";
+  if (t.date <= plusDays(monday, 6)) return has("weekend") && t.date >= plusDays(monday, 5) ? "weekend" : "week";
+  if (t.date <= plusDays(monday, 13)) return "next_week";
+  return has("later") ? "later" : null;
 }
 
 /** Where a task added to "Weekend" goes: Saturday, or today when it is already Sunday. */
