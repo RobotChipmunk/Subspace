@@ -1229,6 +1229,9 @@ async function run(profile) {
     if (await mod.count()) fail("follow-up: the module is still in the rail after its task was opened");
     if ((await get("/api/v1/rail")).modules.some((m) => m.key === "agility-topup")) fail("follow-up: opening the task did not clear its module");
     if ((await get(`/api/v1/todos/${before.task.id}`)).done !== false) fail("follow-up: the task did not stay in the list once its module had gone");
+    // the task (seeded for next week) opens in its own list: the list behind it is Next week, and so is its back button
+    if (!(await page.locator('[data-folder="next_week"] .glass').count())) fail("follow-up: a task opened from the rail did not bring up the list it is in (Next week)");
+    if (!(await page.getByRole("button", { name: "Next week", exact: true }).count())) fail("follow-up: the task's back button does not name the list it is in");
     await reachable(page.locator('[data-tag="finance"]'), "the follow-up task's tag");
     await noSidewaysScroll("follow-up task");
     await shot("todo-follow-up");
