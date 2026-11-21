@@ -319,15 +319,18 @@ final class TodosTests: SubspaceTestCase {
         let hide = expect(app.buttons["todos.hideDone"], "the control that hides finished tasks")
         XCTAssertFalse(hide.isSelected, "Finished tasks should show until hiding them is asked for")
         hide.tap()
-        Thread.sleep(forTimeInterval: 0.6)
-        XCTAssertTrue(app.buttons["todos.hideDone"].isSelected, "The control should say finished tasks are hidden")
+        // The list redraws as finished tasks leave; wait for the control rather than read it at once.
+        let on = NSPredicate(format: "isSelected == true")
+        let lit = XCTWaiter().wait(for: [expectation(for: on, evaluatedWith: app.buttons["todos.hideDone"])], timeout: 10)
+        if lit != .completed { expect(app.buttons["todos.hideDone"], "the control, once tapped") }
+        XCTAssertEqual(lit, .completed, "The control should say finished tasks are hidden")
 
         // A task ticked now stays for a moment, shown as done, then goes with the rest.
         let check = expect(app.buttons[row(title).identifier.replacingOccurrences(of: "todos.row.", with: "todos.check.")], "the task's circle")
         check.tap()
         Thread.sleep(forTimeInterval: 0.8)
         XCTAssertTrue(row(title).exists, "A task ticked while finished tasks are hidden should stay for a moment")
-        XCTAssertTrue(check.isSelected || check.label.contains("not done"), "While it stays it should read as done")
+        XCTAssertTrue(expect(check, "the ticked task's circle, while it stays").isSelected || check.label.contains("not done"), "While it stays it should read as done")
         shot("12-todos-hide-done-lingering")
         waitToVanish(row(title), "the ticked task, three seconds on")
         shot("12-todos-hide-done")
