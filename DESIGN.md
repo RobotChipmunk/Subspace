@@ -401,7 +401,8 @@ Patterns:
 - **Plans** (`Plan` in `todos/page.tsx`; `TodosPlan.swift` in the app): the owner's priorities as
   a short outline, with the tasks under each. It is a view across the lists, listed with "All",
   and it is where the owner steps back and looks at everything; the day lists stay as they are.
-  A priority is a line in 17px semibold; its parts sit under it, set in a little, one level and
+  A priority is a line in 17px semibold; its parts sit under it in 15.5px regular, flush with
+  it (the owner had the indent taken off, Nov 2026): the weight tells them apart. One level and
   no further. No numbers anywhere, and a line shows nothing at its end but the way to open it: a
   line with no tasks is not marked (the owner had "Nothing yet" taken off, Nov 2026). Tapping a
   line opens its tasks in place, without moving anything sideways: the page keeps room for its

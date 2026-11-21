@@ -133,10 +133,8 @@ private struct TodosPlanLine: View {
                 .accessibilityLabel((open ? "Close " : "Open ") + title)
                 .accessibilityIdentifier("todos.plan.toggle.\(key)")
             }
-            .padding(.leading, part ? 20 : 0)
             if open {
                 TodosPlanTasks(line: key, item: item, store: store)
-                    .padding(.leading, part ? 16 : 0)
                     .transition(.opacity)
             }
         }
@@ -351,7 +349,6 @@ private struct TodosPlanAdd: View {
                         .focused($focused)
                         .submitLabel(.done)
                         .frame(minHeight: 36)
-                        .padding(.leading, task ? 0 : 20)
                         .onSubmit {
                             if task {
                                 // stays for the next one
