@@ -64,14 +64,15 @@ const useSound = () =>
     () => false,
   );
 
-const FRAME = "relative mt-3 overflow-hidden rounded-[18px] bg-black";
+const FRAME = "relative overflow-hidden bg-black";
 
-export function Clip({ media }: { media: Media }) {
-  return media.embed ? <Embedded media={media} /> : <FileClip media={media} />;
+/** `frame` places and rounds the clip's frame (its margin and corners). */
+export function Clip({ media, frame = "mt-3 rounded-[18px]" }: { media: Media; frame?: string }) {
+  return media.embed ? <Embedded media={media} frame={frame} /> : <FileClip media={media} frame={frame} />;
 }
 
 /** A video file. It plays without sound as it comes into view; a tap turns the sound on or off. A looping clip has no sound at all. */
-function FileClip({ media }: { media: Media }) {
+function FileClip({ media, frame }: { media: Media; frame: string }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const playing = usePlaying(box);
@@ -90,7 +91,7 @@ function FileClip({ media }: { media: Media }) {
   }, [playing, muted]);
 
   return (
-    <div ref={box} className={FRAME} data-clip={playing ? "playing" : "waiting"} style={{ aspectRatio: shape ? Math.min(2.4, Math.max(0.62, shape)) : 16 / 9, maxHeight: 560 }}>
+    <div ref={box} className={`${FRAME} ${frame}`} data-clip={playing ? "playing" : "waiting"} style={{ aspectRatio: shape ? Math.min(2.4, Math.max(0.62, shape)) : 16 / 9, maxHeight: 560 }}>
       <video
         ref={video}
         src={media.url}
@@ -132,7 +133,7 @@ const src = (m: Media) => {
  * the player takes its place, starts without sound, and is paused and resumed as the feed moves.
  * Sound and everything else are the player's own controls.
  */
-function Embedded({ media }: { media: Media }) {
+function Embedded({ media, frame: framing }: { media: Media; frame: string }) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const playing = usePlaying(box);
@@ -157,7 +158,7 @@ function Embedded({ media }: { media: Media }) {
   }, [playing, loaded, provider]);
 
   return (
-    <div ref={box} className={FRAME} data-clip={playing ? "playing" : "waiting"} data-embed={provider}>
+    <div ref={box} className={`${FRAME} ${framing}`} data-clip={playing ? "playing" : "waiting"} data-embed={provider}>
       <div className={tall ? "relative mx-auto aspect-[9/16] w-[min(100%,300px)]" : "relative aspect-video w-full"}>
         {loaded ? (
           <iframe

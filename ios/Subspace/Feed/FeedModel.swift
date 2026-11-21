@@ -59,6 +59,22 @@ final class FeedModel {
     @ObservationIgnored private var holdUntil = Date.distantPast
     @ObservationIgnored private var scheduled = false
     @ObservationIgnored private var loadingMore = false
+    /// Posts that arrived while the owner was reading further down. They wait out of sight until
+    /// the feed is back at the top: added at the top of two columns, one would push a column down
+    /// under the reader.
+    @ObservationIgnored private var waiting: [Post]?
+    /// The column each post sits in when the feed runs in two, and how much has been added to the
+    /// top of each since.
+    @ObservationIgnored private var lanes: [String: Int] = [:]
+    @ObservationIgnored private var addedAtTop: [CGFloat] = [0, 0]
+
+    // Columns
+    /// Room from which the feed runs in two columns: each is then at least as wide as a post on a phone.
+    static let twoColumns: CGFloat = 696
+    /// The space between posts in two columns, across and down.
+    static let gutter: CGFloat = 16
+    /// The widest the two columns are together.
+    static let widest: CGFloat = 1140
 
     var posts: [Post] {
         let ids = Set(first.map { $0.id })
@@ -79,8 +95,15 @@ final class FeedModel {
             let r: FeedPostsResponse = try await api.get(feedPath)
             // the filter changed while this was on its way: the answer is for the other view
             guard only == onlyBookmarked else { return }
-            if r.posts != first {
-                withAnimation(.ssSoft) { first = r.posts }
+            let incoming = r.posts
+            if !nearTop, let top = first.first?.id, let at = incoming.firstIndex(where: { $0.id == top }), at > 0 {
+                // newer posts wait above, out of sight, until the feed is back at the top
+                waiting = incoming
+                let rest = Array(incoming[at...])
+                if rest != first { withAnimation(.ssSoft) { first = rest } }
+            } else {
+                waiting = nil
+                if incoming != first { withAnimation(.ssSoft) { first = incoming } }
             }
             loaded = true
             problem = ""
@@ -187,6 +210,7 @@ final class FeedModel {
             first.removeAll { $0.id == id }
             older.removeAll { $0.id == id }
         }
+        waiting?.removeAll { $0.id == id }
         threads[id] = nil
         drafts[id] = nil
         cards[id] = nil
@@ -213,6 +237,9 @@ final class FeedModel {
             first = []
             older = []
         }
+        waiting = nil
+        lanes = [:]
+        addedAtTop = [0, 0]
         done = false
         loaded = false
         await refresh()
@@ -239,6 +266,7 @@ final class FeedModel {
             first = apply(first)
             older = apply(older)
         }
+        waiting = waiting.map(apply)
         do {
             try await api.send(on ? "PUT" : "DELETE", "posts/\(post.id)/bookmark")
         } catch {
@@ -258,7 +286,64 @@ final class FeedModel {
 
     func contentMoved(_ frame: CGRect) {
         content = frame
+        // back at the top: the posts that came in meanwhile take their places
+        if let w = waiting, nearTop {
+            waiting = nil
+            withAnimation(.ssSoft) { first = w }
+        }
         schedule()
+    }
+
+    /// The feed is at its top, or close enough that a post added there is seen arriving.
+    private var nearTop: Bool { content.minY > -80 }
+
+    // MARK: Columns
+
+    /// The posts shared between two columns, like masonry: each goes to the shorter column when it
+    /// first appears and stays there, so nothing changes sides as pictures load or posts come and
+    /// go. Posts that came in at the top take turns between the columns, oldest first.
+    func columns(width: CGFloat) -> [[Post]] {
+        let all = posts
+        if let known = all.firstIndex(where: { lanes[$0.id] != nil }), known > 0 {
+            for p in all[..<known].reversed() {
+                let c = addedAtTop[0] <= addedAtTop[1] ? 0 : 1
+                lanes[p.id] = c
+                addedAtTop[c] += height(p, width) + Self.gutter
+            }
+        }
+        var out: [[Post]] = [[], []]
+        var tops: [CGFloat] = [0, 0]
+        for p in all {
+            let c: Int
+            if let lane = lanes[p.id] {
+                c = lane
+            } else {
+                c = tops[0] <= tops[1] ? 0 : 1
+                lanes[p.id] = c
+            }
+            out[c].append(p)
+            tops[c] += height(p, width) + Self.gutter
+        }
+        return out
+    }
+
+    /// How tall a post's card is: as drawn when it has been, otherwise about what it will be.
+    private func height(_ p: Post, _ width: CGFloat) -> CGFloat {
+        if let drawn = cards[p.id]?.height, drawn > 0 { return drawn }
+        let inner = max(120, width - 12)
+        // the card's padding, the room above the words and the byline under them
+        var h: CGFloat = 12 + 12 + 42
+        if let m = p.media, m.type == "video" {
+            h += min(560, inner * 9 / 16)
+        } else if let m = p.media, m.type == "image" {
+            h += min(520, inner / 1.6) + ((m.images?.count ?? 0) > 1 ? 16 : 0)
+        } else if let art = p.art, (art.status ?? "none") != "none" {
+            h += inner / 2
+        }
+        let perLine = max(16, (width - 32) / 8.6)
+        h += min(4, (CGFloat(p.body.count) / perLine).rounded(.up)) * 22.5
+        if p.page != nil { h += 78 }
+        return h
     }
 
     func cardMoved(_ id: String, _ frame: CGRect) {
@@ -319,7 +404,9 @@ final class FeedModel {
     }
 
     /// The post being read: the one crossing a line a little above the middle of the screen. The
-    /// line slides to the top or bottom edge as the feed reaches its ends.
+    /// line slides to the top or bottom edge as the feed reaches its ends. While comments are open
+    /// only the column of the post they show counts, so in two columns they follow down the
+    /// column the owner is reading.
     func reading() -> String? {
         let vh = viewport
         guard vh > 0 else { return nil }
@@ -329,10 +416,12 @@ final class FeedModel {
             let left = content.maxY - vh
             line = max(min(vh * 0.38, 150 + top), vh - 220 - left)
         }
+        let lane = commentsOpen ? activeID.flatMap { cards[$0] } : nil
         var best: String?
         var nearest = CGFloat.greatestFiniteMagnitude
         for p in posts {
             guard let r = cards[p.id] else { continue }
+            if let lane, r.maxX < lane.midX || r.minX > lane.midX { continue }
             let inside = r.minY <= line && r.maxY >= line
             let d: CGFloat = inside ? 0 : min(abs(r.minY - line), abs(r.maxY - line))
             if d < nearest {

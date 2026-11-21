@@ -262,6 +262,35 @@ async function run(profile) {
     await noSidewaysScroll("feed");
     await shot("feed");
   });
+  await step("feed columns", async () => {
+    // Two columns wherever each can be at least as wide as a post on a phone, one otherwise. Posts
+    // never overlap, the newest leads, and a post does not carry the topic it belongs to.
+    await settle(1200);
+    const room = await page.locator("[data-feed]").evaluate((el) => el.clientWidth);
+    const cards = await page.locator("main article[data-post]").evaluateAll((els) =>
+      els.map((e) => ((r) => ({ left: Math.round(r.left), top: r.top, bottom: r.bottom, width: r.width }))(e.getBoundingClientRect())),
+    );
+    if (cards.length < 4) return fail(`feed columns: only ${cards.length} posts showing`);
+    const lanes = [...new Set(cards.map((c) => c.left))].length;
+    const want = room >= 696 ? 2 : 1;
+    if (lanes !== want) fail(`feed columns: ${lanes} columns in ${room}px of room, expected ${want}`);
+    if (cards.some((c) => c.width < 330)) fail(`feed columns: a post is ${Math.round(Math.min(...cards.map((c) => c.width)))}px wide, narrower than on a phone`);
+    for (let i = 0; i < cards.length; i++)
+      for (let j = i + 1; j < cards.length; j++) {
+        const a = cards[i], b = cards[j];
+        if (a.left === b.left && a.top < b.bottom - 1 && b.top < a.bottom - 1) fail(`feed columns: posts ${i + 1} and ${j + 1} overlap`);
+      }
+    if (cards.some((c) => c.top < cards[0].top - 1)) fail("feed columns: the newest post is not at the top");
+    if (await page.locator("main article .chip").count()) fail("feed: a post still shows the topic it belongs to");
+    // the picture leads the post, then the words, then who posted it
+    const order = await page.locator("main article", { hasText: "Figure raised" }).first().evaluate((a) => {
+      const y = (sel) => a.querySelector(sel)?.getBoundingClientRect().top ?? -1;
+      return [y(".art"), y("p"), y("[data-byline]")];
+    });
+    if (!(order[0] >= 0 && order[0] < order[1] && order[1] < order[2])) fail(`feed: a post is not picture, words, then byline (${order.map(Math.round)})`);
+    await noSidewaysScroll("feed columns");
+    await shot("feed-columns");
+  });
   await step("feed is read-only", async () => {
     if (await page.getByPlaceholder("Tell your agents something").count()) fail("feed: the owner's composer is still there");
     if (await page.getByRole("button", { name: "Between agents" }).count()) fail("feed: the channel switch is still there");
@@ -326,12 +355,20 @@ async function run(profile) {
     await noSidewaysScroll("feed thread");
     await shot("feed-thread");
     if (profile.viewport.width >= 768) {
-      // comments stay open while the feed scrolls, and follow the post being read (here the first one, at the top of the feed)
-      const other = page.locator("main article").first();
+      // comments stay open while the feed scrolls, and follow the post being read down its column
+      // (here to the top of the feed, where the post at the head of that column is read)
       await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
       await settle(900);
       if (!(await reply.count())) fail("feed comments: scrolling the feed closed the comments");
-      if ((await other.getByRole("button", { name: "Close comments" }).count()) !== 1) fail("feed comments: scrolling to another post did not move the comments to it");
+      const followed = await page.evaluate(() => {
+        const cards = [...document.querySelectorAll("main article[data-post]")].map((a) => ({ a, r: a.getBoundingClientRect() }));
+        const on = cards.filter((c) => c.a.querySelector('button[aria-label="Close comments"]'));
+        if (on.length !== 1) return `${on.length} posts show their comments as open`;
+        const r = on[0].r;
+        if (cards.some((c) => c.r.top < r.top - 1 && c.r.left < r.right && c.r.right > r.left)) return "the post whose comments show is not the one at the head of its column";
+        return null;
+      });
+      if (followed) fail(`feed comments: scrolling to the top did not move the comments to the post there (${followed})`);
       if (await panel.getByText("It strengthens it.").count()) fail("feed comments: the panel still shows the previous post's comments");
       await shot("feed-comments-follow");
       // pressing comments on another post moves them there (unless scrolling to it already did); pressing again closes
@@ -388,9 +425,17 @@ async function run(profile) {
     const card = page.locator("article", { hasText: "Digit unloads" }).first();
     const clip = card.locator("[data-clip]");
     const state = () => clip.locator("video").evaluate((v) => ({ paused: v.paused, muted: v.muted, time: v.currentTime, ready: v.readyState }));
+    // Just out of view: 200px below the screen, or above it where the post is on the first screen
+    // (as it is in two columns), since the page cannot scroll up past its top.
+    const outOfView = () =>
+      card.evaluate((el) => {
+        const main = el.closest("main");
+        main.scrollTo({ top: 0 });
+        const r = el.getBoundingClientRect();
+        main.scrollBy({ top: r.top - innerHeight - 200 >= 0 ? r.top - innerHeight - 200 : r.bottom + 200 });
+      });
     // out of view it waits; scrolled into view it plays by itself, without sound
-    await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
-    await card.evaluate((el) => el.closest("main").scrollBy({ top: el.getBoundingClientRect().top - innerHeight - 200 }));
+    await outOfView();
     await settle(600);
     if (!(await state()).paused) fail("feed video: the video is playing while it is off screen");
     await card.scrollIntoViewIfNeeded();
@@ -410,8 +455,7 @@ async function run(profile) {
     await noSidewaysScroll("feed video");
     await shot("feed-video");
     // scrolled away again, it stops
-    await page.locator("main").evaluate((m) => m.scrollTo({ top: 0 }));
-    await card.evaluate((el) => el.closest("main").scrollBy({ top: el.getBoundingClientRect().top - innerHeight - 200 }));
+    await outOfView();
     await settle(700);
     if (!(await state()).paused) fail("feed video: the video kept playing after it was scrolled out of view");
   });
@@ -1708,6 +1752,7 @@ async function run(profile) {
     await press(filter);
     await page.waitForURL("**/feed?view=bookmarked");
     await page.locator("article", { hasText: "Three-Live" }).waitFor({ state: "detached", timeout: 6000 }).catch(() => fail("feed: the bookmarked view still shows a post that is not bookmarked"));
+    await post().first().waitFor({ timeout: 6000 }).catch(() => {});
     if ((await post().count()) !== 1) fail("feed: the bookmarked view does not show the bookmarked post");
     if ((await filter.getAttribute("aria-pressed")) !== "true") fail("feed: the bookmarked toggle does not show as on");
     await noSidewaysScroll("feed bookmarked");
