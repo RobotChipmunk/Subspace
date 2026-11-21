@@ -306,16 +306,15 @@ final class TodosTests: SubspaceTestCase {
     }
 
     func testHideDone() {
+        // The task is made on the server before the app opens, so no keyboard is up when the
+        // control is tapped: with the add field still focused, the list moved under the tap and
+        // it opened a task instead. Today is short, so nothing has to be scrolled either.
+        let title = "Return the parcel \(Int.random(in: 1000...9999))"
+        XCTAssertNotNil(Self.request("POST", "todos", ["title": title, "view": "today"])?["id"], "The test's task could not be made on the server")
         launchSignedIn()
         go("todos")
-        // Today is short, so its heading and its tasks are on screen together and nothing has to be
-        // scrolled: a drag to scroll the long backlog started on a task and opened it.
         folder("today").tap()
-        let title = "Return the parcel \(Int.random(in: 1000...9999))"
-        enter(title + "\n", into: app.textFields["todos.add"], "the add field")
-        expect(row(title), "the new task in the list")
-        // the task is saved under its real id a moment after it shows
-        Thread.sleep(forTimeInterval: 1.5)
+        expect(row(title), "the new task in Today")
 
         // Finished tasks can be hidden; the control sits with the filters and says when it is on.
         let hide = expect(app.buttons["todos.hideDone"], "the control that hides finished tasks")
