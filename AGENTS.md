@@ -256,3 +256,6 @@ being true. Read this list before starting work.
 - Previews of a branch share the production database and migrate it on their first request
   (`db.ts`). Keep every migration additive and safe to repeat (`ADD COLUMN IF NOT EXISTS`), so
   that the production deployment, which does not know the new column yet, carries on unharmed.
+- iOS CI: with 33 UI tests the iPhone suite took 2,422 seconds against a 2,700-second watchdog
+  (25 Nov 2026), so the limit is now 3,600 and the job's timeout 80 minutes. The suite grows by
+  about a minute a test: before adding more, consider folding a new check into an existing test.

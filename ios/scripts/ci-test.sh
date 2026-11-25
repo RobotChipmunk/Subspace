@@ -21,9 +21,10 @@ sleep "${SIM_SETTLE_SECONDS:-45}"
 rm -rf "$OUT/$NAME.xcresult"
 # Run in the background under a watchdog: a simulator that never starts the tests must not hold
 # the job until its timeout.
-# The whole suite takes about 28 minutes on a slow runner (25 tests, some run twice), so the
-# limit leaves room above that; the job's own timeout in ios.yml is longer still.
-LIMIT="${TEST_LIMIT_SECONDS:-2700}"
+# The whole suite takes about 40 minutes on an iPhone simulator (33 tests, 2,422 seconds on
+# 25 Nov 2026; 37 minutes on iPad), so the limit leaves room above that; the job's own timeout in
+# ios.yml is longer still.
+LIMIT="${TEST_LIMIT_SECONDS:-3600}"
 # To chase one failure without paying for the whole suite, commit ios/only-testing with one test a
 # line ("SubspaceUITests/IdeasTests/testOpenAnIdeaAndKeepAPiece"). Remove the file before merging.
 ONLY=()
