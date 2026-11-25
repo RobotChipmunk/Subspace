@@ -263,6 +263,11 @@ being true. Read this list before starting work.
   ends, and a loaded CI machine draws it slowly. "Escape did not close the panel" failed once in
   CI because the check looked 600ms later. Wait for the element to be detached
   (`waitFor({ state: "detached" })`), never for a fixed time, before saying something did not close.
+- `ui-check` on `main` failed "feed pictures: the next button did not show the third picture" and
+  "journal: a deleted entry is still listed" at one size after a change that touched neither, and
+  passed unchanged on a fresh seed here (25 Nov 2026). Both looked once after a fixed wait
+  (a glide of 900ms; a list drawn before the delete reached it). They now wait for the dot and for
+  the entry to leave. When a step fails once on a loaded machine, look for a fixed wait in it first.
 - A house-rule proposal's rail module was stored with a 180-character excerpt and nothing in the
   rail showed more, so the owner was asked to approve a rule they could not read (26 Nov 2026).
   The module is still stored short (its notification uses that), but what the owner's rail is

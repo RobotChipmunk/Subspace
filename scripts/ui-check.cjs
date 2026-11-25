@@ -430,7 +430,8 @@ async function run(profile) {
       await pics.hover();
       await reachable(pics.getByRole("button", { name: "Next picture" }), "next picture button");
       await press(pics.getByRole("button", { name: "Next picture" }));
-      await settle(900);
+      // the pictures glide across, slowly on a loaded machine: wait for the dot, not for a fixed time
+      for (let i = 0; i < 25 && (await on()) !== "false,false,true"; i++) await settle(200);
       if ((await on()) !== "false,false,true") fail("feed pictures: the next button did not show the third picture");
       if (await pics.getByRole("button", { name: "Next picture" }).count()) fail("feed pictures: a next button is offered on the last picture");
     }
@@ -1664,7 +1665,9 @@ async function run(profile) {
     if ((await bin.getAttribute("data-armed")) !== "true") fail("journal: the delete control did not ask for confirmation");
     await press(bin);
     await page.locator("[data-entry]", { hasText: "Sketching again" }).waitFor({ timeout: 5000 });
-    if (await page.locator("[data-entry]", { hasText: "Check entry" }).count()) fail("journal: a deleted entry is still listed");
+    // the list can be drawn before it has heard of the delete: give the entry time to leave it
+    const gone = await page.locator("[data-entry]", { hasText: "Check entry" }).first().waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false);
+    if (!gone) fail("journal: a deleted entry is still listed");
   });
 
   // ---------- Saved links ----------
