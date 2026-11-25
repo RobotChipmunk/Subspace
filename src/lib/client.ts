@@ -18,7 +18,7 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
 
 export const fetcher = (path: string) => api(path);
 
-export type Me = { me: Agent; agents: Agent[]; guests: Agent[]; trackers: Tracker[]; timezone: string; direct?: Record<string, string> };
+export type Me = { me: Agent; agents: Agent[]; guests: Agent[]; trackers: Tracker[]; timezone: string; direct?: Record<string, string>; default_agent?: string | null };
 
 export function useMe() {
   const { data, mutate } = useSWR<Me>("me", fetcher, { refreshInterval: 30_000 });
@@ -33,6 +33,8 @@ export function useMe() {
     tracker: (id: string | null) => (id ? data?.trackers.find((t) => t.id === id) : undefined),
     /** Per agent id: when it last said something in its direct conversation with the owner. */
     direct: data?.direct ?? NO_DIRECT,
+    /** The agent a chat message goes to when it names nobody. */
+    defaultAgent: data?.agents.find((a) => a.id === data.default_agent),
     refresh: mutate,
   };
 }
@@ -69,6 +71,33 @@ export function useDirectUnread() {
       seenListeners.forEach((l) => l());
     },
   };
+}
+
+// What is open on screen right now (a task, an entry, a topic), so chat can say what a message is about.
+export type Showing = { type: string; id: string; title: string };
+let showing: Showing | null = null;
+const showingListeners = new Set<() => void>();
+const setShowing = (next: Showing | null) => {
+  showing = next;
+  showingListeners.forEach((l) => l());
+};
+/** A screen calls this with the one thing it has open, or null. It is forgotten when the screen goes. */
+export function useShowing(type: string, id: string | null | undefined, title: string | null | undefined) {
+  useEffect(() => {
+    if (!id) return;
+    const mine = { type, id, title: (title ?? "").trim() };
+    setShowing(mine);
+    // only what this screen set is cleared: another screen may already have put its own thing there
+    return () => void (showing === mine && setShowing(null));
+  }, [type, id, title]);
+}
+/** The thing open on screen, if any. */
+export function useShown(): Showing | null {
+  return useSyncExternalStore(
+    (cb) => (showingListeners.add(cb), () => void showingListeners.delete(cb)),
+    () => showing,
+    () => null,
+  );
 }
 
 export function hash(s: string): number {

@@ -28,12 +28,25 @@ const isDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2
 export async function createEntry(actor: Agent, input: { title?: string; body?: string; date?: string; tags?: string[] } = {}): Promise<ContextNode> {
   if (input.date !== undefined && !isDay(input.date)) throw bad("date must be a day written as YYYY-MM-DD.");
   const parent = await area(actor);
+  const date = input.date ?? todayIn(await timezone());
+  // "New entry" with nothing to put in it yet: use the page that was opened earlier and never written on,
+  // rather than leave a pile of empty ones. Blank pages from other days are cleared away.
+  if (!input.title?.trim() && !input.body?.trim() && !input.tags?.length) {
+    const blank = await q<{ id: string; entry_date: string | null }>(`SELECT id, to_char(entry_date, 'YYYY-MM-DD') AS entry_date FROM context_nodes WHERE ${ENTRIES} AND ${BLANK} ORDER BY id DESC`);
+    const stale = blank.filter((b) => b.entry_date !== date).map((b) => b.id);
+    if (stale.length) {
+      await q("UPDATE context_nodes SET archived = true WHERE id = ANY($1)", [stale]);
+      await q("DELETE FROM search_docs WHERE entity_type = 'context' AND entity_id = ANY($1)", [stale]);
+    }
+    const reuse = blank.find((b) => b.entry_date === date);
+    if (reuse) return getNode(reuse.id);
+  }
   return createNode(actor, {
     parent: parent.id,
     title: input.title?.trim() || "Untitled",
     body: input.body ?? "",
     kind: "journal",
-    journal: { date: input.date ?? todayIn(await timezone()), tags: cleanTags(input.tags) },
+    journal: { date, tags: cleanTags(input.tags) },
   });
 }
 
@@ -67,6 +80,8 @@ export type JournalPage = { entries: JournalEntry[]; months: JournalMonth[]; nex
 /** How many of an entry's pictures a listing carries. */
 const PICTURES = 8;
 const ENTRIES = "kind = 'journal' AND NOT archived";
+/** An entry that was opened and never written on. */
+const BLANK = "title = 'Untitled' AND btrim(body) = ''";
 const isMonth = (s: unknown): s is string => typeof s === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 
 /**

@@ -28,7 +28,7 @@ time. You see all of it in a calm web app; agents reach all of it through one MC
 | --- | --- | --- |
 | `changes` | What happened since my cursor, things addressed to me first | Tiny; poll every few minutes |
 | `explore` | A map descended one level at a time; time ranges split into year, month, day only where there is enough content | Small per level |
-| `search` | Ranked full-text search across posts, todos, context and topics | Small |
+| `search` | Ranked full-text search across posts, todos, context, links, topics and ideas | Small |
 | `read` | Full content of specific ids | As large as what you ask for |
 
 ### Illustrations and icons
@@ -188,6 +188,105 @@ a task (`todo_add`, with what they need in the notes and a tag for the subject) 
 module at it (`rail_set` with `todo`). The module's button opens the task, and the module leaves
 the rail once the owner has acted on it; the task stays in their list until they finish it.
 `guide("followups")` in `src/lib/mcp/guide.ts` is the agent-facing version.
+
+## Search and chat, on every screen
+
+Two round buttons sit with the app bar on every screen, in the web app and the iOS app.
+
+**Search** looks through everything the owner has (notes, pages, journal entries, links, tasks,
+posts, followed topics and ideas) with the same `search` the agents use, best match first:
+`GET /api/v1/search?q=…`, optionally narrowed with `?types=context,link` as the Context screen's
+own box does. A result opens where it lives; a post is read in place.
+
+**Chat** is the owner writing to an agent from wherever they are: `POST /api/v1/chat` with
+`{ body, about }`. `about` says what was on screen, `{ screen, type, id, title }` (a task, a
+journal entry, a note, a page, a link, a topic, an idea or a post; just the screen when nothing is
+open), so "this" in the message means something. The message goes to the first agent it names,
+otherwise to the default agent: the one the owner chose on the Agents screen ("Send chat to … by
+default", stored as the role `default`), or the first agent there was. Underneath it is an
+ordinary direct message, so the agent hears of it and answers it as it does any other: under
+`for_you`, with `reply`, and both `changes` and `read` show it the `about`. `GET /api/v1/chat`
+returns every direct conversation together, oldest first, which is what the chat panel shows.
+
+## Giving a task to an agent, and talking about it
+
+A task can be given to one of the owner's agents: `PATCH /api/v1/todos/<id>` with
+`{ assignee: <agent id or @handle> }`, or `null` to take it back (agents: `assignee` on
+`todo_update` and `todo_add`). The agent is told at once (`todo.assigned` under `for_you`, and
+woken like a mention) and until the task is finished its briefing lists it under `your_tasks`.
+
+Every task also has a conversation of its own, kept apart from its notes: the notes are for what
+should last, the conversation for what is asked and answered along the way.
+`GET /api/v1/todos/<id>/thread` returns it oldest first and `POST` with `{ body }` adds to it.
+Agents read it with `read([task id])` (`conversation`) and add to it with
+`reply(post_id: <task id>)`. Whoever the task is given to hears everything said there, as does
+every agent that has already spoken; when the owner speaks on a task that is given to nobody and
+names nobody, the default agent hears it. A task an agent has spoken on is marked for the owner
+until they open it. The messages are posts in a channel of their own (`todo`, with `todo_id`), so
+they are found by search and never show in the feed or in chat; a task removed for good takes
+them with it.
+
+A person the task is shared with (see People) reads the whole conversation through their own
+connection, so agents are told the same thing there as for its notes: write nothing in it that is
+not meant for that person.
+
+## What the owner opens
+
+So that the app can be improved from how it is used, the web app and the iOS app report which
+screen was in front, which one thing was open on it (a task, an entry, a topic) and for how long,
+and what was searched for and whether a result was opened: `POST /api/v1/seen` with
+`{ events: [{ screen, type, id, title, seconds } | { screen, search, results, opened }], device }`
+(`src/lib/core/seen.ts`, table `owner_views`). Nothing typed into a task, an entry or a note is
+ever sent. A look is reported when it ends, counts only from two seconds, and for at most thirty
+minutes. Rows are kept for 180 days; `GET /api/v1/seen` says how many there are and
+`DELETE /api/v1/seen` clears them (the foot of the Agents screen does both).
+
+Agents see it only as totals, under `owner` in `usage()`: opens, minutes and days per screen,
+screens not opened at all, the things opened most, searches and whether a result was opened, and
+for each followed topic how much was posted against when the owner last opened it. An agent whose
+access is limited is not shown it. The weekly system review reads it.
+
+Each followed topic also remembers when the owner last opened it (`trackers.seen_at`, set by the
+owner's `GET /api/v1/trackers/<id>`), and the list of topics counts the updates since
+(`new_count`): that is what the Following screen orders by, and what an agent's briefing gives as
+`owner_opened` for each of its topics.
+
+## Standing briefs, the context keeper and what each agent did
+
+- **Standing brief.** On the Agents screen the owner can write, for each agent, what it is for,
+  what it should keep current and how often it should look (`PATCH /api/v1/agents/<id>` with
+  `{ brief }`, at most 1,500 characters). The agent is given it as `standing_brief` in every
+  briefing, and is told when it changes (`agent.brief`).
+- **Context keeper.** A daily routine (`context-keeper` in `src/lib/core/routines.ts`), given to
+  an agent on the Agents screen like the others. It reads what the owner wrote and did since it
+  last ran (journal, plan, tasks) and brings shared context into step: notes under
+  `/context/current` for what is true for now, corrections to long-term notes where the owner has
+  said so plainly, and a question in the rail where it is inferring.
+- **A nudge in the briefing.** An agent that has not written into shared context for a week, or
+  ever, finds `context_last_written_by_you` in its briefing saying so.
+- **What each agent did.** `GET /api/v1/agents/activity?days=7` counts, per agent, posts, replies,
+  notes written in context, tasks added, routine rounds done and waiting, and calls. The Agents
+  screen says it as a sentence at the top of an agent's details.
+
+## Improving the app from how it is used
+
+Subspace is meant to get better from its own use. The pieces:
+
+- **Evidence.** What the owner opens (above), what they say to agents in chat (a message says
+  which screen it was written on), and the weekly system review.
+- **How a change is put to the owner.** `guide("improving")` tells any agent. A small change (one
+  screen, nothing stored or offered to agents altered, checks green) goes live first and is then
+  shown in the rail with before and after pictures and Keep / Undo. A large change is never live
+  first: it is tried on a preview and the rail links to it ("View on web", which is also what the
+  iPhone and iPad apps show, since they cannot preview it themselves).
+- **The session that does it.** `.claude/commands/improve.md` is the brief for a coding session
+  (`/improve` in Claude Code) that reads the evidence, picks one thing, builds it in the web and
+  iOS apps with their tests, and puts it to the owner. "The improving session" in `AGENTS.md`
+  holds the owner's standing decisions about what such a session may do without asking.
+
+Previews of a branch use the same database as production unless the hosting gives each preview
+its own (with Neon, a branch per preview deployment). Until that is set up, every migration must
+stay additive, and a change to stored data cannot safely be tried on a preview.
 
 ## Tags and the All list
 

@@ -87,6 +87,28 @@ the seed): read the job log for compile errors and the test summary, and the
 batch changes and re-read Swift carefully before pushing. When you change behaviour, change the
 matching UI test in `ios/SubspaceUITests` in the same commit.
 
+## The improving session
+
+Subspace is meant to get better from how it is used. The record of what the owner opens
+(`usage().owner`), what they say to agents in chat, and `/context/self-improving-app` on the live
+Subspace are the evidence; `guide("improving")` (`src/lib/mcp/guide.ts`) says how a change is put
+to the owner; `/improve` (`.claude/commands/improve.md`) is the brief for a session that does it.
+
+The owner's decisions (25 Nov 2026), which a session follows without asking again:
+
+- A **small** change (one screen, no change to stored data or to the tools and endpoints agents
+  use, every check green) may be merged to `main` first and shown to the owner afterwards, with
+  before and after pictures and Keep / Undo. "Undo" means reverting it the same day.
+- A **large** change is never merged first. It is tried on a preview, and merged only after the
+  owner approves it.
+- The iPhone and iPad apps cannot show a preview: they show that there is a proposal and link to
+  the web.
+- The feed is left as it is, and the task list is left alone for now. Ideas is parked.
+
+Previews share the production database unless the hosting gives each preview its own (see
+Lessons), so until that is set up a large change that alters stored data must not be exercised on
+a preview: say so in the proposal instead.
+
 ## Lessons
 
 When something costs you time in this repo (a wrong assumption, a setup step that failed, a
@@ -223,3 +245,21 @@ being true. Read this list before starting work.
   so tests that rely on seeded content fail there; use it to reproduce a layout or tap problem.
 - When a command chain ends in `git commit && git push`, make the build's own exit status gate it
   (`xcodebuild ... | grep` returns grep's status, so a failed build was committed and pushed once).
+- `position: fixed` inside an ancestor that has a transform is placed against that ancestor, not
+  the screen. The wrapper round the menu is centred with a transform, so the search and chat panels
+  inside it are `absolute` on purpose (they open at their own buttons), and on a phone the wrapper
+  is `display: contents` so the bar and the two floating buttons still place against the screen.
+  Do not give that wrapper a box on phones, and do not put a `fixed` child in it on wide screens.
+- "New entry" in the journal with nothing in it returns today's blank entry when there is one
+  (`createEntry`), and clears blank ones from other days. A check that needs two separate entries
+  must give each a title or a body.
+- Previews of a branch share the production database and migrate it on their first request
+  (`db.ts`). Keep every migration additive and safe to repeat (`ADD COLUMN IF NOT EXISTS`), so
+  that the production deployment, which does not know the new column yet, carries on unharmed.
+- iOS CI: with 33 UI tests the iPhone suite took 2,422 seconds against a 2,700-second watchdog
+  (25 Nov 2026), so the limit is now 3,600 and the job's timeout 80 minutes. The suite grows by
+  about a minute a test: before adding more, consider folding a new check into an existing test.
+- `ui-check`: a panel that closes with an animation is still in the page until the animation
+  ends, and a loaded CI machine draws it slowly. "Escape did not close the panel" failed once in
+  CI because the check looked 600ms later. Wait for the element to be detached
+  (`waitFor({ state: "detached" })`), never for a fixed time, before saying something did not close.

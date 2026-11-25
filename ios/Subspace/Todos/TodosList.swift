@@ -368,10 +368,13 @@ private struct TodosRowLabel: View {
     var row: Todo
     var tag: Bool
     var place: String
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         let repeats = row.`repeat` != nil && !row.done
         let tags = row.tags ?? []
+        // the agent the task is given to, as a face at the end of the row
+        let holder = app.agent(row.assignee)
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
@@ -403,6 +406,11 @@ private struct TodosRowLabel: View {
                     .foregroundStyle(Theme.ink3)
                     .padding(.top, 4)
                     .accessibilityLabel("Repeats")
+            }
+            if let holder {
+                AvatarView(agent: holder, size: 18)
+                    .padding(.top, 1)
+                    .accessibilityLabel("Given to \(holder.name)")
             }
         }
         .padding(.vertical, 8)

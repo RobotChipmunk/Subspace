@@ -11,6 +11,8 @@ struct Agent: Codable, Identifiable, Hashable {
     /// "human", "agent" or "guest".
     var kind: String
     var bio: String?
+    /// The owner's standing brief for an agent: what it is for, what it keeps current, how often it should look.
+    var brief: String?
     var roles: [String]?
     var last_seen_at: String?
     var archived: Bool?
@@ -46,6 +48,25 @@ struct Tracker: Codable, Identifiable, Hashable {
     var created_by: String?
     var archived: Bool?
     var created_at: String?
+    /// When the owner last opened the topic (nil: never), and how many updates it has had since.
+    var seen_at: String?
+    var new_count: Int?
+
+    /// How many whole days since it last had an update; nil when it never has.
+    var quietDays: Int? {
+        guard let at = parseDate(latest_at) else { return nil }
+        return max(0, Int(Date().timeIntervalSince(at) / 86_400))
+    }
+
+    /// A topic that has had nothing for this many days has gone quiet.
+    static let quietAfter = 7
+
+    /// Where it stands: 0 something new since the owner last looked, 1 going along, 2 gone quiet, 3 never updated.
+    var standing: Int {
+        guard let days = quietDays else { return 3 }
+        if (new_count ?? 0) > 0 { return 0 }
+        return days >= Self.quietAfter ? 2 : 1
+    }
 }
 
 struct MeResponse: Codable {
@@ -56,6 +77,8 @@ struct MeResponse: Codable {
     var timezone: String?
     /// Per agent id: when it last said something in its direct conversation with the owner.
     var direct: [String: String]?
+    /// The agent a chat message goes to when it names nobody.
+    var default_agent: String?
 }
 
 struct PostImage: Codable, Hashable {
@@ -102,6 +125,16 @@ struct PageRef: Codable, Hashable, Identifiable {
     var cover: String?
 }
 
+/// What the owner had on screen when they wrote a message to an agent: the screen ("todos"), and
+/// the one thing open on it when there was one.
+struct About: Codable, Hashable {
+    var screen: String
+    /// "post", "todo", "journal", "context", "page", "link", "tracker" or "idea".
+    var type: String?
+    var id: String?
+    var title: String?
+}
+
 struct Post: Codable, Identifiable, Hashable {
     let id: String
     var author: String
@@ -121,6 +154,10 @@ struct Post: Codable, Identifiable, Hashable {
     var last_reply_at: String?
     /// When the owner bookmarked this post to come back to it; nil when it is not bookmarked.
     var bookmarked_at: String?
+    /// A message from the owner to an agent: what was on their screen when they wrote it.
+    var about: About?
+    /// Said in a task's conversation: the task it belongs to.
+    var todo_id: String?
     var created_at: String
 }
 
@@ -152,6 +189,9 @@ struct Todo: Codable, Identifiable, Hashable {
     /// The line of the plan the task is part of (a priority, or a part of one), and that line's name.
     var plan_id: String?
     var plan: String?
+    /// The agent the task has been given to, if any (an agent's id), and how much has been said in its conversation.
+    var assignee: String?
+    var said: Int?
     /// The rail module this task is tied to, while that module exists: the one pointing at it, or
     /// the one it was kept from with "Later". Sent when one task is read.
     var rail: TodoRail?

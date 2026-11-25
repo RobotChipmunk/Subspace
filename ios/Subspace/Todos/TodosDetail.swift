@@ -41,6 +41,11 @@ struct TodosDetail: View {
                 schedule(todo)
                 origin(todo)
                 notesArea(notes)
+                if !helpers.isEmpty {
+                    TodosThread(todoID: id, to: helpers.first { $0.id == todo.assignee }?.name)
+                        .padding(.leading, sizeClass == .regular ? 42 : 0)
+                        .padding(.top, 28)
+                }
             } else if problem == nil {
                 Capsule()
                     .fill(Theme.fill)
@@ -54,6 +59,7 @@ struct TodosDetail: View {
             configure()
             await poll()
         }
+        .showing(.todos, "todo", id: id, title: todo?.title)
         .onChange(of: tagText) { _, now in
             if now.count > 30 { tagText = String(now.prefix(30)) }
         }
@@ -160,6 +166,13 @@ struct TodosDetail: View {
 
                 TodosRepeatMenu(rule: rule) { value in
                     Task { await setRepeat(value) }
+                }
+
+                // the agent it is given to: that agent is told, and hears what is said on the task
+                if !helpers.isEmpty {
+                    TodosGiveToMenu(agents: helpers, chosen: todo.assignee) { value in
+                        Task { await setAssignee(value) }
+                    }
                 }
 
                 // the line of the plan it is part of; only once there is a plan
@@ -393,7 +406,7 @@ struct TodosDetail: View {
         let creator = app.agent(todo.created_by)
         let guestName = app.agent(todo.guest_id)?.name ?? "They"
         let waiting = todo.scope == "guest"
-        let shared = waiting ? "Not on a day yet. \(guestName) can see where you put it." : "\(guestName) can see this task, its notes and its day."
+        let shared = waiting ? "Not on a day yet. \(guestName) can see where you put it." : "\(guestName) can see this task, its notes, its day and what is said below."
         VStack(alignment: .leading, spacing: 6) {
             if let creator, !creator.isHuman {
                 HStack(spacing: 6) {
@@ -727,6 +740,13 @@ struct TodosDetail: View {
         _ = await patch(["plan": value ?? "none"])
     }
 
+    /// The owner's agents: the ones a task can be given to.
+    private var helpers: [Agent] { app.agents.filter { $0.kind == "agent" } }
+
+    private func setAssignee(_ value: String?) async {
+        _ = await patch(["assignee": value ?? "none"])
+    }
+
     /// Goes to the task that was added to follow this one, where its date can be changed.
     private func openNext(_ next: String) async {
         titleFocused = false
@@ -824,6 +844,46 @@ private struct TodosPartOfMenu: View {
         }
         .accessibilityLabel("Part of. Now: \(on ? title : "Not in the plan")")
         .accessibilityIdentifier("todos.detail.partOf")
+    }
+}
+
+/// Who the task is given to. Accent, with the agent's face, while it is given to one.
+private struct TodosGiveToMenu: View {
+    var agents: [Agent]
+    var chosen: String?
+    var pick: (String?) -> Void
+
+    var body: some View {
+        let holder = agents.first { $0.id == chosen }
+        let on = holder != nil
+        Menu {
+            Button {
+                pick(nil)
+            } label: {
+                if on { Text("Nobody") } else { Label("Nobody", systemImage: "checkmark") }
+            }
+            ForEach(agents) { agent in
+                Button {
+                    pick(agent.id)
+                } label: {
+                    if agent.id == chosen { Label(agent.name, systemImage: "checkmark") } else { Text(agent.name) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if let holder { AvatarView(agent: holder, size: 20) } else { Image(systemName: "person.2") }
+                Text(holder?.name ?? "Give to").lineLimit(1)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(on ? Theme.accent : Theme.ink2)
+            .padding(.leading, on ? 8 : 12)
+            .padding(.trailing, 12)
+            .frame(minHeight: 36)
+            .background(on ? Theme.accentSoft : Theme.fill, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Give to. Now: \(holder?.name ?? "Nobody")")
+        .accessibilityIdentifier("todos.detail.giveTo")
     }
 }
 

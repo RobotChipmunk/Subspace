@@ -64,8 +64,25 @@ struct ContextScreen: View {
             }
         }
         .task(id: trimmedQuery) { await search() }
+        .showing(.context, shownKind, id: tree?.node?.id == nodeID ? nodeID : nil, title: tree?.node?.title)
+        // an address that names a note or a link ("/context?node=<id>", as a search result does) opens it
+        .onChange(of: app.pendingContextID, initial: true) { _, id in
+            guard let id else { return }
+            app.pendingContextID = nil
+            go(id)
+        }
         .onChange(of: app.tab) { _, now in
             if now == .context { Task { await load() } }
+        }
+    }
+
+    /// What the open node is, as chat names it: a page, a link, or a note.
+    private var shownKind: String {
+        switch tree?.node?.kind {
+        case "page": return "page"
+        case "link": return "link"
+        case "journal": return "journal"
+        default: return "context"
         }
     }
 
@@ -187,18 +204,7 @@ struct ContextScreen: View {
     }
 
     private func open(_ hit: ContextHit) {
-        switch hit.type {
-        case "context", "link":
-            go(hit.id)
-        case "todo":
-            app.open("/todos?open=\(hit.id)")
-        case "post":
-            app.open("/feed")
-        case "tracker":
-            app.open("/following")
-        default:
-            break
-        }
+        go(hit.id)
     }
 
     /// A link inside a note that points at another note or page opens it here.
@@ -263,7 +269,8 @@ struct ContextScreen: View {
         }
         try? await Task.sleep(for: .milliseconds(250))
         if Task.isCancelled { return }
-        if let reply: ContextSearchReply = try? await app.api.get("search?q=" + q(text)) {
+        // this box looks through context only; the search beside the app bar looks through everything
+        if let reply: ContextSearchReply = try? await app.api.get("search?types=context,link&q=" + q(text)) {
             if Task.isCancelled { return }
             hits = reply.results
         }

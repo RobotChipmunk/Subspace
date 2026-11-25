@@ -11,6 +11,11 @@ final class FollowingAgentsTests: SubspaceTestCase {
         expect(app.descendants(matching: .any)["following.stop"], "Stop following, inside the opened topic")
         expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'following.update.'")).firstMatch, "the topic's updates")
         shot("30-following-open")
+        // Opening a topic reads it: the server knows the owner has looked, and nothing in it is new any more.
+        let topics = Self.request("GET", "trackers")?["trackers"] as? [[String: Any]] ?? []
+        let seen = topics.first { $0["title"] as? String == "Robotics investments" }
+        XCTAssertNotNil(seen?["seen_at"] as? String, "Opening a topic should record that the owner has looked at it")
+        XCTAssertEqual(seen?["new_count"] as? Int, 0, "A topic that has just been opened has nothing new")
         topic.tap()
 
         // Follow something new
@@ -45,6 +50,9 @@ final class FollowingAgentsTests: SubspaceTestCase {
         let connect = expect(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agents.connect.'")).firstMatch, "a Connect button")
         connect.tap()
         expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.address.'")).firstMatch, "the connector address")
+        // What the agent did this week, and the standing brief the owner writes for it, lead its details.
+        expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.did.'")).firstMatch, "the line on what the agent did this week")
+        expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agents.brief.'")).firstMatch, "the standing brief field")
         shot("40-agents-connect")
 
         // Access is set on the agent: read only, then one part of the app off, each saved as it is changed.

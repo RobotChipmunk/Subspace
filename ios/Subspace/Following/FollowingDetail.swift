@@ -38,6 +38,8 @@ struct FollowingDetail: View {
     @State private var fullHeight: CGFloat = 0
     @State private var clampHeight: CGFloat = 0
     @State private var updates: [Post]? = nil
+    /// When the owner had last opened this topic, as it stood when it was opened now.
+    @State private var since: String? = nil
     @State private var hasMore = false
     @State private var loadingMore = false
     @State private var problem = ""
@@ -71,6 +73,9 @@ struct FollowingDetail: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 20)
+        .onAppear {
+            if since == nil { since = tracker.seen_at ?? tracker.created_at ?? "" }
+        }
         .task(id: visible) {
             guard visible else { return }
             while !Task.isCancelled {
@@ -296,14 +301,22 @@ struct FollowingDetail: View {
                         .font(.system(size: 14))
                         .foregroundStyle(Theme.ink3)
                 } else {
+                    // what has come in since the owner last opened the topic is marked; with nothing new, the latest is
+                    let anyNew = list.contains { isNew($0) }
                     ForEach(Array(list.enumerated()), id: \.element.id) { item in
-                        FollowingUpdateRow(post: item.element, first: item.offset == 0, last: item.offset == list.count - 1)
+                        FollowingUpdateRow(post: item.element, first: item.offset == 0, last: item.offset == list.count - 1, marked: isNew(item.element) || (item.offset == 0 && !anyNew))
                     }
                     if hasMore { earlierButton }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What was new when the topic was opened stays marked while it is open (opening it reads it).
+    private func isNew(_ post: Post) -> Bool {
+        guard let since else { return false }
+        return post.created_at > since
     }
 
     private var earlierButton: some View {
@@ -391,6 +404,8 @@ struct FollowingUpdateRow: View {
     var post: Post
     var first: Bool
     var last: Bool
+    /// Its dot is in accent: it is new since the owner last looked, or the latest when nothing is.
+    var marked: Bool
 
     @Environment(AppModel.self) private var app
 
@@ -440,9 +455,9 @@ struct FollowingUpdateRow: View {
 
     private var dot: some View {
         Circle()
-            .fill(first ? Theme.accent : Theme.ink3)
+            .fill(marked ? Theme.accent : Theme.ink3)
             .frame(width: 9, height: 9)
-            .background(Circle().fill(first ? Theme.accentSoft : Color.clear).frame(width: 17, height: 17))
+            .background(Circle().fill(marked ? Theme.accentSoft : Color.clear).frame(width: 17, height: 17))
             .padding(.top, 5)
     }
 

@@ -13,9 +13,9 @@ import { aimsAtSystem, propose } from "../core/rules";
 import { routineDone, usage } from "../core/routines";
 import { sharingFor } from "../core/guests";
 import { createPlanItem, deletePlanItem, updatePlanItem } from "../core/plan";
-import { createTodo, listTodos, updateTodo } from "../core/todos";
+import { createTodo, getTodo, listTodos, sayOnTodo, updateTodo } from "../core/todos";
 import { createTracker, updateTracker } from "../core/trackers";
-import { bad, notFound, oneLine, type Agent } from "../core/util";
+import { agentById, bad, listAgents, notFound, oneLine, type Agent } from "../core/util";
 import { q } from "../db";
 import { CORE, GUIDE_VERSION, TOPICS } from "./guide";
 
@@ -44,8 +44,8 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "guide",
-    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, ideas, context, todos, following.",
-    inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | ideas | context | todos | following") }),
+    description: "Current instructions for using Subspace well. No topic returns the core guide; topics: design, posting, rail, followups, pages, illustration, icons, ideas, context, todos, following, improving.",
+    inputSchema: obj({ topic: str("design | posting | rail | followups | pages | illustration | icons | ideas | context | todos | following | improving") }),
     readOnly: true,
     run: async (a, { topic }) => {
       if (topic && !TOPICS[topic]) throw bad(`No guide "${topic}". Topics: ${Object.keys(TOPICS).join(", ")}.`);
@@ -199,10 +199,16 @@ export const TOOLS: Tool[] = [
   {
     name: "reply",
     description: "Reply in a post's conversation thread. Use this to answer mentions and to add detail about the story to your own posts. Never for notes about your own process, coverage, checks or access status, and never to ask the owner for something under your own post: they may not read it, so what you need from them is a task plus a rail module (guide(\"followups\")). Up to 2000 characters. For a longer or structured answer, make a page with page_write and pass its id as page: the reply then carries a card that opens it.",
-    inputSchema: obj({ post_id: str("Any post id in the thread."), body: str("Your reply."), page: str("Optional. Id of a page you made that holds the full answer; shown as a card under the reply.") }, ["post_id", "body"]),
+    inputSchema: obj({ post_id: str("Any post id in the thread. Or a task's id (t_...), to say something in that task's conversation: what you did, what you found, what you need."), body: str("Your reply."), page: str("Optional. Id of a page you made that holds the full answer; shown as a card under the reply.") }, ["post_id", "body"]),
     run: async (a, { post_id, body, page }) => {
+      // a task's id answers in the task's own conversation
+      if (typeof post_id === "string" && post_id.startsWith("t_")) {
+        const said = await sayOnTodo(a, post_id, body, page);
+        const t = await getTodo(post_id);
+        return { id: said.id, todo: post_id, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
+      }
       const p = await createReply(a, post_id, body, page);
-      return { id: p.id, thread: p.root_id };
+      return p.todo_id ? { id: p.id, todo: p.todo_id } : { id: p.id, thread: p.root_id };
     },
   },
   {
@@ -213,13 +219,15 @@ export const TOOLS: Tool[] = [
     run: async (_a, { view, tag, plan }) => {
       const l = await listTodos(view || "today", { tags: tag ? String(tag).split(",") : undefined, plan: plan ? String(plan) : undefined });
       const share = await sharingFor(l.todos.map((t) => t.guest_id));
-      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, order: t.ord, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...share.tag(t.guest_id) })) };
+      // who a task has been given to, and how much has been said on it
+      const givenTo = l.todos.some((t) => t.assignee) ? new Map((await listAgents(true)).map((x) => [x.id, x.handle])) : new Map<string, string>();
+      return { view: l.view, today: l.today, todos: l.todos.map((t) => ({ id: t.id, title: t.title, done: t.done, order: t.ord, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.repeat ? { repeat: t.repeat } : {}), ...(t.assignee ? { assignee: "@" + (givenTo.get(t.assignee) ?? t.assignee) } : {}), ...(t.said ? { said: t.said } : {}), ...share.tag(t.guest_id) })) };
     },
   },
   {
     name: "todo_add",
     description: "Add a task to the owner's list. Title starts with a verb and fits on one line. Notes are a page: markdown that can contain blocks (see the server instructions). This is also how you ask the owner for anything: when you need them to do, decide or answer something, add the task here with what they need in its notes, then point a rail module at it with rail_set(todo: id). Never ask in the feed.",
-    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, plan: str("Optional: the id of the line in the owner's plan this task works towards (your briefing lists the plan). Leave it out for a chore, an errand or anything that serves none of their priorities."), repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished."), order: { type: "integer", description: "Optional: where it goes among the tasks of that day or list, 1 for first. Left out, it goes last, which is usually right." } }, ["title"]),
+    inputSchema: obj({ title: str("The task."), view: str("today (default), week, weekend, next_week, backlog, or YYYY-MM-DD."), notes: str("Optional markdown notes; may contain blocks."), tags: { type: "array", items: { type: "string" }, description: 'Optional, at most three: the subject the task belongs to, e.g. ["finance"]. The owner filters their lists by these. Reuse a tag already in use (explore("/todos") lists them) before making a new one.' }, plan: str("Optional: the id of the line in the owner's plan this task works towards (your briefing lists the plan). Leave it out for a chore, an errand or anything that serves none of their priorities."), repeat: str("Optional: daily, every_3_days, weekly, biweekly, monthly or yearly. When the owner finishes the task, the next one is created that long after the day it was finished."), order: { type: "integer", description: "Optional: where it goes among the tasks of that day or list, 1 for first. Left out, it goes last, which is usually right." }, assignee: str("Optional: the @handle of the agent that should do this task. Only for work the owner asked to be handed to that agent; a task for the owner themselves has no assignee.") }, ["title"]),
     run: async (a, args) => {
       const t = await createTodo(a, args as any);
       return { id: t.id, scope: t.scope, date: t.date, ...(t.tags.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), next: "If the owner has to act on this, tell them in the rail: rail_set(key, label, title, show_until, todo: this id)." };
@@ -238,6 +246,7 @@ export const TOOLS: Tool[] = [
         tags: { type: "array", items: { type: "string" }, description: "The task's whole set of tags, replacing what it has; [] takes them all off. Leave out to keep them. Do not remove tags the owner chose." },
         plan: str('The id of the line in the owner\'s plan the task is part of, or "none" to take it out of the plan. Leave out to keep it where it is. Which priority a task serves is the owner\'s call: change it only when they ask.'),
         order: { type: "integer", description: "Its place among the tasks of its day or list (the one it is moved to, when view is given too): 1 for first, a number past the end for last. The other tasks keep their order around it. The order is the owner's: change it only when they ask." },
+        assignee: str('Give the task to an agent, by @handle, or "none" to take it back. That agent is told at once and the task shows in its briefing under your_tasks. Who does a task is the owner\'s call: set this only when they ask, or to hand on a task that was given to you to the agent whose work it is.'),
         notes_append: str("Markdown to add at the end of the notes. May contain blocks: fenced code blocks whose language is the block type and whose body is JSON."),
         notes_replace: { type: "object", properties: { find: str("Exact existing text."), replace: str("Replacement markdown.") }, required: ["find", "replace"] },
       },
@@ -245,7 +254,7 @@ export const TOOLS: Tool[] = [
     ),
     run: async (a, { id, ...patch }) => {
       const t = await updateTodo(a, id, patch);
-      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.repeat ? { repeat: t.repeat } : {}), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(t.done && t.next_id && t.next_date ? { next: { id: t.next_id, date: t.next_date } } : {}), notes_chars: t.notes.length, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
+      return { id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.repeat ? { repeat: t.repeat } : {}), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(t.assignee ? { assignee: "@" + ((await agentById(t.assignee))?.handle ?? t.assignee) } : {}), ...(t.done && t.next_id && t.next_date ? { next: { id: t.next_id, date: t.next_date } } : {}), notes_chars: t.notes.length, ...(await sharingFor([t.guest_id])).warning(t.guest_id) };
     },
   },
   {
@@ -331,7 +340,7 @@ export const TOOLS: Tool[] = [
   {
     name: "page_write",
     description:
-      'Create or update a page: a finished, well laid out document for the owner, such as research, a shortlist of options, a comparison or a plan. The body is markdown and can contain blocks (entity cards in a grid, carousel or list, maps, tables, stats, charts, timelines, callouts, sources and more). Read guide("pages") before your first page. Pages live in the context tree: always give a parent folder that fits the topic. To put results inside a todo instead, write the same markdown and blocks with todo_update.',
+      'Create or update a page: a finished, well laid out document for the owner, such as research, a shortlist of options, a comparison or a plan. The body is markdown and can contain blocks (entity cards in a grid, carousel or list, maps, tables, stats, charts, timelines, callouts, sources and more). Read guide("pages") before your first page. Pages live in the context tree: always give a parent folder that fits the topic. To put results inside a todo instead, write the same markdown and blocks with todo_update. The limits pages are most often refused for: a table cell holds at most 500 characters and its caption 300; a callout needs text (at most 800 characters) and its tone is info, good, warn or decision; every fact and stat needs a label and a value.',
     inputSchema: obj({
       id: str("Page id or /context/path to update. Omit to create."),
       parent: str("Required when creating: the context folder this belongs in, by id or path, e.g. /context/home/travel. Create the folder first with context_write if none fits. Never the top level."),
@@ -573,10 +582,11 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "usage",
-    description: "How Subspace was used over the last days, in numbers: tool calls and failures by agent and by tool, searches that found nothing, what became of rail modules (acted on, sent, kept, dismissed), tasks added and finished, and the built-in agents' runs. For reviewing how well the system is working; not needed for ordinary tasks.",
+    description: "How Subspace was used over the last days, in numbers: tool calls and failures by agent and by tool, searches that found nothing, what became of rail modules (acted on, sent, kept, dismissed), tasks added and finished, the built-in agents' runs, and under owner what the owner themselves opened in the app (which screens and things, for how long, what they searched for, which followed topics they looked at). For reviewing how well the system is working; not needed for ordinary tasks.",
     inputSchema: obj({ days: { type: "integer", description: "How far back, 1 to 60. Default 7." } }),
     readOnly: true,
-    run: (_a, { days }) => usage(days),
+    // what the owner opened is for agents that may see everything
+    run: (a, { days }) => usage(days, { withoutOwner: !sightOf(a).full }),
   },
   {
     name: "submit_art",

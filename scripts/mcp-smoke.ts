@@ -1,5 +1,5 @@
 /** End-to-end check of the MCP surface against the database in DATABASE_URL. */
-import { createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
+import { agentActivity, createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
 import { moduleActed, moduleLater, removeModule, sentAnswers } from "../src/lib/core/rail";
 import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
@@ -7,9 +7,13 @@ import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
 import { embedPending, meaningOn } from "../src/lib/core/meaning";
 import { addItem, createIdea, deleteIdea, getIdea, listIdeas, makeTask, moreOf, notYet, pruneItem, setAsideNear, updateIdea, updateItem } from "../src/lib/core/ideas";
 import { archiveNode, createNode, getNode } from "../src/lib/core/context";
-import { deleteTodo, getTodo } from "../src/lib/core/todos";
-import { agentByToken, ownerAgent } from "../src/lib/core/util";
+import { createTodo, deleteTodo, getTodo, sayOnTodo, todoThread, updateTodo } from "../src/lib/core/todos";
+import { createGuest, guestAdd, guestTask, guestTasks, removeGuest } from "../src/lib/core/guests";
+import { agentByToken, defaultAgent, ownerAgent } from "../src/lib/core/util";
+import { listChat, listFeed, sendChat } from "../src/lib/core/posts";
 import { handleMcp } from "../src/lib/mcp/server";
+import { clearSeen, recordSeen, seenKept } from "../src/lib/core/seen";
+import { archiveTracker, createTracker, listTrackers, seenTracker } from "../src/lib/core/trackers";
 import { q } from "../src/lib/db";
 
 let n = 0;
@@ -584,6 +588,137 @@ async function main() {
     // the review's numbers
     const week = await call(s, "usage", { days: 7 });
     if (!week.agents?.some((x: any) => x.agent === "@" + s.handle && x.calls > 10) || !week.tools?.length || !week.rail?.length || week.tasks?.added_by_agents === undefined) throw new Error("usage() is missing its numbers: " + JSON.stringify(week).slice(0, 400));
+  }
+
+  // Forgiving where a small slip would otherwise mean sending the whole thing again.
+  {
+    for (const view of ["next week", "this-week", "Next_Week"]) if ((await call(s, "todo_list", { view })).ERROR) throw new Error(`todo_list refused the view "${view}"`);
+    if ((await call(s, "reply", { post_id: p.id, body: "y".repeat(2050) })).ERROR) throw new Error("a reply a few words over the limit was refused");
+    const wayOver = await call(s, "reply", { post_id: p.id, body: "y".repeat(2200) });
+    if (!/Cut 200 /.test(wayOver.ERROR ?? "")) throw new Error("a reply far over the limit did not say how much to cut: " + JSON.stringify(wayOver));
+    const fence = "```";
+    const slips = `Intro.\n\n${fence}callout\n{"tone":"warning","title":"Only a title"}\n${fence}\n\n${fence}facts\n{"items":[{"label":"Kept","value":"1"},{"label":"No value"}]}\n${fence}\n\nOutro.`;
+    const mended = await call(s, "page_write", { parent: "/context/agents", title: "Mended page " + tag, summary: "A page with small slips in its blocks.", body: slips });
+    if (mended.ERROR) throw new Error("a page with small slips in its blocks was refused: " + mended.ERROR);
+    const kept = (await getNode(mended.id)).body;
+    if (!kept.includes('"tone":"warn"') || !kept.includes('"text":"Only a title"') || kept.includes("No value") || !kept.includes("Outro.")) throw new Error("a page's slips were not put right: " + kept);
+    await archiveNode(owner, mended.id);
+    const broken = await call(s, "page_write", { parent: "/context/agents", title: "Broken page " + tag, summary: "A page with a block that cannot be put right.", body: `${fence}callout\n{"tone":"info"}\n${fence}` });
+    if (!broken.ERROR) throw new Error("a callout with no words at all was accepted");
+  }
+
+  // Chat: what the owner writes from any screen says what they were looking at, and goes to whoever it names, else the default agent.
+  {
+    const first = await sendChat(owner, "What changed here " + tag, { screen: "todos", type: "todo", id: followUp.id, title: "Decide on the smoke test", extra: "dropped" });
+    const usual = await defaultAgent();
+    if (!usual || first.to !== usual.id) throw new Error("a chat message naming nobody did not go to the default agent: " + first.to);
+    if (first.message.about?.id !== followUp.id || first.message.about?.screen !== "todos" || "extra" in (first.message.about ?? {})) throw new Error("a chat message did not keep what was on screen: " + JSON.stringify(first.message.about));
+    const named = await sendChat(owner, `@${s.handle} and what do you make of it ${tag}?`, { screen: "nowhere" });
+    if (named.to !== s.id || named.message.about) throw new Error("a chat message naming an agent did not go to it, or kept a screen that does not exist: " + JSON.stringify(named));
+    const heard = await call(s, "changes", { peek: true, limit: 100 });
+    if (!heard.for_you?.some((e: { id: string }) => e.id === named.message.id)) throw new Error("the agent named in a chat message was not told of it");
+    const seen = await call(usual.id === claude.id ? claude : s, "read", { ids: [first.message.id] });
+    if (!JSON.stringify(seen).includes(`"id":"${followUp.id}"`)) throw new Error("the agent reading a chat message is not shown what it was about: " + JSON.stringify(seen).slice(0, 300));
+    const chat = await listChat();
+    if (chat.default_agent !== usual.id || ![first, named].every((x) => chat.messages.some((m) => m.id === x.message.id))) throw new Error("chat does not list every conversation together");
+    if (!(await sendChat(s as never, "from an agent", null).then(() => false, () => true))) throw new Error("an agent was allowed to use the owner's chat");
+  }
+
+  // A task can be given to an agent, and has a conversation of its own, apart from its notes.
+  {
+    const forYou = async (who: any, type: string, id: string) => ((await call(who, "changes", { peek: true, limit: 100 })).for_you ?? []).some((e: { type: string; id: string }) => e.type === type && e.id === id);
+    const job = await createTodo(owner, { title: "Turn the hall light down " + tag, view: "week" });
+    const given = await updateTodo(owner, job.id, { assignee: "@" + s.handle });
+    if (given.assignee !== s.id) throw new Error("a task was not given to the agent named: " + given.assignee);
+    if (!(await forYou(s, "todo.assigned", job.id))) throw new Error("the agent a task was given to was not told");
+    if (!(await call(s, "briefing")).your_tasks?.some((t: { id: string }) => t.id === job.id)) throw new Error("a task given to an agent is not in its briefing");
+    await sayOnTodo(owner, job.id, "Down to a third after ten, please.");
+    if (!(await forYou(s, "todo.said", job.id))) throw new Error("what the owner said on a task did not reach the agent it is given to");
+    const answer = await call(s, "reply", { post_id: job.id, body: "Done: a third after ten." });
+    if (answer.ERROR || answer.todo !== job.id) throw new Error("an agent could not answer in a task's conversation: " + JSON.stringify(answer));
+    const seen = (await call(s, "read", { ids: [job.id] }))[0];
+    if (seen?.assignee !== "@" + s.handle || seen?.conversation?.length !== 2 || seen.conversation[1].by !== "@" + s.handle) throw new Error("reading a task does not show who it is given to and what was said: " + JSON.stringify(seen).slice(0, 400));
+    if (!(await getTodo(job.id)).ai_unseen) throw new Error("an agent's answer on a task did not mark the task for the owner");
+    if ((await call(s, "todo_list", { view: "week" })).todos.find((t: { id: string }) => t.id === job.id)?.assignee !== "@" + s.handle) throw new Error("todo_list does not say who a task is given to");
+    // answering one of the messages is saying something on the task, not a thread of its own
+    const again = await call(s, "reply", { post_id: answer.id, body: "And back up at six." });
+    if (again.todo !== job.id || (await todoThread(job.id)).length !== 3) throw new Error("a reply to a message on a task did not join the task's conversation");
+    // none of it shows in the feed or in chat
+    if ((await listFeed({ limit: 100 })).some((x) => x.todo_id) || (await listChat()).messages.some((x) => x.todo_id)) throw new Error("a task's conversation leaked into the feed or chat");
+    // the owner speaking to nobody in particular, on a task given to nobody, is heard by the default agent
+    const loose = await createTodo(owner, { title: "Loose end " + tag, view: "backlog" });
+    await sayOnTodo(owner, loose.id, "Any thoughts on this one?");
+    const usual = await defaultAgent();
+    if (usual?.id === claude.id && !(await forYou(claude, "todo.said", loose.id))) throw new Error("the default agent did not hear the owner on a task given to nobody");
+    // taken back, and an agent that does not exist is refused
+    if ((await updateTodo(owner, job.id, { assignee: null })).assignee) throw new Error("a task could not be taken back");
+    if (!(await updateTodo(owner, job.id, { assignee: "@nobody" + tag }).then(() => false, () => true))) throw new Error("a task was given to an agent that does not exist");
+    // a person the task is shared with reads the whole conversation
+    const guest = await createGuest(owner, { name: "Pat " + tag });
+    const asked = await guestAdd(guest, { title: "Quieter doorbell " + tag });
+    await updateTodo(owner, asked.id, { assignee: s.id });
+    await call(s, "reply", { post_id: asked.id, body: "Turned down to two of five." });
+    const theirs = await guestTask(guest, asked.id);
+    if (theirs.conversation?.length !== 1 || !theirs.conversation[0].text.includes("two of five")) throw new Error("a person does not see the conversation on a task shared with them: " + JSON.stringify(theirs).slice(0, 300));
+    if (!(await guestTasks(guest, {})).tasks.some((x: { id: string; messages?: number }) => x.id === asked.id && x.messages === 1)) throw new Error("a person's list does not say a task has been answered");
+    if (!(await call(s, "reply", { post_id: asked.id, body: "One more word." })).privacy) throw new Error("an agent answering on a shared task was not reminded who reads it");
+    await removeGuest(owner, guest.id);
+    // removed for good, a task takes its conversation with it
+    for (const id of [job.id, loose.id, asked.id]) {
+      await deleteTodo(owner, id);
+      await deleteTodo(owner, id, true);
+    }
+    if ((await q<{ n: number }>("SELECT count(*)::int AS n FROM posts WHERE todo_id = ANY($1)", [[job.id, loose.id]]))[0].n) throw new Error("a task removed for good left its conversation behind");
+  }
+
+  // What the owner opens is kept as counts (never what they type), and each topic knows when they last looked.
+  {
+    const kept = await recordSeen(owner, {
+      events: [
+        { screen: "following", seconds: 40 },
+        { screen: "todos", type: "todo", id: followUp.id, title: "Decide on the smoke test", seconds: 12 },
+        { screen: "todos", seconds: 1 }, // passed through: too short to count
+        { screen: "nowhere", seconds: 30 }, // not a screen
+        { screen: "feed", search: "Robot " + tag, results: 4, opened: null },
+      ],
+      device: "web",
+    });
+    if (kept.kept !== 3) throw new Error("what the owner opened was not kept as expected: " + JSON.stringify(kept));
+    if (!(await recordSeen(s as never, { events: [{ screen: "feed", seconds: 30 }] }).then(() => false, () => true))) throw new Error("an agent could report what the owner opens");
+    const o = (await call(claude, "usage", { days: 7 })).owner;
+    if (!o?.recorded || !o.screens?.some((x: any) => x.screen === "following" && x.opens >= 1) || !o.most_opened?.some((x: any) => x.id === followUp.id) || !o.searches?.some((x: any) => x.query === "robot " + tag && x.opened_a_result === 0) || !o.screens_not_opened?.includes("journal"))
+      throw new Error("usage() does not say what the owner opened: " + JSON.stringify(o).slice(0, 500));
+    const topic = await createTracker(owner, { title: "Seen topic " + tag, description: "For the smoke test.", agents: [s.id] });
+    await call(s, "post", { body: "Something happened on the seen topic " + tag + ".", tracker: topic.slug, media: { type: "image", url: `https://example.com/${tag}/seen.png` } });
+    const before = (await listTrackers()).find((x) => x.id === topic.id)!;
+    if (before.new_count !== 1 || before.seen_at) throw new Error("a topic the owner has not opened does not count its update as new: " + JSON.stringify(before));
+    if ((await call(s, "briefing")).your_trackers?.find((x: any) => x.path === `/following/${topic.slug}`)?.owner_opened !== "never") throw new Error("the briefing does not say the owner has never opened a topic");
+    await seenTracker(topic.id);
+    const after = (await listTrackers()).find((x) => x.id === topic.id)!;
+    if (after.new_count !== 0 || !after.seen_at) throw new Error("opening a topic did not read it: " + JSON.stringify(after));
+    await archiveTracker(owner, topic.id);
+    await clearSeen(owner);
+    if ((await seenKept()).count) throw new Error("the record of what the owner opened could not be cleared");
+  }
+
+  // What the owner wants of an agent reaches it at the start of every session, and what each agent did is counted.
+  {
+    const wanted = "Follow robotics funding. Keep the work notes current each week.";
+    await updateAgent(owner, s.id, { brief: wanted });
+    // an agent is read afresh for every request it makes; here it is read again by hand
+    if ((await call((await agentByToken(scoutTok))!, "briefing")).standing_brief !== wanted) throw new Error("an agent's standing brief is not in its briefing");
+    if (!((await call(s, "changes", { peek: true, limit: 100 })).for_you ?? []).some((e: { type: string }) => e.type === "agent.brief")) throw new Error("an agent was not told its standing brief changed");
+    await updateAgent(owner, s.id, { brief: "" });
+    if ((await call((await agentByToken(scoutTok))!, "briefing")).standing_brief) throw new Error("a cleared standing brief is still given");
+    const did = (await agentActivity(7)).agents[s.id];
+    if (!did || did.posts < 1 || did.todos < 1 || did.calls < 10 || did.writes < 1) throw new Error("what an agent did this week is not counted: " + JSON.stringify(did));
+    // an agent that has written nothing into shared context is told so, plainly, when it starts
+    const quiet = await createAgent(owner, { name: "Quiet " + tag, handle: "quiet" + tag });
+    const told = await call((await agentByToken(await issueToken(quiet.id)))!, "briefing");
+    if (told.context_last_written_by_you?.when !== "never") throw new Error("an agent that never wrote context is not told so: " + JSON.stringify(told.context_last_written_by_you));
+    await updateAgent(owner, quiet.id, { archived: true });
+    // keeping context current is a routine like the others
+    if (!(await listRoutines()).some((r) => r.key === "context-keeper")) throw new Error("the context keeper is not among the routines");
   }
 
   // What agents did is on record: every call above, with what it asked for and what it was shown.

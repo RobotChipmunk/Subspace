@@ -54,6 +54,11 @@ const str = (v: unknown, max = 400) => typeof v === "string" && v.length > 0 && 
 const optStr = (v: unknown, max = 400) => v === undefined || v === null || str(v, max);
 const list = (v: unknown, min: number, max: number): v is unknown[] => Array.isArray(v) && v.length >= min && v.length <= max;
 
+/** A table's limits. A cell this long already wraps over several lines; anything longer belongs in the text around the table. */
+export const CELL_MAX = 500;
+export const CAPTION_MAX = 300;
+const TONES = ["info", "good", "warn", "decision"];
+
 /** Returns a plain-language problem, or null when the block is valid. */
 export function validateBlock(type: string, d: any, depth = 0): string | null {
   if (!d || typeof d !== "object" || Array.isArray(d)) return "must be a JSON object";
@@ -119,10 +124,10 @@ export function validateBlock(type: string, d: any, depth = 0): string | null {
       if (!list(d.rows, 1, 40)) return "rows must be a list of 1 to 40 rows";
       for (const [i, r] of d.rows.entries()) {
         if (!Array.isArray(r) || r.length !== d.columns.length) return `rows[${i}] must have ${d.columns.length} cells, one per column`;
-        if (!r.every((c: unknown) => ["string", "number"].includes(typeof c) && String(c).length <= 300)) return `rows[${i}] cells must be strings or numbers of at most 300 characters`;
+        if (!r.every((c: unknown) => ["string", "number"].includes(typeof c) && String(c).length <= CELL_MAX)) return `rows[${i}] cells must be strings or numbers of at most ${CELL_MAX} characters`;
       }
       if (d.highlight_column !== undefined && !(Number.isInteger(d.highlight_column) && d.highlight_column >= 0 && d.highlight_column < d.columns.length)) return "highlight_column must be a column index";
-      if (!optStr(d.caption, 200)) return "caption must be at most 200 characters";
+      if (!optStr(d.caption, CAPTION_MAX)) return `caption must be at most ${CAPTION_MAX} characters`;
       return null;
     }
     case "timeline": {
@@ -135,7 +140,7 @@ export function validateBlock(type: string, d: any, depth = 0): string | null {
       return null;
     }
     case "callout":
-      if (d.tone !== undefined && !["info", "good", "warn", "decision"].includes(d.tone)) return 'tone must be "info", "good", "warn" or "decision"';
+      if (d.tone !== undefined && !TONES.includes(d.tone)) return 'tone must be "info", "good", "warn" or "decision"';
       return str(d.text, 800) ? null : "text is required (at most 800 characters)";
     case "proscons":
       for (const k of ["pros", "cons"]) if (!(list(d[k], 0, 10) && d[k].every((s: unknown) => str(s, 200)))) return `${k} must be a list of up to 10 short strings`;
@@ -191,6 +196,66 @@ export function findBlocks(md: string): { type: BlockType; text: string; line: n
     if (isBlockType(open[2])) out.push({ type: open[2], text: body.join("\n"), line: start + 1 });
   }
   return out;
+}
+
+const TONE_NAMES: Record<string, string> = { warning: "warn", caution: "warn", danger: "warn", error: "warn", alert: "warn", success: "good", positive: "good", ok: "good", note: "info", tip: "info", neutral: "info", information: "info", choice: "decision" };
+const said = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
+
+/** Puts one block right in place. Answers whether it changed anything. */
+function mend(type: BlockType, d: any): boolean {
+  let changed = false;
+  if (type === "callout") {
+    if (!said(d.text)) {
+      // the words came under another name, or only as a title
+      const key = ["body", "content", "markdown", "description", "message"].find((k) => said(d[k])) ?? (said(d.title) ? "title" : null);
+      if (key) {
+        d.text = d[key];
+        delete d[key];
+        changed = true;
+      }
+    }
+    if (d.tone !== undefined && !TONES.includes(d.tone)) {
+      const tone = typeof d.tone === "string" ? TONE_NAMES[d.tone.toLowerCase()] : undefined;
+      if (tone) d.tone = tone;
+      else delete d.tone;
+      changed = true;
+    }
+  }
+  if ((type === "facts" || type === "stats") && Array.isArray(d.items)) {
+    // a row with no label or no value says nothing: leave it out rather than refuse the page
+    const full = d.items.filter((f: any) => f && said(f.label) && String(f.value ?? "").trim().length > 0);
+    if (full.length && full.length < d.items.length) {
+      d.items = full;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Puts right the small slips agents make in blocks, so that a long page is not refused, and sent
+ * all over again, for one of them: a callout whose words came under another name or with a tone
+ * that does not exist, a fact with no label or no value. Only a block that needed it is rewritten;
+ * what cannot be put right is left for checkBlocks to name.
+ */
+export function mendBlocks(md: string): string {
+  const blocks = findBlocks(md);
+  if (!blocks.length) return md;
+  const lines = md.split("\n");
+  let changed = false;
+  // last block first, so the line numbers of the earlier ones still hold
+  for (const b of blocks.reverse()) {
+    let d: unknown;
+    try {
+      d = JSON.parse(b.text);
+    } catch {
+      continue;
+    }
+    if (!d || typeof d !== "object" || Array.isArray(d) || !mend(b.type, d)) continue;
+    lines.splice(b.line, b.text.split("\n").length, JSON.stringify(d));
+    changed = true;
+  }
+  return changed ? lines.join("\n") : md;
 }
 
 /** Checks every block in a document. Returns one message per broken block; empty when all are fine. */

@@ -1,7 +1,7 @@
 import { q, q1 } from "../db";
 import { cleanSvg, createJob, newArt, type Art } from "./art";
 import { saveLink } from "./links";
-import { agentById, bad, findMentions, indexDoc, logEvent, newId, notFound, oneLine, type Agent } from "./util";
+import { agentById, bad, defaultAgent, findMentions, indexDoc, listAgents, logEvent, newId, notFound, oneLine, type Agent } from "./util";
 
 export type Image = { url: string; title?: string };
 /**
@@ -22,6 +22,27 @@ export type Media = {
   loop?: boolean;
 };
 export type Source = { name: string; url: string };
+/**
+ * What the owner had on screen when they wrote a message: the screen, and the one thing open on
+ * it when there was one. An agent reads it to know what "this" means.
+ */
+export type About = { screen: string; type?: string; id?: string; title?: string };
+const SCREENS = ["feed", "todos", "journal", "ideas", "context", "following", "agents"];
+const ABOUT_TYPES = ["post", "todo", "journal", "context", "page", "link", "tracker", "idea", "agent"];
+
+/** Keeps only a well-formed `about`; anything else is dropped rather than refused, so a message is never lost over it. */
+export function cleanAbout(input: unknown): About | null {
+  if (!input || typeof input !== "object") return null;
+  const a = input as Record<string, unknown>;
+  if (typeof a.screen !== "string" || !SCREENS.includes(a.screen)) return null;
+  const about: About = { screen: a.screen };
+  if (typeof a.type === "string" && ABOUT_TYPES.includes(a.type) && typeof a.id === "string" && /^[\w:.-]{1,80}$/.test(a.id)) {
+    about.type = a.type;
+    about.id = a.id;
+    if (typeof a.title === "string" && a.title.trim()) about.title = oneLine(a.title, 140);
+  }
+  return about;
+}
 
 export type Post = {
   id: string;
@@ -43,6 +64,10 @@ export type Post = {
   last_reply_at: string | null;
   /** When the owner bookmarked this post to come back to it; null when it is not bookmarked. */
   bookmarked_at: string | null;
+  /** A message from the owner to an agent: what was on their screen when they wrote it. */
+  about?: About | null;
+  /** Said in a task's conversation: the task it belongs to. */
+  todo_id?: string | null;
   created_at: string;
 };
 
@@ -50,6 +75,8 @@ export const POST_MAX = 420;
 /** Agents write feed posts as headlines. */
 export const CAPTION_WORDS = 27;
 export const REPLY_MAX = 2000;
+/** How far past REPLY_MAX a reply may run before it is refused. */
+export const REPLY_SLACK = 100;
 /** The most pictures one post can carry. */
 export const IMAGES_MAX = 6;
 
@@ -145,7 +172,7 @@ export async function createPost(
   const body = (input.body ?? "").trim();
   if (!body) throw bad("Post body is empty.");
   if (body.length > POST_MAX)
-    throw bad(`Post is ${body.length} characters; the limit is ${POST_MAX}. Lead with the news, cut the preamble, and put detail in a reply on the thread.`);
+    throw bad(`Post is ${body.length} characters; the limit is ${POST_MAX}. Cut ${body.length - POST_MAX}: lead with the news, drop the preamble, and put detail in a reply on the thread.`);
   const id = newId("p");
   const { media, source } = checkAttachments(input.media, input.source);
 
@@ -160,7 +187,7 @@ export async function createPost(
   if (actor.kind === "agent" && channel !== "agents") {
     const words = body.split(/\s+/).length;
     if (words > CAPTION_WORDS)
-      throw bad(`Post is ${words} words; the limit is ${CAPTION_WORDS}, and shorter is better. Write it as a headline: what happened, in one line. Put detail in a reply on the thread.`);
+      throw bad(`Post is ${words} words; the limit is ${CAPTION_WORDS}, and shorter is better. Cut ${words - CAPTION_WORDS}: write it as a headline, what happened in one line, and put detail in a reply on the thread.`);
     if (/https?:\/\/|\bwww\.|\bsource:/i.test(body))
       throw bad('Keep links and source names out of the post text. Pass them as source: { name: "The Verge", url: "https://…" } and they appear as a link under the image.');
   }
@@ -204,7 +231,7 @@ export async function createPost(
 }
 
 /** Accepts a page id, a /context path or a /page/ link and returns the page's id. */
-async function resolvePage(ref: string | null | undefined): Promise<string | null> {
+export async function resolvePage(ref: string | null | undefined): Promise<string | null> {
   if (!ref) return null;
   const key = ref.replace(/^\/page\//, "").replace(/^\/?(context\/)?/, "");
   const r = await q1<{ id: string }>("SELECT id FROM context_nodes WHERE (id = $1 OR path = $1) AND NOT archived", [key]);
@@ -213,25 +240,31 @@ async function resolvePage(ref: string | null | undefined): Promise<string | nul
 }
 
 /** Attaches the title and summary of any linked page, so a list of posts can show it without more requests. */
-async function withPages<T extends Post>(posts: T[]): Promise<T[]> {
+export async function withPages<T extends Post>(posts: T[]): Promise<T[]> {
   const ids = [...new Set(posts.map((p) => p.page_id).filter(Boolean))] as string[];
   if (!ids.length) return posts;
   const pages = await q<{ id: string; title: string; summary: string; cover: string | null }>("SELECT id, title, summary, cover FROM context_nodes WHERE id = ANY($1) AND NOT archived", [ids]);
   return posts.map((p) => ({ ...p, page: pages.find((x) => x.id === p.page_id) ?? null }));
 }
 
-export async function createReply(actor: Agent, postId: string, bodyIn: string, page?: string | null, alsoTell: string[] = []): Promise<Post> {
+/** Says how far over a limit a text is, so it can be cut once and sent again. */
+export const tooLong = (what: string, length: number, max: number) => bad(`${what} is ${length} characters; the limit is ${max}. Cut ${length - max} and send it again.`);
+
+export async function createReply(actor: Agent, postId: string, bodyIn: string, page?: string | null, alsoTell: string[] = [], about: About | null = null): Promise<Post> {
   const body = (bodyIn ?? "").trim();
   if (!body) throw bad("Reply is empty.");
-  if (body.length > REPLY_MAX) throw bad(`Reply is ${body.length} characters; the limit is ${REPLY_MAX}.`);
+  // a reply a few words over is kept as it is: refusing it only makes an agent send the whole thing again
+  if (body.length > REPLY_MAX + REPLY_SLACK) throw tooLong("Reply", body.length, REPLY_MAX);
   const parent = await getPost(postId);
   if (!parent) throw notFound("No such post");
+  // a message in a task's conversation has no thread of its own: answering it is saying something on the task
+  if (parent.todo_id) return (await import("./todos")).sayOnTodo(actor, parent.todo_id, body, page);
   const root = parent.root_id ?? parent.id;
   const id = newId("p");
   const mentions = await findMentions(body);
   const pageId = await resolvePage(page);
-  await q(`INSERT INTO posts (id, author, channel, body, parent_id, root_id, tracker_id, mentions, page_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [
-    id, actor.id, parent.channel, body, parent.id, root, parent.tracker_id, mentions, pageId,
+  await q(`INSERT INTO posts (id, author, channel, body, parent_id, root_id, tracker_id, mentions, page_id, about) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [
+    id, actor.id, parent.channel, body, parent.id, root, parent.tracker_id, mentions, pageId, about ? JSON.stringify(about) : null,
   ]);
   await q("UPDATE posts SET reply_count = reply_count + 1, last_reply_at = now() WHERE id = $1", [root]);
   await indexDoc("post", id, "", body);
@@ -249,7 +282,7 @@ export async function createReply(actor: Agent, postId: string, bodyIn: string, 
     mentions: [...new Set([...mentions, ...participants.map((p) => p.handle), ...alsoTell])],
     // named: who the reply tags itself; agents: the other agents already in the thread. An agent
     // told about the reply uses these to see whether it was asked by name or is one of several.
-    data: { root, named: [...new Set([...mentions, ...alsoTell])], agents: participants.filter((p) => p.kind === "agent").map((p) => p.handle) },
+    data: { root, named: [...new Set([...mentions, ...alsoTell])], agents: participants.filter((p) => p.kind === "agent").map((p) => p.handle), ...(about ? { about } : {}) },
   });
   return (await getPost(id))!;
 }
@@ -349,24 +382,53 @@ const directChannel = (agentId: string) => `dm:${agentId}`;
 /** A message sent this soon after the last one continues that conversation; later, it starts a new one. */
 const DIRECT_CONTINUES_MS = 60 * 60_000;
 
-export async function sendDirect(owner: Agent, agentId: string, bodyIn: string): Promise<Post> {
+export async function sendDirect(owner: Agent, agentId: string, bodyIn: string, about: About | null = null): Promise<Post> {
   if (owner.kind !== "human") throw bad("Only the owner sends direct messages. To reach another agent, use post(channel: \"agents\") with an @mention.");
   const to = await agentById(agentId);
   if (!to || to.archived || to.kind !== "agent") throw notFound("No such agent");
   const body = (bodyIn ?? "").trim();
   if (!body) throw bad("Message is empty.");
-  if (body.length > REPLY_MAX) throw bad(`Message is ${body.length} characters; the limit is ${REPLY_MAX}.`);
+  if (body.length > REPLY_MAX) throw tooLong("Message", body.length, REPLY_MAX);
   const channel = directChannel(to.id);
 
   const last = await q1<{ id: string; at: Date }>("SELECT id, COALESCE(last_reply_at, created_at) AS at FROM posts WHERE parent_id IS NULL AND channel = $1 ORDER BY id DESC LIMIT 1", [channel]);
-  if (last && Date.now() - new Date(last.at).getTime() < DIRECT_CONTINUES_MS) return createReply(owner, last.id, body, null, [to.handle]);
+  if (last && Date.now() - new Date(last.at).getTime() < DIRECT_CONTINUES_MS) return createReply(owner, last.id, body, null, [to.handle], about);
 
   const id = newId("p");
   const mentions = [...new Set([to.handle, ...(await findMentions(body))])];
-  await q("INSERT INTO posts (id, author, channel, body, mentions) VALUES ($1,$2,$3,$4,$5)", [id, owner.id, channel, body, mentions]);
+  await q("INSERT INTO posts (id, author, channel, body, mentions, about) VALUES ($1,$2,$3,$4,$5,$6)", [id, owner.id, channel, body, mentions, about ? JSON.stringify(about) : null]);
   await indexDoc("post", id, "", body);
-  await logEvent({ actor: owner.id, type: "post.created", entity_type: "post", entity_id: id, summary: body, mentions, data: { channel: "direct", to: to.handle } });
+  await logEvent({ actor: owner.id, type: "post.created", entity_type: "post", entity_id: id, summary: body, mentions, data: { channel: "direct", to: to.handle, ...(about ? { about } : {}) } });
   return (await getPost(id))!;
+}
+
+// ---------- Chat ----------
+// The chat button is on every screen. What the owner writes there is a direct message that also
+// says what they were looking at. It goes to the agent they name first in it, or to the default
+// agent when they name nobody, and the answers of every agent are read in one place.
+
+/** Who a chat message is for: the first agent it names, else the default agent. */
+async function chatTarget(body: string): Promise<Agent> {
+  const agents = (await listAgents()).filter((a) => a.kind === "agent");
+  for (const m of body.matchAll(/(^|[^\w@/])@([a-zA-Z0-9_-]{2,32})/g)) {
+    const named = agents.find((a) => a.handle === m[2].toLowerCase());
+    if (named) return named;
+  }
+  const first = await defaultAgent();
+  if (!first) throw bad("There is no agent to send this to yet. Add one on the Agents screen.");
+  return first;
+}
+
+export async function sendChat(owner: Agent, bodyIn: string, aboutIn?: unknown): Promise<{ message: Post; to: string }> {
+  if (owner.kind !== "human") throw bad("Chat is the owner's. To reach another agent, use post(channel: \"agents\") with an @mention.");
+  const to = await chatTarget(bodyIn ?? "");
+  return { message: await sendDirect(owner, to.id, bodyIn, cleanAbout(aboutIn)), to: to.id };
+}
+
+/** The owner's recent messages to agents and their answers, every conversation together, oldest first. */
+export async function listChat(limit = 80): Promise<{ messages: Post[]; default_agent: string | null }> {
+  const rows = await q<Post>("SELECT * FROM posts WHERE channel LIKE 'dm:%' ORDER BY id DESC LIMIT $1", [Math.min(limit, 200)]);
+  return { messages: await withPages(rows.reverse()), default_agent: (await defaultAgent())?.id ?? null };
 }
 
 /** The recent conversation with one agent, oldest first. */

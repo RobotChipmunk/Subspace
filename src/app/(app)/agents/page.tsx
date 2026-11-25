@@ -8,6 +8,7 @@ import { Avatar, PageCard, PageHeader, Rich, SendButton } from "@/components/bit
 import { MentionInput } from "@/components/MentionInput";
 import { ago, api, fetcher, soft, spring, useDirectUnread, useMe } from "@/lib/client";
 import type { AccessRules, Section } from "@/lib/core/access";
+import type { Activity } from "@/lib/core/agents";
 import type { Grant } from "@/lib/core/oauth";
 import type { Post } from "@/lib/core/posts";
 import type { SentAnswer } from "@/lib/core/rail";
@@ -50,6 +51,88 @@ export default function AgentsPage() {
         ))}
         <AddRow label="Add a person" placeholder="Their name, e.g. Meredith" hint={'Their tasks appear in your todos under "From" and their name.'} preview={(n) => `From ${n.trim()}`} onAdd={async (name) => (setOpenId((await api<Agent>("guests", { body: { name } })).id), void refresh())} />
       </div>
+      <Kept />
+    </div>
+  );
+}
+
+const count = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
+const listed = (parts: string[]) => (parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`);
+/** What an agent did this week, as one plain sentence or two. */
+function didLine(x: Activity, readOnly: boolean): string {
+  const parts = [
+    x.posts ? count(x.posts, "post") : "",
+    x.replies ? count(x.replies, "reply", "replies") : "",
+    x.context ? `${count(x.context, "note")} in context` : "",
+    x.todos ? `${count(x.todos, "task")} added` : "",
+    x.routines_done ? `${count(x.routines_done, "routine round")} done` : "",
+  ].filter(Boolean);
+  let line = parts.length ? `This week: ${listed(parts)}.` : x.calls ? `This week: looked in ${count(x.calls, "time")}${readOnly ? "" : " and wrote nothing"}.` : "Nothing this week.";
+  if (x.routines_waiting) line += ` ${count(x.routines_waiting, "routine round")} waiting.`;
+  // an agent that may only read is not expected to keep context
+  if (!readOnly) line += x.last_context_at ? ` Last wrote in context ${/^\d+[mhd]$/.test(ago(x.last_context_at)) ? ago(x.last_context_at) + " ago" : ago(x.last_context_at) === "now" ? "just now" : "on " + ago(x.last_context_at)}.` : " Has not written in context yet.";
+  return line;
+}
+
+/** What this agent has contributed lately, so the owner can see who is doing what. */
+function Did({ agent: a }: { agent: Agent }) {
+  const { data } = useSWR<{ agents: Record<string, Activity> }>("agents/activity", fetcher, { refreshInterval: 60_000 });
+  const mine = data?.agents[a.id];
+  if (!mine) return null;
+  return (
+    <p data-did className="text-[13.5px] leading-relaxed text-ink2">
+      {didLine(mine, !!a.access?.read_only)}
+    </p>
+  );
+}
+
+/**
+ * The owner's standing brief for an agent: what it is for, what it keeps current, how often it
+ * should look. The agent is given it at the start of every session.
+ */
+function Brief({ agent: a, onChanged }: { agent: Agent; onChanged: () => void }) {
+  const [text, setText] = useState(a.brief ?? "");
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(a.brief ?? "");
+  }, [a.brief]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    setFocused(false);
+    if (text.trim() !== (a.brief ?? "")) (await api(`agents/${a.id}`, { method: "PATCH", body: { brief: text } }), onChanged());
+  };
+  return (
+    <textarea
+      value={text}
+      rows={2}
+      maxLength={1500}
+      aria-label={`Standing brief for ${a.name}`}
+      placeholder={`What ${a.name} is for, what it should keep current, and how often it should look. ${a.name} reads this at the start of every session.`}
+      onChange={(e) => setText(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={save}
+      ref={(el) => {
+        if (el) (el.style.height = "0px"), (el.style.height = Math.max(el.scrollHeight, 56) + "px");
+      }}
+      className="w-full resize-none overflow-hidden rounded-[16px] bg-fill px-3.5 py-2.5 text-[14px] leading-relaxed placeholder:text-ink3"
+    />
+  );
+}
+
+/**
+ * What the app keeps about how the owner uses it (which screens and things they open, what they
+ * search for), said plainly at the foot of the page, with the way to clear it.
+ */
+function Kept() {
+  const { data, mutate } = useSWR<{ count: number; since: string | null }>("seen", fetcher);
+  if (!data) return null;
+  const since = data.since ? new Date(data.since).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  return (
+    <div data-kept className="mx-auto mt-14 flex max-w-[520px] flex-col items-center gap-2 text-center text-[13px] leading-relaxed text-ink3">
+      <p>
+        Subspace keeps which screens and things you open and what you search for, so your agents can tell what is useful and suggest changes. Nothing you type is kept.
+        {data.count > 0 && ` ${data.count.toLocaleString()} ${data.count === 1 ? "look" : "looks"} since ${since}.`}
+      </p>
+      {data.count > 0 && <ConfirmDelete label="Clear this record" confirm="Clear" size={15} onConfirm={async () => (await api("seen", { method: "DELETE" }), mutate())} />}
     </div>
   );
 }
@@ -171,6 +254,8 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
   const live = !!a.runtime?.enabled;
   const human = a.kind === "human";
   const illustrator = a.roles.includes("illustrator");
+  // the agent a chat message goes to when it names nobody
+  const usual = useMe().defaultAgent?.id === a.id;
   const origin = typeof window !== "undefined" ? location.origin : "";
   const patch = async (body: Record<string, unknown>) => (await api(`agents/${a.id}`, { method: "PATCH", body }), onChanged());
 
@@ -243,6 +328,8 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
         {open && !human && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={soft} className="overflow-hidden">
             <div className="mt-3.5 space-y-3.5 border-t hairline pt-3.5">
+              <Did agent={a} />
+              <Brief agent={a} onChanged={onChanged} />
               <p className="text-[13.5px] leading-relaxed text-ink2">
                 Add this address as a custom connector (MCP server) in {a.name}. The app will open a Subspace page where you approve it. The address is not a secret: nothing works until you approve. In Claude: Settings → Connectors → Add custom connector.
               </p>
@@ -275,13 +362,18 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
               </details>
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 [&_button]:whitespace-nowrap">
-                {!illustrator ? (
-                  <button onClick={() => patch({ illustrator: true })} className="text-[13px] text-ink2 hover:text-accent">
-                    Make {a.name} the illustrator
-                  </button>
-                ) : (
-                  <span />
-                )}
+                <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  {!illustrator && (
+                    <button onClick={() => patch({ illustrator: true })} className="text-[13px] text-ink2 hover:text-accent">
+                      Make {a.name} the illustrator
+                    </button>
+                  )}
+                  {!usual && (
+                    <button onClick={() => patch({ default: true })} className="text-[13px] text-ink2 hover:text-accent">
+                      Send chat to {a.name} by default
+                    </button>
+                  )}
+                </span>
                 {a.id !== "a_claude" && <ConfirmDelete label="Remove agent" confirm="Remove and disconnect" size={15} onConfirm={() => patch({ archived: true })} />}
               </div>
             </div>

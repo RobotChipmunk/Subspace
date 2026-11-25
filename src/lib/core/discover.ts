@@ -23,7 +23,7 @@ import { allModules, getModule, railGone } from "./rail";
 import { doersOf, listRoutines, ROUTINES } from "./routines";
 import { ensureSystem, houseRules, SYSTEM } from "./rules";
 import { listPlan, type PlanItem } from "./plan";
-import { calendar, folders, getTodo, listTodos } from "./todos";
+import { calendar, folders, getTodo, listTodos, todoThread } from "./todos";
 import { sharingFor } from "./guests";
 import { getTracker, listTrackers } from "./trackers";
 import { addDays, bad, listAgents, listGuests, notFound, oneLine, ownerAgent, timezone, type Agent } from "./util";
@@ -281,11 +281,12 @@ export async function explore(actor: Agent, rawPath = "/", cursor?: string): Pro
     }
     const l = await listTodos(a);
     const share = await sharingFor(l.todos.map((t) => t.guest_id));
+    const givenTo = new Map((await listAgents(true)).map((x) => [x.id, x.handle]));
     return {
       path: `/todos/${a}`,
       title: `Todos · ${a}`,
       count: l.todos.length,
-      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope, ...(a === "all" && t.date ? { date: t.date } : {}) }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan ? { part_of: t.plan } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...share.tag(t.guest_id) })),
+      items: l.todos.map((t) => ({ id: t.id, line: t.title, done: t.done, ...(t.scope === "day" ? { date: t.date } : { scope: t.scope, ...(a === "all" && t.date ? { date: t.date } : {}) }), ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan ? { part_of: t.plan } : {}), ...(t.has_notes ? { has_notes: true } : {}), ...(t.assignee ? { assignee: "@" + (givenTo.get(t.assignee) ?? t.assignee) } : {}), ...(t.said ? { said: t.said } : {}), ...share.tag(t.guest_id) })),
       hint: "read([id]) returns a todo's notes. A task marked shared_with is seen by that person: write nothing into it that is not meant for them.",
     };
   }
@@ -587,6 +588,8 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
   for (const e of shown) {
     const item: Item = { seq: e.seq, at: e.ts, by: "@" + e.handle, type: e.type, id: e.entity_id, line: e.summary };
     if (e.data?.root) item.thread = e.data.root;
+    // a direct message says what the owner was looking at when they wrote it
+    if (e.data?.about && e.mentions.includes(agent.handle)) item.about = e.data.about;
     if (e.type === "post.replied" && e.mentions.includes(agent.handle)) {
       // Say why it is here and who else heard it, so several agents in one thread can settle who acts.
       const named = Array.isArray(e.data?.named) ? (e.data.named as string[]) : [];
@@ -704,7 +707,7 @@ export async function search(opts: { query: string; types?: string[]; since?: st
 
   if (exact) rows = rows.filter((r) => r.entity_id !== exact.id);
   const ctxIds = rows.filter((r) => r.entity_type === "context" || r.entity_type === "link").map((r) => r.entity_id);
-  const nodes = ctxIds.length ? await q<{ id: string; path: string; url: string | null; site: string | null; summary: string }>("SELECT id, path, url, site, summary FROM context_nodes WHERE id = ANY($1)", [ctxIds]) : [];
+  const nodes = ctxIds.length ? await q<{ id: string; path: string; kind: string; url: string | null; site: string | null; summary: string }>("SELECT id, path, kind, url, site, summary FROM context_nodes WHERE id = ANY($1)", [ctxIds]) : [];
   const node = (id: string) => nodes.find((p) => p.id === id);
   const todoIds = rows.filter((r) => r.entity_type === "todo").map((r) => r.entity_id);
   const guestOf = new Map((todoIds.length ? await q<{ id: string; guest_id: string | null }>("SELECT id, guest_id FROM todos WHERE id = ANY($1) AND guest_id IS NOT NULL", [todoIds]) : []).map((t) => [t.id, t.guest_id]));
@@ -721,6 +724,8 @@ export async function search(opts: { query: string; types?: string[]; since?: st
         type: r.entity_type,
         ...(r.title ? { title: r.title } : {}),
         ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
+        // a context result is a note, a page or a journal entry: each opens in its own place
+        ...(r.entity_type === "context" && node(r.entity_id)?.kind && node(r.entity_id)?.kind !== "note" ? { kind: node(r.entity_id)?.kind } : {}),
         ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
         ...(r.entity_type === "todo" ? share.tag(guestOf.get(r.entity_id)) : {}),
         ...(r.entity_type === "idea" ? { path: "/ideas/" + r.entity_id } : {}),
@@ -822,6 +827,10 @@ const slimPost = (p: Post, handles: Map<string, string>) => ({
   ...(p.source ? { source: p.source } : {}),
   ...(p.page_id ? { page: p.page_id } : {}),
   ...(p.art?.status === "pending" ? { illustration: "pending" } : {}),
+  // a message from the owner: what they had on screen when they wrote it
+  ...(p.about ? { about: p.about } : {}),
+  // said in a task's conversation: read([that task]) shows all of it; answer with reply(post_id: the task's id)
+  ...(p.todo_id ? { todo: p.todo_id } : {}),
 });
 
 export async function read(ids: string[], opts: { after?: string; /** the agent reading; what it may not see reads as not there */ actor?: Agent } = {}) {
@@ -856,7 +865,19 @@ export async function read(ids: string[], opts: { after?: string; /** the agent 
       } else if (id.startsWith("t_")) {
         if (!sight.section("todos")) throw gone();
         const t = await getTodo(id);
-        out.push({ type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date, ...(t.tags?.length ? { tags: t.tags } : {}), ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}), ...(await sharingFor([t.guest_id])).warning(t.guest_id), notes: t.notes, updated_at: t.updated_at });
+        const said = await todoThread(id);
+        out.push({
+          type: "todo", id: t.id, title: t.title, done: t.done, scope: t.scope, date: t.date,
+          ...(t.tags?.length ? { tags: t.tags } : {}),
+          ...(t.plan_id ? { plan: t.plan_id, part_of: t.plan } : {}),
+          // who the task has been given to; when that is you, the work is yours
+          ...(t.assignee ? { assignee: "@" + (handles.get(t.assignee) ?? t.assignee) } : {}),
+          ...(await sharingFor([t.guest_id])).warning(t.guest_id),
+          notes: t.notes,
+          // what has been asked and answered about it, oldest first; add to it with reply(post_id: this task's id)
+          ...(said.length ? { conversation: said.map((p) => ({ id: p.id, by: "@" + (handles.get(p.author) ?? p.author), at: p.created_at, body: p.body, ...(p.page_id ? { page: p.page_id } : {}) })) } : {}),
+          updated_at: t.updated_at,
+        });
       } else if (id.startsWith("f_") || (!id.startsWith("c_") && !id.includes("/") && (await q1("SELECT 1 FROM trackers WHERE slug = $1", [id])))) {
         if (!sight.section("following")) throw gone();
         const t = await getTracker(id);
@@ -918,7 +939,7 @@ async function sharedListsNote() {
     shared_task_lists: guests.map((g) => ({
       person: g.name,
       list: `/todos/guest:${g.id}`,
-      rule: `${g.name} sees every task marked shared_with "${g.name}": title, notes, day and status. Write nothing into those tasks that is not meant for ${g.name}.`,
+      rule: `${g.name} sees every task marked shared_with "${g.name}": title, notes, day, status and its conversation. Write nothing into those tasks that is not meant for ${g.name}.`,
     })),
   };
 }
@@ -936,8 +957,8 @@ export async function briefing(agent: Agent) {
   const cal = await calendar();
   const tz = await timezone();
   const peek = await changes(agent, { peek: true, limit: 60 });
-  const trackers = await q<{ slug: string; title: string; label: string; latest_at: string | null }>(
-    "SELECT slug, title, label, latest_at FROM trackers WHERE $1 = ANY(agents) AND NOT archived ORDER BY title",
+  const trackers = await q<{ slug: string; title: string; label: string; latest_at: string | null; seen_at: string | null }>(
+    "SELECT slug, title, label, latest_at, seen_at FROM trackers WHERE $1 = ANY(agents) AND NOT archived ORDER BY title",
     [agent.id],
   );
   const agents = await listAgents();
@@ -949,6 +970,20 @@ export async function briefing(agent: Agent) {
   await ensureCurrent().catch((e) => console.error("briefing: Current section", (e as Error).message));
   const access = sight.full ? null : describeAccess(agent, await contextChildren(null));
   const mine = (await listRoutines()).filter((r) => doersOf(r).includes(agent.id));
+  // when this agent last wrote anything into shared context: said when it has been a while, so that keeping it current is not left to chance
+  const lastWrote = sight.full ? await q1<{ at: Date | null }>("SELECT max(ts) AS at FROM events WHERE actor = $1 AND entity_type = 'context' AND type NOT IN ('context.lapsed', 'context.archived')", [agent.id]) : null;
+  const quietDays = lastWrote?.at ? Math.floor((Date.now() - new Date(lastWrote.at).getTime()) / 86_400_000) : null;
+  const wrote =
+    !sight.full || agent.kind !== "agent" || (quietDays !== null && quietDays < 7)
+      ? null
+      : {
+          when: lastWrote?.at ? new Date(lastWrote.at).toISOString() : "never",
+          note: `${quietDays === null ? "You have not written anything into shared context yet" : `You last wrote into shared context ${quietDays} days ago`}. Context is the memory every agent shares, and it is only useful while it is current. If you have learned anything since that lasts (a decision, a preference, what the owner is in the middle of, something another agent will need), write it now: context_write, or a note under /context/current with until for what is only true for a while. Nothing to add is a fine answer; do not write for the sake of it.`,
+        };
+  // the tasks given to this agent that are still open, soonest first
+  const given = sight.section("todos")
+    ? (await q<{ id: string; title: string; scope: string; date: string | null }>("SELECT id, title, scope, date FROM todos WHERE assignee = $1 AND NOT done AND deleted_at IS NULL ORDER BY date NULLS LAST, position, id LIMIT 20", [agent.id])).map((t) => ({ id: t.id, title: t.title, ...(t.scope === "day" && t.date ? { date: t.date } : { scope: t.scope }) }))
+    : [];
   // said here as well as on connecting: an app may hold instructions from the day it connected, but it reads this every session
   const rules = sight.node({ path: SYSTEM, kind: "note" }) ? await houseRules().catch(() => "") : "";
   // what is true for now, so every session starts knowing it; a note past its day is left out, and its writer is reminded of it
@@ -958,6 +993,9 @@ export async function briefing(agent: Agent) {
   const mineLapsed = now.filter((c) => c.lapsed && c.updated_by === agent.id);
   return {
     you: { handle: "@" + agent.handle, name: agent.name, roles: agent.roles, bio: agent.bio },
+    // what the owner wants of this agent, in their own words: it holds for every session, and wins over habit
+    ...(agent.brief ? { standing_brief: agent.brief } : {}),
+    ...(wrote ? { context_last_written_by_you: wrote } : {}),
     ...(access ? { your_access: access } : {}),
     ...(now.some((c) => !c.lapsed)
       ? { current: now.filter((c) => !c.lapsed).slice(0, 12).map((c) => ({ path: "/context/" + c.path, title: c.title, about: c.summary || undefined, ...(c.until ? { until: c.until } : {}), set_by: handleOf(c.updated_by) })) }
@@ -989,8 +1027,10 @@ export async function briefing(agent: Agent) {
     ...(sight.section("pages")
       ? { recent_pages: (await recentPages(sight.full ? 5 : 30)).filter(sight.node).slice(0, 5).map((p) => ({ id: p.id, title: p.title, about: p.summary || undefined, created: p.created_at })) }
       : {}),
-    ...(sight.section("following") ? { your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at })) } : {}),
+    ...(sight.section("following") ? { your_trackers: trackers.map((t) => ({ path: `/following/${t.slug}`, title: t.title, label: t.label, last_update: t.latest_at, owner_opened: t.seen_at ?? "never" })) } : {}),
     agents: agents.map((a) => `@${a.handle}${a.kind === "human" ? " (owner)" : ""}${a.roles.includes("illustrator") ? " (illustrator)" : ""}`),
+    // tasks the owner (or another agent) has given to this agent and that are still open
+    ...(given.length ? { your_tasks: given, your_tasks_hint: "These tasks are yours to do. read([id]) for the notes and the conversation; do the work, put the lasting result in the notes (todo_update notes_append), and say what you did or ask what you need in the task's conversation: reply(post_id: the task's id)." } : {}),
     ...(mine.length ? { your_routines: mine.map((r) => ({ path: `/routines/${r.key}`, title: r.title, every: r.every, next_due: r.next_at })) } : {}),
     ...(sight.section("todos") && !sight.readOnly ? await sharedListsNote() : {}),
     map: (await explore(agent, "/")).children,

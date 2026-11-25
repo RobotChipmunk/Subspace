@@ -2,27 +2,63 @@
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Avatar, PageHeader, Rich, TrackerTile } from "@/components/bits";
 import { Floating } from "@/components/Floating";
-import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
+import { ago, api, fetcher, soft, spring, useMe, useShowing } from "@/lib/client";
 import type { Post } from "@/lib/core/posts";
 import type { Tracker } from "@/lib/core/trackers";
 
+const DAY = 86_400_000;
+/** A topic that has had nothing for this many days has gone quiet. */
+const QUIET_DAYS = 7;
+/** How many whole days since a topic last had an update; null when it never has. */
+const quietDays = (t: Tracker) => (t.latest_at ? Math.floor((Date.now() - new Date(t.latest_at).getTime()) / DAY) : null);
+/** Where a topic stands: something new since the owner last looked, going along, gone quiet, or never updated. */
+const standing = (t: Tracker): 0 | 1 | 2 | 3 => {
+  const d = quietDays(t);
+  if (d === null) return 3;
+  if ((t.new_count ?? 0) > 0) return 0;
+  return d >= QUIET_DAYS ? 2 : 1;
+};
+
 export default function FollowingPage() {
+  return (
+    <Suspense>
+      <Following />
+    </Suspense>
+  );
+}
+
+function Following() {
   const { data, mutate } = useSWR<{ trackers: Tracker[] }>("trackers", fetcher, { refreshInterval: 15_000 });
   const { refresh } = useMe();
   const [openId, setOpenId] = useState<string | null>(null);
+  // a topic named in the address (a search result) opens as the page arrives
+  const wanted = useSearchParams().get("topic");
+  useEffect(() => {
+    if (wanted) setOpenId(wanted);
+  }, [wanted]);
   const [adding, setAdding] = useState(false);
   const changed = () => (mutate(), refresh());
+  // By standing: what has something new first, then what is going along, then what has gone quiet,
+  // then what never started. A topic keeps the place it had when the screen opened, so reading
+  // one does not send it down the list under the owner's finger.
+  const placed = useRef(new Map<string, number>());
+  const trackers = useMemo(() => {
+    const list = data?.trackers ?? [];
+    for (const t of list) if (!placed.current.has(t.id)) placed.current.set(t.id, standing(t));
+    return [...list].sort((a, b) => placed.current.get(a.id)! - placed.current.get(b.id)!);
+  }, [data]);
 
   return (
     <div className="mx-auto max-w-[680px]">
       <PageHeader title="Following" sub="Things your agents keep an eye on for you." />
       <div className="flex flex-col gap-2.5">
         <AnimatePresence initial={false}>
-          {data?.trackers.map((t, i) => (
+          {trackers.map((t, i) => (
             <Row key={t.id} tracker={t} index={i} open={openId === t.id} onToggle={() => setOpenId(openId === t.id ? null : t.id)} onChanged={changed} onRemoved={() => (setOpenId(null), changed())} />
           ))}
         </AnimatePresence>
@@ -73,20 +109,38 @@ function AddForm({ onDone }: { onDone: (t?: Tracker) => void }) {
 function Row({ tracker: t, index, open, onToggle, onChanged, onRemoved }: { tracker: Tracker; index: number; open: boolean; onToggle: () => void; onChanged: () => void; onRemoved: () => void }) {
   const { agent } = useMe();
   const ref = useRef<HTMLDivElement>(null);
+  useShowing("tracker", open ? t.id : null, t.title);
   useEffect(() => {
     if (open) setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 350);
   }, [open]);
+  // opening a topic reads it: a moment later the list hears that nothing in it is new any more
+  useEffect(() => {
+    if (!open) return;
+    const told = setTimeout(onChanged, 1500);
+    return () => clearTimeout(told);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fresh = !open && (t.new_count ?? 0) > 0;
+  const quiet = quietDays(t);
+  const gone = quiet !== null && quiet >= QUIET_DAYS;
 
   return (
-    <motion.div ref={ref} layout="position" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ ...soft, delay: open ? 0 : Math.min(index, 8) * 0.035 }} className={`glass scroll-mt-6 rounded-[24px] transition-shadow duration-500 ${open ? "glass-lift" : ""}`}>
-      <button onClick={onToggle} aria-expanded={open} className="group flex w-full items-center gap-3.5 p-3.5 text-left">
+    <motion.div ref={ref} layout="position" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} transition={{ ...soft, delay: open ? 0 : Math.min(index, 8) * 0.035 }} data-standing={["new", "active", "quiet", "never"][standing(t)]} className={`glass scroll-mt-6 rounded-[24px] transition-shadow duration-500 ${open ? "glass-lift" : ""}`}>
+      <button onClick={onToggle} aria-expanded={open} className={`group flex w-full items-center gap-3.5 p-3.5 text-left transition-opacity duration-500 ${(gone || quiet === null) && !open ? "opacity-60" : ""}`}>
         <motion.div animate={{ scale: open ? 1.08 : 1, rotate: open ? -4 : 0 }} transition={spring}>
           <TrackerTile tracker={t} />
         </motion.div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className="truncate text-[16px] font-semibold">{t.title}</span>
-            <span className="flex-none text-[12.5px] text-ink3">{ago(t.latest_at)}</span>
+            {fresh ? (
+              // something has come in since the owner last opened this topic
+              <span data-new className="flex flex-none items-center gap-1.5 text-[12.5px] font-medium text-accent">
+                <span className="h-2 w-2 rounded-full bg-accent" />
+                {t.new_count} new
+              </span>
+            ) : (
+              <span className="flex-none text-[12.5px] text-ink3">{gone ? `Quiet for ${quiet} days` : ago(t.latest_at)}</span>
+            )}
           </div>
           <p className={`truncate text-[14px] ${t.latest ? "text-ink2" : "text-ink3"}`}>{t.latest || (t.agents.length ? "Waiting for the first update." : "No agent assigned yet.")}</p>
         </div>
@@ -118,6 +172,10 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
   const { data } = useSWR<{ updates: Post[] }>(`trackers/${t.id}`, fetcher, { refreshInterval: 15_000 });
   const [description, setDescription] = useState(t.description);
   const [label, setLabel] = useState(t.label);
+  // what was new when the topic was opened stays marked while it is open (opening it reads it)
+  const since = useRef(t.seen_at ?? t.created_at).current;
+  const isNew = (u: Post) => u.created_at > since;
+  const anyNew = !!data?.updates.some(isNew);
   // The description shows three lines until asked for; an empty one opens straight into the editor.
   const [full, setFull] = useState(!t.description);
   const [over, setOver] = useState(false);
@@ -209,7 +267,7 @@ function Expanded({ tracker: t, onChanged, onRemoved }: { tracker: Tracker; onCh
         {(data?.updates.length ?? 0) > 1 && <span className="absolute bottom-3 left-[5px] top-3 w-px bg-[var(--fill-strong)]" />}
         {data?.updates.map((u, i) => (
           <motion.li key={u.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ ...soft, delay: Math.min(i, 10) * 0.045 }} className="relative flex gap-4 pb-5 last:pb-0">
-            <span className={`relative mt-[7px] h-[11px] w-[11px] flex-none rounded-full border-2 border-[var(--surface-solid)] ${i === 0 ? "bg-accent shadow-[0_0_0_4px_var(--accent-soft)]" : "bg-ink3"}`} />
+            <span className={`relative mt-[7px] h-[11px] w-[11px] flex-none rounded-full border-2 border-[var(--surface-solid)] ${isNew(u) || (i === 0 && !anyNew) ? "bg-accent shadow-[0_0_0_4px_var(--accent-soft)]" : "bg-ink3"}`} />
             <div className="min-w-0 flex-1">
               <div className="text-[12.5px] text-ink3">
                 {new Date(u.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · {agent(u.author)?.name}

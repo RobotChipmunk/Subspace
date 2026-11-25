@@ -11,7 +11,7 @@ import { ArtPanel, Avatar, PageCard, PageHeader, Rich, SendButton } from "@/comp
 import { Clip } from "@/components/Clip";
 import { MentionInput } from "@/components/MentionInput";
 import { useComments } from "@/components/Shell";
-import { ago, api, fetcher, soft, useMe } from "@/lib/client";
+import { ago, api, fetcher, soft, useMe, useShowing } from "@/lib/client";
 import type { Image, Post } from "@/lib/core/posts";
 
 export default function FeedPage() {
@@ -182,6 +182,8 @@ function Feed() {
 
   const activeAt = commentsOpen ? posts.findIndex((p) => p.id === activeId) : -1;
   const active = posts[activeAt];
+  // the post whose comments are open is what chat is about
+  useShowing("post", active?.id, active?.body);
   // Fetch the comments of the posts either side of the one being read, so they are there by the
   // time the feed reaches them. In two columns its neighbours down the column are a post or two away.
   const beside = [-2, -1, 1, 2].map((d) => posts[activeAt + d]?.id).filter(Boolean).join();
