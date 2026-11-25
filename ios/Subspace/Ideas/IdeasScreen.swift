@@ -24,6 +24,7 @@ struct IdeasScreen: View {
             }
         }
         .task { await load() }
+        .showing(.ideas, "idea", id: openID, title: ideas.first { $0.id == openID }?.title)
         // an address that names an idea ("/ideas?idea=<id>", as a task made of one does) opens its canvas
         .onChange(of: app.pendingIdeaID, initial: true) { _, id in
             guard let id else { return }

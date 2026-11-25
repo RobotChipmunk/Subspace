@@ -31,6 +31,19 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// Search and chat: the two things within reach on every screen. Each opens as a sheet.
+enum DockPanel: String, Identifiable {
+    case search, chat
+    var id: String { rawValue }
+}
+
+/// The one thing open on screen (a task, an entry, a topic), so chat can say what a message is about.
+struct Showing: Equatable {
+    var type: String
+    var id: String
+    var title: String
+}
+
 /// A page opened over whatever is on screen.
 struct PageTarget: Identifiable, Hashable {
     let id: String
@@ -52,6 +65,8 @@ final class AppModel {
     var guests: [Agent] = []
     var trackers: [Tracker] = []
     var direct: [String: String] = [:]
+    /// The agent a chat message goes to when it names nobody.
+    var defaultAgentID: String?
     var rail: [RailModule] = []
     /// Modules kept on screen for a moment after an action of theirs was sent.
     @ObservationIgnored private var railHeld: Set<String> = []
@@ -66,7 +81,16 @@ final class AppModel {
     var pendingJournalID: String?
     /// An idea to open on the Ideas screen, set by an address that names one.
     var pendingIdeaID: String?
+    /// A followed topic the Following screen should open as soon as it can; it clears this once it has.
+    var pendingTopicID: String?
+    /// A note or link the Context screen should open as soon as it can; it clears this once it has.
+    var pendingContextID: String?
     var railSheet = false
+    /// Search or chat, while one of them is open.
+    var dock: DockPanel?
+    /// What each screen has open, if anything. Screens are kept once visited, so each has its own;
+    /// they set it with the `showing` modifier.
+    private var shown: [AppTab: Showing] = [:]
     /// True while the feed's comments panel is open beside it; the docked rail steps aside.
     var commentsBeside = false
 
@@ -138,9 +162,12 @@ final class AppModel {
         guests = []
         trackers = []
         direct = [:]
+        defaultAgentID = nil
         rail = []
         Notifier.shared.reset()
         presentedPage = nil
+        dock = nil
+        shown = [:]
         railSheet = false
         tab = .feed
         withAnimation(.ssSoft) { signedIn = false }
@@ -172,6 +199,7 @@ final class AppModel {
         guests = r.guests ?? []
         trackers = r.trackers ?? []
         direct = r.direct ?? [:]
+        defaultAgentID = r.default_agent
         // Todos follow the owner's local calendar, so keep the server in step with this device.
         let tz = TimeZone.current.identifier
         if sentTimezone != tz {
@@ -273,10 +301,35 @@ final class AppModel {
         UserDefaults.standard.set(directSeen, forKey: "direct_seen")
     }
 
+    /// Chat shows every conversation together, so opening it reads them all.
+    func markAllDirectRead() {
+        for (id, at) in direct { markDirectRead(id, at: at) }
+    }
+
+    /// The agent a chat message goes to when it names nobody.
+    var defaultAgent: Agent? { agent(defaultAgentID) }
+
+    // What is on screen
+
+    /// What is open on the screen in front right now, if anything.
+    var showing: Showing? { shown[tab] }
+
+    /// A screen has opened one thing (a task, an entry, a topic).
+    func show(_ tab: AppTab, _ type: String, id: String, title: String?) {
+        let next = Showing(type: type, id: id, title: (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+        if shown[tab] != next { shown[tab] = next }
+    }
+
+    /// That thing has closed. Only what is still shown is forgotten: the screen may have opened another since.
+    func unshow(_ tab: AppTab, id: String) {
+        if shown[tab]?.id == id { shown[tab] = nil }
+    }
+
     // Links
 
     /// Opens an address from content: a page ("/page/<id>"), a task ("/todos?open=<id>"), a journal
-    /// entry ("/journal?entry=<id>"), an idea ("/ideas?idea=<id>"),
+    /// entry ("/journal?entry=<id>"), an idea ("/ideas?idea=<id>"), a followed topic
+    /// ("/following?topic=<id>"), a note or link ("/context?node=<id>"),
     /// another screen ("/feed") or the web, which opens in the viewer inside the app.
     func open(_ link: String) {
         if link.hasPrefix("/page/") {
@@ -303,6 +356,20 @@ final class AppModel {
             railSheet = false
             presentedPage = nil
             withAnimation(.ssSpring) { tab = .ideas }
+            return
+        }
+        if link.hasPrefix("/following") {
+            if let id = URLComponents(string: link)?.queryItems?.first(where: { $0.name == "topic" })?.value, !id.isEmpty { pendingTopicID = id }
+            railSheet = false
+            presentedPage = nil
+            withAnimation(.ssSpring) { tab = .following }
+            return
+        }
+        if link.hasPrefix("/context") {
+            if let id = URLComponents(string: link)?.queryItems?.first(where: { $0.name == "node" })?.value, !id.isEmpty { pendingContextID = id }
+            railSheet = false
+            presentedPage = nil
+            withAnimation(.ssSpring) { tab = .context }
             return
         }
         if link.hasPrefix("/"), let t = AppTab(rawValue: String(link.dropFirst()).components(separatedBy: CharacterSet(charactersIn: "?#/")).first ?? "") {

@@ -15,11 +15,11 @@ import { activeModules, buttonSets, moduleActed, moduleLater, removeModule, sent
 import { assignRoutine, listRoutines, tickSoon } from "@/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
-import { createPost, createReply, deletePost, directActivity, getThread, listDirect, listFeed, sendDirect, setBookmark } from "@/lib/core/posts";
+import { createPost, createReply, deletePost, directActivity, getThread, listChat, listDirect, listFeed, sendChat, sendDirect, setBookmark } from "@/lib/core/posts";
 import { createPlanItem, deletePlanItem, listPlan, updatePlanItem } from "@/lib/core/plan";
 import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
 import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
-import { ApiError, listAgents, listGuests, setSetting, timezone, type Agent } from "@/lib/core/util";
+import { ApiError, defaultAgent, listAgents, listGuests, setSetting, timezone, type Agent } from "@/lib/core/util";
 
 /**
  * The REST API used by the web app, and by the iOS app later. Everything goes through the same
@@ -33,7 +33,7 @@ type Ctx = { actor: Agent; url: URL; body: any; req: Request };
 type Handler = (c: Ctx, ...args: string[]) => Promise<unknown>;
 
 const routes: [string, RegExp, Handler][] = [
-  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), guests: await listGuests(), trackers: await listTrackers(), timezone: await timezone(), ...(actor.kind === "human" ? { direct: await directActivity() } : {}) })],
+  ["GET", /^me$/, async ({ actor }) => ({ me: actor, agents: await listAgents(), guests: await listGuests(), trackers: await listTrackers(), timezone: await timezone(), ...(actor.kind === "human" ? { direct: await directActivity(), default_agent: (await defaultAgent())?.id ?? null } : {}) })],
   ["PATCH", /^me$/, async ({ body }) => {
     if (typeof body.timezone === "string") {
       new Intl.DateTimeFormat("en", { timeZone: body.timezone }); // throws on an invalid zone
@@ -130,8 +130,15 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^devices$/, ({ actor, body }) => ownerOnly(actor, () => registerDevice(body?.token, body?.env))],
   ["DELETE", /^devices\/([^/]+)$/, ({ actor }, token) => ownerOnly(actor, () => removeDevice(token))],
 
-  // the apps' own search shows notes, links, tasks, posts and topics; ideas are found there only when asked for (types=idea)
-  ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean) ?? ["post", "todo", "context", "link", "tracker"], limit: 20 })],
+  // the apps' own search covers everything the owner has: notes, pages, journal entries, links, tasks, posts, topics and ideas.
+  // ?types= narrows it (the Context screen's own box asks for context,link).
+  ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean) ?? [], limit: 20 })],
+
+  // Chat: what the owner writes from the chat button on any screen. { body, about } where about says what was on
+  // screen ({ screen, type, id, title }). It goes to the first agent named in it, else the default agent; answers { message, to }.
+  // GET is every direct conversation together, oldest first, with default_agent.
+  ["GET", /^chat$/, ({ actor }) => ownerOnly(actor, () => listChat())],
+  ["POST", /^chat$/, ({ actor, body }) => sendChat(actor, body?.body, body?.about)],
 
   // Routines: duties that come round on a schedule. The owner gives each to one agent ({ agent: id }) or to nobody ({ agent: null }).
   // The switch beside an agent sends { agent: id, on }: on gives it to that agent (joining the others when the routine is shared), off takes it from that agent only.

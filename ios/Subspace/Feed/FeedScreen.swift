@@ -36,6 +36,8 @@ struct FeedScreen: View {
             // While comments are open beside the feed they take the docked rail's place.
             .onChange(of: beside && model.commentsOpen && app.tab == .feed, initial: true) { _, now in app.commentsBeside = now }
             .onChange(of: geo.size.height) { _, now in model.setViewport(now) }
+            // the post whose comments are open is what chat is about
+            .showing(.feed, "post", id: model.commentsOpen ? model.activeID : nil, title: model.posts.first { $0.id == model.activeID }?.body)
             .sheet(isPresented: sheetBinding(beside)) {
                 FeedCommentsPanel(model: model, sheet: true)
                     .environment(app)

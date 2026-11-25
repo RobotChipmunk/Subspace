@@ -27,8 +27,9 @@ struct RootView: View {
     }
 }
 
-/// The frame around every screen: the app bar (left on wide screens, bottom on phones), the
-/// screen itself, and the Now rail (docked from 1100 points wide, a sheet below that).
+/// The frame around every screen: the app bar (left on wide screens, bottom on phones) with search
+/// and chat beside it, the screen itself, and the Now rail (docked from 1100 points wide, a sheet
+/// below that).
 struct ShellView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -40,6 +41,8 @@ struct ShellView: View {
     /// The docked rail grows with the screen, as `--rail-w` does on the web: 308 points where it
     /// first docks, 330 on an 11-inch iPad on its side, 360 from 1286 points wide.
     static func railWidth(in width: CGFloat) -> CGFloat { min(max(300, width * 0.28), 360) }
+    /// The height the side bar needs with search above it and chat below (and the Now button in it).
+    static let dockStackHeight: CGFloat = 600
 
     var body: some View {
         @Bindable var app = app
@@ -67,11 +70,37 @@ struct ShellView: View {
                 // No bar at the top: what scrolls up under the status bar blurs and fades away.
                 .softTopEdge(geo.safeAreaInsets.top)
 
-                if wide {
+                // Search and chat are within reach on every screen: with the app bar on a wide
+                // screen (search above it, chat below), floating just above it on a phone.
+                if wide && geo.size.height < Self.dockStackHeight {
+                    // too short to stack them with the bar (a large phone on its side): they sit together in the corner
                     NavBar(vertical: true, showNow: !docked, indicator: indicator)
                         .padding(.leading, 16)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    HStack(spacing: 10) {
+                        DockButton(panel: .search)
+                        DockButton(panel: .chat)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                } else if wide {
+                    VStack(spacing: 10) {
+                        DockButton(panel: .search)
+                        NavBar(vertical: true, showNow: !docked, indicator: indicator)
+                        DockButton(panel: .chat)
+                    }
+                    .padding(.leading, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 } else if !keyboardUp {
+                    HStack {
+                        DockButton(panel: .search)
+                        Spacer(minLength: 0)
+                        DockButton(panel: .chat)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 74)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .transition(.opacity)
                     NavBar(vertical: false, showNow: true, indicator: indicator)
                         .padding(.bottom, 8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -99,6 +128,16 @@ struct ShellView: View {
             PageView(pageID: target.id)
                 .environment(app)
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $app.dock) { panel in
+            Group {
+                switch panel {
+                case .search: SearchSheet()
+                case .chat: ChatSheet()
+                }
+            }
+            .environment(app)
+            .presentationDragIndicator(.visible)
         }
         .onChange(of: app.tab, initial: true) { _, tab in visited.insert(tab) }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
@@ -150,24 +189,19 @@ struct NavBar: View {
                 Button {
                     withAnimation(.ssSpring) { app.tab = tab }
                 } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 20, weight: on ? .semibold : .regular))
-                            .foregroundStyle(on ? Theme.accent : Theme.ink2)
-                            .frame(width: across, height: side)
-                        if tab == .agents && app.anyDirectUnread {
-                            Circle().fill(Theme.accent).frame(width: 8, height: 8).offset(x: -10, y: 10)
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 20, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? Theme.accent : Theme.ink2)
+                        .frame(width: across, height: side)
+                        .background {
+                            if on {
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .fill(Theme.solid)
+                                    .shadow(color: Theme.shadow, radius: 8, x: 0, y: 4)
+                                    .matchedGeometryEffect(id: "tab", in: indicator)
+                            }
                         }
-                    }
-                    .background {
-                        if on {
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(Theme.solid)
-                                .shadow(color: Theme.shadow, radius: 8, x: 0, y: 4)
-                                .matchedGeometryEffect(id: "tab", in: indicator)
-                        }
-                    }
-                    .contentShape(Rectangle())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle(scale: 0.9))
                 .accessibilityLabel(tab.label)

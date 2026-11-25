@@ -8,7 +8,8 @@ import { embedPending, meaningOn } from "../src/lib/core/meaning";
 import { addItem, createIdea, deleteIdea, getIdea, listIdeas, makeTask, moreOf, notYet, pruneItem, setAsideNear, updateIdea, updateItem } from "../src/lib/core/ideas";
 import { archiveNode, createNode, getNode } from "../src/lib/core/context";
 import { deleteTodo, getTodo } from "../src/lib/core/todos";
-import { agentByToken, ownerAgent } from "../src/lib/core/util";
+import { agentByToken, defaultAgent, ownerAgent } from "../src/lib/core/util";
+import { listChat, sendChat } from "../src/lib/core/posts";
 import { handleMcp } from "../src/lib/mcp/server";
 import { q } from "../src/lib/db";
 
@@ -584,6 +585,40 @@ async function main() {
     // the review's numbers
     const week = await call(s, "usage", { days: 7 });
     if (!week.agents?.some((x: any) => x.agent === "@" + s.handle && x.calls > 10) || !week.tools?.length || !week.rail?.length || week.tasks?.added_by_agents === undefined) throw new Error("usage() is missing its numbers: " + JSON.stringify(week).slice(0, 400));
+  }
+
+  // Forgiving where a small slip would otherwise mean sending the whole thing again.
+  {
+    for (const view of ["next week", "this-week", "Next_Week"]) if ((await call(s, "todo_list", { view })).ERROR) throw new Error(`todo_list refused the view "${view}"`);
+    if ((await call(s, "reply", { post_id: p.id, body: "y".repeat(2050) })).ERROR) throw new Error("a reply a few words over the limit was refused");
+    const wayOver = await call(s, "reply", { post_id: p.id, body: "y".repeat(2200) });
+    if (!/Cut 200 /.test(wayOver.ERROR ?? "")) throw new Error("a reply far over the limit did not say how much to cut: " + JSON.stringify(wayOver));
+    const fence = "```";
+    const slips = `Intro.\n\n${fence}callout\n{"tone":"warning","title":"Only a title"}\n${fence}\n\n${fence}facts\n{"items":[{"label":"Kept","value":"1"},{"label":"No value"}]}\n${fence}\n\nOutro.`;
+    const mended = await call(s, "page_write", { parent: "/context/agents", title: "Mended page " + tag, summary: "A page with small slips in its blocks.", body: slips });
+    if (mended.ERROR) throw new Error("a page with small slips in its blocks was refused: " + mended.ERROR);
+    const kept = (await getNode(mended.id)).body;
+    if (!kept.includes('"tone":"warn"') || !kept.includes('"text":"Only a title"') || kept.includes("No value") || !kept.includes("Outro.")) throw new Error("a page's slips were not put right: " + kept);
+    await archiveNode(owner, mended.id);
+    const broken = await call(s, "page_write", { parent: "/context/agents", title: "Broken page " + tag, summary: "A page with a block that cannot be put right.", body: `${fence}callout\n{"tone":"info"}\n${fence}` });
+    if (!broken.ERROR) throw new Error("a callout with no words at all was accepted");
+  }
+
+  // Chat: what the owner writes from any screen says what they were looking at, and goes to whoever it names, else the default agent.
+  {
+    const first = await sendChat(owner, "What changed here " + tag, { screen: "todos", type: "todo", id: followUp.id, title: "Decide on the smoke test", extra: "dropped" });
+    const usual = await defaultAgent();
+    if (!usual || first.to !== usual.id) throw new Error("a chat message naming nobody did not go to the default agent: " + first.to);
+    if (first.message.about?.id !== followUp.id || first.message.about?.screen !== "todos" || "extra" in (first.message.about ?? {})) throw new Error("a chat message did not keep what was on screen: " + JSON.stringify(first.message.about));
+    const named = await sendChat(owner, `@${s.handle} and what do you make of it ${tag}?`, { screen: "nowhere" });
+    if (named.to !== s.id || named.message.about) throw new Error("a chat message naming an agent did not go to it, or kept a screen that does not exist: " + JSON.stringify(named));
+    const heard = await call(s, "changes", { peek: true, limit: 100 });
+    if (!heard.for_you?.some((e: { id: string }) => e.id === named.message.id)) throw new Error("the agent named in a chat message was not told of it");
+    const seen = await call(usual.id === claude.id ? claude : s, "read", { ids: [first.message.id] });
+    if (!JSON.stringify(seen).includes(`"id":"${followUp.id}"`)) throw new Error("the agent reading a chat message is not shown what it was about: " + JSON.stringify(seen).slice(0, 300));
+    const chat = await listChat();
+    if (chat.default_agent !== usual.id || ![first, named].every((x) => chat.messages.some((m) => m.id === x.message.id))) throw new Error("chat does not list every conversation together");
+    if (!(await sendChat(s as never, "from an agent", null).then(() => false, () => true))) throw new Error("an agent was allowed to use the owner's chat");
   }
 
   // What agents did is on record: every call above, with what it asked for and what it was shown.

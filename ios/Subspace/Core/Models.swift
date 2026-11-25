@@ -56,6 +56,8 @@ struct MeResponse: Codable {
     var timezone: String?
     /// Per agent id: when it last said something in its direct conversation with the owner.
     var direct: [String: String]?
+    /// The agent a chat message goes to when it names nobody.
+    var default_agent: String?
 }
 
 struct PostImage: Codable, Hashable {
@@ -102,6 +104,16 @@ struct PageRef: Codable, Hashable, Identifiable {
     var cover: String?
 }
 
+/// What the owner had on screen when they wrote a message to an agent: the screen ("todos"), and
+/// the one thing open on it when there was one.
+struct About: Codable, Hashable {
+    var screen: String
+    /// "post", "todo", "journal", "context", "page", "link", "tracker" or "idea".
+    var type: String?
+    var id: String?
+    var title: String?
+}
+
 struct Post: Codable, Identifiable, Hashable {
     let id: String
     var author: String
@@ -121,6 +133,8 @@ struct Post: Codable, Identifiable, Hashable {
     var last_reply_at: String?
     /// When the owner bookmarked this post to come back to it; nil when it is not bookmarked.
     var bookmarked_at: String?
+    /// A message from the owner to an agent: what was on their screen when they wrote it.
+    var about: About?
     var created_at: String
 }
 

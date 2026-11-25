@@ -9,7 +9,7 @@ import useSWRInfinite from "swr/infinite";
 import { Avatar, mesh } from "@/components/bits";
 import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
-import { ago, api, fetcher, hash, soft, useMe, useSaver } from "@/lib/client";
+import { ago, api, fetcher, hash, soft, useMe, useSaver, useShowing } from "@/lib/client";
 import type { ContextLite, ContextNode } from "@/lib/core/context";
 import type { CurrentNote } from "@/lib/core/current";
 import type { LinkPage } from "@/lib/core/links";
@@ -477,6 +477,7 @@ function NodeEditor({ node, onChanged, onDeleted }: { node: ContextNode; onChang
   const [title, setTitle] = useState(node.title);
   const [summary, setSummary] = useState(node.summary);
   const [body, setBody] = useState(node.body);
+  useShowing(node.kind === "note" ? "context" : node.kind, node.id, node.title);
   const by = agent(node.updated_by);
 
   const patch = async (b: Record<string, unknown>) => (await api(`context/${node.id}`, { method: "PATCH", body: b }), onChanged());

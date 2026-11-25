@@ -54,6 +54,7 @@ struct TodosDetail: View {
             configure()
             await poll()
         }
+        .showing(.todos, "todo", id: id, title: todo?.title)
         .onChange(of: tagText) { _, now in
             if now.count > 30 { tagText = String(now.prefix(30)) }
         }

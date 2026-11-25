@@ -171,6 +171,8 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
   const live = !!a.runtime?.enabled;
   const human = a.kind === "human";
   const illustrator = a.roles.includes("illustrator");
+  // the agent a chat message goes to when it names nobody
+  const usual = useMe().defaultAgent?.id === a.id;
   const origin = typeof window !== "undefined" ? location.origin : "";
   const patch = async (body: Record<string, unknown>) => (await api(`agents/${a.id}`, { method: "PATCH", body }), onChanged());
 
@@ -275,13 +277,18 @@ function AgentRow({ agent: a, index, open, onToggle, onChanged }: { agent: Agent
               </details>
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 [&_button]:whitespace-nowrap">
-                {!illustrator ? (
-                  <button onClick={() => patch({ illustrator: true })} className="text-[13px] text-ink2 hover:text-accent">
-                    Make {a.name} the illustrator
-                  </button>
-                ) : (
-                  <span />
-                )}
+                <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  {!illustrator && (
+                    <button onClick={() => patch({ illustrator: true })} className="text-[13px] text-ink2 hover:text-accent">
+                      Make {a.name} the illustrator
+                    </button>
+                  )}
+                  {!usual && (
+                    <button onClick={() => patch({ default: true })} className="text-[13px] text-ink2 hover:text-accent">
+                      Send chat to {a.name} by default
+                    </button>
+                  )}
+                </span>
                 {a.id !== "a_claude" && <ConfirmDelete label="Remove agent" confirm="Remove and disconnect" size={15} onConfirm={() => patch({ archived: true })} />}
               </div>
             </div>

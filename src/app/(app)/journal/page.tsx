@@ -9,7 +9,7 @@ import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
 import { TagPills } from "@/components/TagPills";
-import { api, fetcher, soft, useSaver } from "@/lib/client";
+import { api, fetcher, soft, useSaver, useShowing } from "@/lib/client";
 import type { ContextNode } from "@/lib/core/context";
 import type { JournalEntry, JournalMonth, JournalPage } from "@/lib/core/journal";
 import { MOOD_NAMES, toneOf } from "@/lib/moods";
@@ -315,6 +315,7 @@ function EntryEditor({ entry, today, onChanged, onDeleted }: { entry: ContextNod
   const [day, setDay] = useState(entry.entry_date ?? today);
   const [mood, setMood] = useState(entry.mood);
   const [gist, setGist] = useState(entry.summary);
+  useShowing("journal", entry.id, entry.title === "Untitled" ? "" : entry.title);
   const panel = useRef<HTMLDivElement>(null);
 
   const patch = async (b: Record<string, unknown>) => (await api(`context/${entry.id}`, { method: "PATCH", body: b }), onChanged());

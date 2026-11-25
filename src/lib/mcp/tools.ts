@@ -331,7 +331,7 @@ export const TOOLS: Tool[] = [
   {
     name: "page_write",
     description:
-      'Create or update a page: a finished, well laid out document for the owner, such as research, a shortlist of options, a comparison or a plan. The body is markdown and can contain blocks (entity cards in a grid, carousel or list, maps, tables, stats, charts, timelines, callouts, sources and more). Read guide("pages") before your first page. Pages live in the context tree: always give a parent folder that fits the topic. To put results inside a todo instead, write the same markdown and blocks with todo_update.',
+      'Create or update a page: a finished, well laid out document for the owner, such as research, a shortlist of options, a comparison or a plan. The body is markdown and can contain blocks (entity cards in a grid, carousel or list, maps, tables, stats, charts, timelines, callouts, sources and more). Read guide("pages") before your first page. Pages live in the context tree: always give a parent folder that fits the topic. To put results inside a todo instead, write the same markdown and blocks with todo_update. The limits pages are most often refused for: a table cell holds at most 500 characters and its caption 300; a callout needs text (at most 800 characters) and its tone is info, good, warn or decision; every fact and stat needs a label and a value.',
     inputSchema: obj({
       id: str("Page id or /context/path to update. Omit to create."),
       parent: str("Required when creating: the context folder this belongs in, by id or path, e.g. /context/home/travel. Create the folder first with context_write if none fits. Never the top level."),

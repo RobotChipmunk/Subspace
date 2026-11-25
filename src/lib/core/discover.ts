@@ -587,6 +587,8 @@ export async function changes(agent: Agent, opts: { since?: number; limit?: numb
   for (const e of shown) {
     const item: Item = { seq: e.seq, at: e.ts, by: "@" + e.handle, type: e.type, id: e.entity_id, line: e.summary };
     if (e.data?.root) item.thread = e.data.root;
+    // a direct message says what the owner was looking at when they wrote it
+    if (e.data?.about && e.mentions.includes(agent.handle)) item.about = e.data.about;
     if (e.type === "post.replied" && e.mentions.includes(agent.handle)) {
       // Say why it is here and who else heard it, so several agents in one thread can settle who acts.
       const named = Array.isArray(e.data?.named) ? (e.data.named as string[]) : [];
@@ -704,7 +706,7 @@ export async function search(opts: { query: string; types?: string[]; since?: st
 
   if (exact) rows = rows.filter((r) => r.entity_id !== exact.id);
   const ctxIds = rows.filter((r) => r.entity_type === "context" || r.entity_type === "link").map((r) => r.entity_id);
-  const nodes = ctxIds.length ? await q<{ id: string; path: string; url: string | null; site: string | null; summary: string }>("SELECT id, path, url, site, summary FROM context_nodes WHERE id = ANY($1)", [ctxIds]) : [];
+  const nodes = ctxIds.length ? await q<{ id: string; path: string; kind: string; url: string | null; site: string | null; summary: string }>("SELECT id, path, kind, url, site, summary FROM context_nodes WHERE id = ANY($1)", [ctxIds]) : [];
   const node = (id: string) => nodes.find((p) => p.id === id);
   const todoIds = rows.filter((r) => r.entity_type === "todo").map((r) => r.entity_id);
   const guestOf = new Map((todoIds.length ? await q<{ id: string; guest_id: string | null }>("SELECT id, guest_id FROM todos WHERE id = ANY($1) AND guest_id IS NOT NULL", [todoIds]) : []).map((t) => [t.id, t.guest_id]));
@@ -721,6 +723,8 @@ export async function search(opts: { query: string; types?: string[]; since?: st
         type: r.entity_type,
         ...(r.title ? { title: r.title } : {}),
         ...(r.entity_type === "context" || r.entity_type === "link" ? { path: "/context/" + node(r.entity_id)?.path } : {}),
+        // a context result is a note, a page or a journal entry: each opens in its own place
+        ...(r.entity_type === "context" && node(r.entity_id)?.kind && node(r.entity_id)?.kind !== "note" ? { kind: node(r.entity_id)?.kind } : {}),
         ...(r.entity_type === "link" ? { url: node(r.entity_id)?.url, ...(node(r.entity_id)?.site ? { site: node(r.entity_id)?.site } : {}), ...(node(r.entity_id)?.summary ? { why: node(r.entity_id)?.summary } : {}) } : {}),
         ...(r.entity_type === "todo" ? share.tag(guestOf.get(r.entity_id)) : {}),
         ...(r.entity_type === "idea" ? { path: "/ideas/" + r.entity_id } : {}),
@@ -822,6 +826,8 @@ const slimPost = (p: Post, handles: Map<string, string>) => ({
   ...(p.source ? { source: p.source } : {}),
   ...(p.page_id ? { page: p.page_id } : {}),
   ...(p.art?.status === "pending" ? { illustration: "pending" } : {}),
+  // a message from the owner: what they had on screen when they wrote it
+  ...(p.about ? { about: p.about } : {}),
 });
 
 export async function read(ids: string[], opts: { after?: string; /** the agent reading; what it may not see reads as not there */ actor?: Agent } = {}) {

@@ -1,4 +1,4 @@
-import { checkBlocks } from "../blocks";
+import { checkBlocks, mendBlocks } from "../blocks";
 import { q, q1 } from "../db";
 import { listPlan, planScope, readPlan, type PlanItem } from "./plan";
 import { TODO_RAIL, taskChanged, type TodoRail } from "./rail";
@@ -82,11 +82,20 @@ export async function calendar() {
   return { today, monday, saturday: addDays(monday, 5), sunday: addDays(monday, 6), nextMonday: addDays(monday, 7), dow: weekday(today) };
 }
 
+/** A view by any of the spellings people and agents reach for: "next week", "this-week", "Next_Week". */
+const VIEW_ALIASES: Record<string, string> = { this_week: "week", thisweek: "week", nextweek: "next_week", this_weekend: "weekend", someday: "backlog", everything: "all" };
+export function viewName(view: string): string {
+  if (view.startsWith("guest:") || /^\d{4}-\d{2}-\d{2}$/.test(view)) return view;
+  const v = view.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return VIEW_ALIASES[v] ?? v;
+}
+
 type Spec = { where: string; params: unknown[]; add: { scope: string; date: string | null; guest_id?: string } };
 
 /** Where a view's tasks live, and where a task added to that view should go. */
-function viewSpec(view: string, cal: Awaited<ReturnType<typeof calendar>>): Spec {
+function viewSpec(viewIn: string, cal: Awaited<ReturnType<typeof calendar>>): Spec {
   const { today, monday, saturday, sunday, nextMonday } = cal;
+  const view = viewName(viewIn);
   // everything on a guest's list, placed on a day or not; a task added here starts without a day
   if (view.startsWith("guest:")) return { where: "guest_id = $1", params: [view.slice(6)], add: { scope: "guest", date: null, guest_id: view.slice(6) } };
   if (view === "today") return { where: "scope = 'day' AND date = $1", params: [today], add: { scope: "day", date: today } };
@@ -302,6 +311,8 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   const { add } = viewSpec(input.view || "today", cal);
   if (add.guest_id && !(await listGuests()).some((g) => g.id === add.guest_id)) throw bad(`Unknown view "${input.view}".`);
   const id = newId("t");
+  // small slips in an agent's blocks are put right rather than refused (see mendBlocks)
+  if (actor.kind === "agent" && input.notes) input = { ...input, notes: mendBlocks(input.notes) };
   if (input.notes) guardBlocks(actor, input.notes);
   const notes = input.notes ? (actor.kind === "agent" ? markAgentText(input.notes, actor.handle) : input.notes) : "";
   const repeat = input.repeat === undefined ? null : readRepeat(input.repeat);
@@ -392,6 +403,9 @@ export async function updateTodo(
     }
   }
 
+  // small slips in an agent's blocks are put right rather than refused (see mendBlocks)
+  if (actor.kind === "agent" && patch.notes_append) patch = { ...patch, notes_append: mendBlocks(patch.notes_append) };
+  if (actor.kind === "agent" && patch.notes_replace?.replace) patch = { ...patch, notes_replace: { ...patch.notes_replace, replace: mendBlocks(patch.notes_replace.replace) } };
   let notes: string | undefined;
   if (patch.notes !== undefined) {
     // Whole-document writes come from the editor (the owner). Agents make targeted, marked edits.

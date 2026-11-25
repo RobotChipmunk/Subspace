@@ -595,6 +595,9 @@ const MIGRATIONS: string[] = [
    );
    ALTER TABLE todos ADD COLUMN IF NOT EXISTS plan_id text;
    CREATE INDEX IF NOT EXISTS todos_plan ON todos (plan_id) WHERE plan_id IS NOT NULL`,
+  // Chat from anywhere: a message the owner sends an agent says what was on their screen when
+  // they wrote it ({ screen, type, id, title }), so "this" in the message means something.
+  `ALTER TABLE posts ADD COLUMN IF NOT EXISTS about jsonb`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

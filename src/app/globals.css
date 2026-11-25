@@ -205,6 +205,42 @@ html[data-typing] .art-mesh {
 .nav {
   background: color-mix(in srgb, var(--surface-solid) 72%, transparent);
 }
+/* Search and chat stack with the menu: search above it, chat below. A wide screen that is too
+   short for that (a small window, a phone on its side) keeps the menu where it is and puts the
+   two together in the bottom corner, each panel opening above them. The wrapper gives up its box
+   there, so its children place against the screen again. */
+@media (min-width: 768px) and (max-height: 619px) {
+  .dock {
+    display: contents;
+  }
+  .dock > nav {
+    position: fixed;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .dock > [data-dock] {
+    position: fixed;
+    bottom: 16px;
+    z-index: 30;
+  }
+  .dock > [data-dock="search"] {
+    right: 72px;
+  }
+  .dock > [data-dock="chat"] {
+    right: 16px;
+  }
+  .dock > [data-dock-panel] {
+    position: fixed;
+    inset: auto 16px 72px auto;
+    margin: 0;
+    max-height: calc(100dvh - 88px);
+  }
+  .dock > [data-dock-panel="chat"] {
+    height: min(540px, calc(100dvh - 88px));
+  }
+}
+
 /* Popups sit over text, so they are nearly solid rather than see-through. */
 .menu {
   background: color-mix(in srgb, var(--surface-solid) 94%, transparent);

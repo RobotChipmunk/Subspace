@@ -121,6 +121,9 @@ def todos_for(view, plan=None):
     return {"today": TODAY, "todos": rows}
 
 
+CHAT = []
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.command, self.path))
@@ -148,7 +151,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == "auth/login" and m == "POST":
             return self.reply(200, {"token": "standin"})
         if path == "me":
-            return self.reply(200, {"me": ME, "agents": AGENTS, "guests": [], "trackers": [], "timezone": "America/Los_Angeles"})
+            usual = next((a["id"] for a in AGENTS if a.get("kind") == "agent"), None)
+            return self.reply(200, {"me": ME, "agents": AGENTS, "guests": [], "trackers": [], "timezone": "America/Los_Angeles", "default_agent": usual})
+        # chat from any screen: every message together; a new one says what was on screen
+        if path == "chat":
+            usual = next((a["id"] for a in AGENTS if a.get("kind") == "agent"), None)
+            if m == "POST":
+                b = self.body()
+                msg = {"id": f"p_{random.randint(10000, 99999)}", "author": ME["id"], "channel": f"dm:{usual}", "body": b.get("body", ""), "about": b.get("about"), "created_at": ago(0)}
+                CHAT.append(msg)
+                return self.reply(200, {"message": msg, "to": usual})
+            return self.reply(200, {"messages": CHAT, "default_agent": usual})
+        # search over everything: here, the tasks and posts this stand-in has
+        if path == "search":
+            words = q.get("q", "").lower()
+            hits = [{"id": t["id"], "type": "todo", "title": t["title"], "snippet": t["title"], "at": t["created_at"]} for t in TODOS if words in t["title"].lower()]
+            hits += [{"id": p["id"], "type": "post", "title": "", "snippet": p["body"], "at": p["created_at"]} for p in POSTS if words in p["body"].lower()]
+            return self.reply(200, {"results": hits[:20]})
         if path == "rail":
             return self.reply(200, {"modules": []})
         if path == "feed":

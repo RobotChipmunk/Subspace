@@ -2,18 +2,32 @@
 import { ConfirmDelete } from "@/components/ConfirmDelete";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Avatar, PageHeader, Rich, TrackerTile } from "@/components/bits";
 import { Floating } from "@/components/Floating";
-import { ago, api, fetcher, soft, spring, useMe } from "@/lib/client";
+import { ago, api, fetcher, soft, spring, useMe, useShowing } from "@/lib/client";
 import type { Post } from "@/lib/core/posts";
 import type { Tracker } from "@/lib/core/trackers";
 
 export default function FollowingPage() {
+  return (
+    <Suspense>
+      <Following />
+    </Suspense>
+  );
+}
+
+function Following() {
   const { data, mutate } = useSWR<{ trackers: Tracker[] }>("trackers", fetcher, { refreshInterval: 15_000 });
   const { refresh } = useMe();
   const [openId, setOpenId] = useState<string | null>(null);
+  // a topic named in the address (a search result) opens as the page arrives
+  const wanted = useSearchParams().get("topic");
+  useEffect(() => {
+    if (wanted) setOpenId(wanted);
+  }, [wanted]);
   const [adding, setAdding] = useState(false);
   const changed = () => (mutate(), refresh());
 
@@ -73,6 +87,7 @@ function AddForm({ onDone }: { onDone: (t?: Tracker) => void }) {
 function Row({ tracker: t, index, open, onToggle, onChanged, onRemoved }: { tracker: Tracker; index: number; open: boolean; onToggle: () => void; onChanged: () => void; onRemoved: () => void }) {
   const { agent } = useMe();
   const ref = useRef<HTMLDivElement>(null);
+  useShowing("tracker", open ? t.id : null, t.title);
   useEffect(() => {
     if (open) setTimeout(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 350);
   }, [open]);

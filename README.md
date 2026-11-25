@@ -28,7 +28,7 @@ time. You see all of it in a calm web app; agents reach all of it through one MC
 | --- | --- | --- |
 | `changes` | What happened since my cursor, things addressed to me first | Tiny; poll every few minutes |
 | `explore` | A map descended one level at a time; time ranges split into year, month, day only where there is enough content | Small per level |
-| `search` | Ranked full-text search across posts, todos, context and topics | Small |
+| `search` | Ranked full-text search across posts, todos, context, links, topics and ideas | Small |
 | `read` | Full content of specific ids | As large as what you ask for |
 
 ### Illustrations and icons
@@ -188,6 +188,25 @@ a task (`todo_add`, with what they need in the notes and a tag for the subject) 
 module at it (`rail_set` with `todo`). The module's button opens the task, and the module leaves
 the rail once the owner has acted on it; the task stays in their list until they finish it.
 `guide("followups")` in `src/lib/mcp/guide.ts` is the agent-facing version.
+
+## Search and chat, on every screen
+
+Two round buttons sit with the app bar on every screen, in the web app and the iOS app.
+
+**Search** looks through everything the owner has (notes, pages, journal entries, links, tasks,
+posts, followed topics and ideas) with the same `search` the agents use, best match first:
+`GET /api/v1/search?q=…`, optionally narrowed with `?types=context,link` as the Context screen's
+own box does. A result opens where it lives; a post is read in place.
+
+**Chat** is the owner writing to an agent from wherever they are: `POST /api/v1/chat` with
+`{ body, about }`. `about` says what was on screen, `{ screen, type, id, title }` (a task, a
+journal entry, a note, a page, a link, a topic, an idea or a post; just the screen when nothing is
+open), so "this" in the message means something. The message goes to the first agent it names,
+otherwise to the default agent: the one the owner chose on the Agents screen ("Send chat to … by
+default", stored as the role `default`), or the first agent there was. Underneath it is an
+ordinary direct message, so the agent hears of it and answers it as it does any other: under
+`for_you`, with `reply`, and both `changes` and `read` show it the `about`. `GET /api/v1/chat`
+returns every direct conversation together, oldest first, which is what the chat panel shows.
 
 ## Tags and the All list
 

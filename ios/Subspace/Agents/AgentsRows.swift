@@ -353,6 +353,8 @@ struct AgentsAgentRow: View {
     /// Answers this agent has not read yet.
     private var waiting: Int { sent.filter { $0.picked_up != true }.count }
     private var illustrator: Bool { (agent.roles ?? []).contains("illustrator") }
+    /// The agent a chat message goes to when it names nobody.
+    private var usual: Bool { app.defaultAgentID == agent.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -604,21 +606,38 @@ struct AgentsAgentRow: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 8) {
-            if !illustrator {
-                Button {
-                    Task { _ = await patch(["illustrator": true]) }
-                } label: {
-                    Text("Make \(agent.name) the illustrator")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.ink2)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                        .frame(minHeight: 36)
-                        .contentShape(Rectangle())
+        HStack(alignment: .bottom, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                if !illustrator {
+                    Button {
+                        Task { _ = await patch(["illustrator": true]) }
+                    } label: {
+                        Text("Make \(agent.name) the illustrator")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.ink2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .frame(minHeight: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityIdentifier("agents.illustrator.\(agent.id)")
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("agents.illustrator.\(agent.id)")
+                if !usual {
+                    Button {
+                        Task { _ = await patch(["default": true]) }
+                    } label: {
+                        Text("Send chat to \(agent.name) by default")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.ink2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .frame(minHeight: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityIdentifier("agents.default.\(agent.id)")
+                }
             }
             Spacer(minLength: 0)
             if agent.id != "a_claude" {

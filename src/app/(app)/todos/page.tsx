@@ -11,7 +11,7 @@ import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
 import { Floating } from "@/components/Floating";
 import { TagPills } from "@/components/TagPills";
-import { api, fetcher, soft, spring, useMe, useSaver } from "@/lib/client";
+import { api, fetcher, soft, spring, useMe, useSaver, useShowing } from "@/lib/client";
 import type { PlanItem } from "@/lib/core/plan";
 import type { RailAction } from "@/lib/core/rail";
 import type { BinnedTodo, Folder, Repeat, TagCount, Todo } from "@/lib/core/todos";
@@ -1516,6 +1516,7 @@ function Detail({ id, backLabel, folders, tags, plan, today, onOpen, onBack }: {
   const [title, setTitle] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
   const railTold = useRef(false);
+  useShowing("todo", todo?.id, todo?.title);
 
   // Take the server's notes only when nothing typed here is waiting to be saved.
   useEffect(() => {

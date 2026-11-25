@@ -1,4 +1,4 @@
-import { checkBlocks } from "../blocks";
+import { checkBlocks, mendBlocks } from "../blocks";
 import { asMood, MOOD_NAMES } from "../moods";
 import { q, q1 } from "../db";
 import { markAgentText } from "./todos";
@@ -147,7 +147,8 @@ export async function createNode(actor: Agent, input: { parent?: string | null; 
   const path = await uniquePath(parent?.path ?? null, title);
   // only the owner starts the System section itself
   if (path === SYSTEM && actor.kind === "agent") throw bad('"System" is the name of the house rules section. Choose another title.');
-  const body = input.body ?? "";
+  // small slips in an agent's blocks are put right rather than refused (see mendBlocks)
+  const body = actor.kind === "agent" ? mendBlocks(input.body ?? "") : (input.body ?? "");
   guard(actor, body);
   const link = input.kind === "link" ? input.link : undefined;
   const journal = input.kind === "journal" ? input.journal : undefined;
@@ -187,7 +188,10 @@ export async function updateNode(
     body = before.body.replace(patch.body_replace.find, patch.body_replace.replace);
   }
   if (body.length > 400_000) throw bad("Node body is too long. Split it into child nodes.");
-  if (body !== before.body) guard(actor, body);
+  if (body !== before.body) {
+    if (actor.kind === "agent") body = mendBlocks(body);
+    guard(actor, body);
+  }
   const cover = patch.cover === undefined ? before.cover : patch.cover === null ? null : okCover(patch.cover);
   // a link stays a link and a journal entry stays a journal entry, whatever is asked
   const kind = before.kind === "link" || before.kind === "journal" ? before.kind : (patch.kind ?? before.kind);

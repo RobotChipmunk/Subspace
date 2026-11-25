@@ -18,7 +18,7 @@ export async function createAgent(actor: Agent, input: { name: string; handle?: 
   return (await agentById(id))!;
 }
 
-export async function updateAgent(actor: Agent, id: string, patch: { name?: string; bio?: string; illustrator?: boolean; archived?: boolean; /** what it may see and do; null gives it everything again */ access?: AccessRules | null }) {
+export async function updateAgent(actor: Agent, id: string, patch: { name?: string; bio?: string; illustrator?: boolean; /** true makes this the agent that answers when the owner names nobody */ default?: boolean; archived?: boolean; /** what it may see and do; null gives it everything again */ access?: AccessRules | null }) {
   const a = await agentById(id);
   if (!a || a.kind === "guest") throw notFound("No such agent");
   if (a.kind === "human" && patch.archived) throw bad("The owner cannot be removed.");
@@ -35,6 +35,13 @@ export async function updateAgent(actor: Agent, id: string, patch: { name?: stri
     await q("UPDATE jobs SET assigned_to = $1 WHERE status = 'open' AND kind <> 'routine'", [id]);
     roles = [...roles.filter((r) => r !== "illustrator"), "illustrator"];
   } else if (patch.illustrator === false) roles = roles.filter((r) => r !== "illustrator");
+  if (patch.default === true) {
+    if (a.kind !== "agent") throw bad("Only an agent can be the default.");
+    // one at a time: it is who a message goes to when it names nobody
+    await q("UPDATE agents SET roles = array_remove(roles, 'default')");
+    roles = [...roles.filter((r) => r !== "default"), "default"];
+  }
+  if (patch.archived) roles = roles.filter((r) => r !== "default");
   await q("UPDATE agents SET name = $2, bio = $3, roles = $4, archived = $5, token_hash = CASE WHEN $5 THEN NULL ELSE token_hash END WHERE id = $1", [
     id, patch.name?.trim() || a.name, patch.bio ?? a.bio, roles, patch.archived ?? a.archived,
   ]);

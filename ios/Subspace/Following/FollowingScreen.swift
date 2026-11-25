@@ -35,6 +35,13 @@ struct FollowingScreen: View {
                 try? await Task.sleep(for: .seconds(15))
             }
         }
+        .showing(.following, "tracker", id: openID, title: (trackers ?? app.trackers).first { $0.id == openID }?.title)
+        // an address that names a topic ("/following?topic=<id>", as a search result does) opens it
+        .onChange(of: app.pendingTopicID, initial: true) { _, id in
+            guard let id else { return }
+            app.pendingTopicID = nil
+            withAnimation(.ssSoft) { openID = id }
+        }
     }
 
     private var rows: some View {

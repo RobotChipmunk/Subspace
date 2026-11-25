@@ -141,6 +141,30 @@ Patterns:
 - **App bar** (`Shell.tsx`): icons only, one glass pill; left on wide screens, bottom on phones.
   Seven tabs: Feed, Todos, Journal, Ideas, Context, Following, Agents. Targets are 48px; on
   phones they are 40px wide and 44px tall, so the seven and the Now button fit a 360px screen.
+- **Search and chat** (`Dock.tsx`; `Shell/Dock.swift`, `SearchSheet.swift` and `ChatSheet.swift` in
+  the app): the two things within reach on every screen. Each is one round glass button, 44px,
+  icon only: search above the app bar and chat below it on a wide screen; on a phone they float
+  just above the bar, search at the left edge and chat at the right. Each opens a panel at its own
+  button: an opaque surface (`bg-solid`, 26px corners, `--shadow-lift`), 400px wide beside the bar,
+  growing down from the search button or up from the chat button; across the bottom of a phone
+  over a veil. In the app each is a sheet. A tap outside or Escape closes it; the keyboard is in
+  the field as it opens (focused from an effect, see Lessons), and Cmd+K opens search on the web.
+  Neither panel has a heading or a caption: the field says what it is. On a wide screen under
+  620px tall (a small window, a large phone on its side) there is no room to stack them with the
+  bar, so the two sit together in the bottom right corner and each panel opens above them.
+  - *Search* looks through everything the owner has, best match first, in one list: a kind icon
+    in `ink3`, the title, two lines of the matching words (matches on `accent-soft`), and how long
+    ago. A result opens where it lives and the panel closes. A post has no place of its own, so
+    it opens in place under its row (reveal in place) with its thread and source.
+  - *Chat* is every conversation with every agent in one stream: the owner's messages on the
+    right on `accent-soft`, an agent's on the left on `fill` with its face where the speaker
+    changes. What is on screen (the open task, entry, topic, post or note, else the screen's
+    name) rides along as one small `accent-soft` chip above the field; tapping it leaves it out
+    of the next message. A message that carried one shows it as a 12px `ink3` line above the
+    bubble, only where it differs from the message before. The field's placeholder names the
+    agent a message goes to when it names nobody ("Message Claude"); typing @ offers the others.
+  - An accent dot on the chat button says an agent has answered since chat was last open. The
+    Agents tab no longer carries that dot.
 - **Rows** (todos, links): no dividers; hover fill; title, one secondary line, one meta line.
   A row that stands for something in another place (a task in a person's list) names that place
   in a word or two at its end, in meta type.

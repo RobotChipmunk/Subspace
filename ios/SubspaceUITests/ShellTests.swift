@@ -31,6 +31,69 @@ final class ShellTests: SubspaceTestCase {
         }
     }
 
+    /// Search and chat are beside the app bar on every screen. Search looks through everything and
+    /// a result opens where it lives (a post is read in place); a chat message says what was on
+    /// screen and goes to the default agent unless it names another.
+    func testSearchAndChatFromAnyScreen() {
+        launchSignedIn()
+        go("following")
+        press(app.buttons["dock.search"], "the search button beside the app bar")
+        expect(app.textFields["search.field"], "the search field")
+        // the field has the keyboard as the sheet opens: nothing needs tapping first
+        Thread.sleep(forTimeInterval: 1.0)
+        app.typeText("robot")
+        func hit(_ kind: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "search.hit.\(kind).")).firstMatch
+        }
+        for kind in ["todo", "post", "tracker"] {
+            expect(hit(kind), "a \(kind) among the results for robot")
+        }
+        shot("06-search")
+
+        // a post has no place of its own: it is read where it was found
+        bringIntoView(hit("post"))
+        press(hit("post"), "a post among the results")
+        expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'search.peek.'")).firstMatch, "the post, read in place")
+        shot("06-search-post")
+
+        // everything else opens where it lives
+        bringIntoView(hit("todo"), down: false)
+        press(hit("todo"), "a task among the results")
+        expect(app.buttons["todos.detail.close"], "the task that was found, open on Todos")
+        waitToVanish(app.textFields["search.field"], "the search sheet once a result was opened")
+
+        // chat, about the task that is open
+        press(app.buttons["dock.chat"], "the chat button beside the app bar")
+        expect(app.descendants(matching: .any)["chat.message"], "the chat field")
+        let about = expect(app.buttons["chat.about"], "what the message is about")
+        XCTAssertFalse(about.label == "Leave out Todos" || about.label == "Leave out ", "The open task should be what the message is about, not just the screen (\(about.label))")
+        let stamp = String(Int(Date().timeIntervalSince1970) % 100_000)
+        Thread.sleep(forTimeInterval: 1.0)
+        app.typeText("What changed here \(stamp)")
+        expect(app.buttons["chat.send"], "the send button, once there is something to send").tap()
+        func bubble(_ words: String) -> XCUIElement {
+            app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'chat.bubble.' AND label CONTAINS %@", words)).firstMatch
+        }
+        expect(bubble("What changed here \(stamp)"), "the sent message in the conversation")
+        // naming an agent sends it to that one
+        app.typeText("@scout anything new \(stamp)")
+        expect(app.buttons["chat.send"], "the send button for the second message").tap()
+        expect(bubble("anything new \(stamp)"), "the second message in the conversation")
+        shot("06-chat")
+
+        // what the server kept: which task was on screen, and who each message went to
+        let chat = Self.request("GET", "chat")
+        let me = Self.request("GET", "me")
+        let messages = chat?["messages"] as? [[String: Any]] ?? []
+        let usual = chat?["default_agent"] as? String ?? ""
+        let scout = (me?["agents"] as? [[String: Any]] ?? []).first { $0["handle"] as? String == "scout" }?["id"] as? String ?? ""
+        let first = messages.first { $0["body"] as? String == "What changed here \(stamp)" }
+        let second = messages.first { ($0["body"] as? String ?? "").hasSuffix("anything new \(stamp)") }
+        XCTAssertEqual((first?["about"] as? [String: Any])?["type"] as? String, "todo", "The message should say that a task was on screen")
+        XCTAssertEqual(first?["channel"] as? String, "dm:" + usual, "A message naming nobody goes to the default agent")
+        XCTAssertEqual(second?["channel"] as? String, "dm:" + scout, "A message naming an agent goes to that agent")
+    }
+
     func testSessionSurvivesRelaunch() {
         launch()
         signIn()

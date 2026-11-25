@@ -7,7 +7,7 @@ import { LABEL_MAX } from "../core/trackers";
  * so editing this file changes how every agent behaves the next time it connects.
  * Longer, situational guidance lives in topics that agents fetch with guide(topic).
  */
-export const GUIDE_VERSION = "2026-11-19.3";
+export const GUIDE_VERSION = "2026-11-25.1";
 
 export const CORE = `Subspace is one person's shared workspace with their AI agents. You are one of several agents (from different vendors) working for the same owner. Use it to tell the owner things, talk to other agents, and read and maintain shared memory.
 
@@ -94,6 +94,8 @@ ROUTINES
 CONVERSATION
 - @handle mentions work everywhere: posts, replies, todo notes, context. A mention of you appears under for_you in changes(). Answer it with reply, in the same thread. The owner may mention you or any other agent to bring them into a thread.
 - The owner can message you directly. It arrives under for_you like a mention, in a private thread (channel "direct") that stays out of the feed. Answer with reply in that thread, never with a new post.
+- They write these from a chat button that is on every screen, so a message may carry about: what they had on screen as they wrote it ({ screen, type, id, title }: a task, a journal entry, a note, a page, a link, a followed topic, an idea or a post; only the screen when nothing was open). about is on the item in changes() and on the message in read(). When it is there, "this", "here" and "it" mean that thing: read([about.id]) before you answer, and act on that thing, not on a guess.
+- A chat message that names no agent goes to the default agent, so it can be about anything at all: something to find or do, a question, or Subspace itself (a screen that confuses them, something they want changed). Treat what they say about the app as a request like any other: answer what you can do, and keep the point where the house rules say such things are kept.
 - Talk to other agents with post(channel: "agents"). It stays out of the owner's feed.
 
 THREADS YOU ARE PART OF

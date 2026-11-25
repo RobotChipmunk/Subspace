@@ -3,8 +3,9 @@ import { Bot, BookOpen, CircleCheck, Lightbulb, NotebookPen, PanelRight, Radar, 
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, spring, useDirectUnread, useMe } from "@/lib/client";
+import { DockButton, DockPanels, type DockPanel } from "./Dock";
 import { Rail, useRail } from "./Rail";
 
 const TABS = [
@@ -30,6 +31,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const rail = useRail();
   const direct = useDirectUnread();
   const [commentsOpen, setComments] = useState(false);
+  // Search and chat are within reach on every screen; one of them is open at a time.
+  const [panel, setPanel] = useState<DockPanel>(null);
+  const closePanel = useCallback(() => setPanel(null), []);
+  const toggle = (p: DockPanel) => setPanel((cur) => (cur === p ? null : p));
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPanel((cur) => (cur === "search" ? null : "search"));
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
   const comments = useMemo(() => ({ open: commentsOpen, set: setComments }), [commentsOpen]);
   // Comments take the rail's place while they are open; the rail returns when they close.
   const railDocked = rail.docked && !commentsOpen;
@@ -61,9 +76,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="group/shell relative z-10 flex h-dvh" data-rail={railDocked ? "open" : "closed"} data-comments={commentsOpen ? "open" : "closed"}>
+      {/* The menu, with search above it and chat below. On a phone the menu is the bar along the
+          bottom and the two float just above it, one at each side (this wrapper has no box there). */}
+      <div className="dock max-md:contents md:fixed md:left-4 md:top-1/2 md:z-30 md:flex md:-translate-y-1/2 md:flex-col md:items-center md:gap-2.5">
+      <DockButton kind="search" open={panel === "search"} onToggle={() => toggle("search")} />
       <nav
         aria-label="Apps"
-        className="glass nav fixed z-30 flex items-center gap-1 rounded-[26px] p-1.5 max-md:gap-0.5 max-md:inset-x-0 max-md:bottom-[max(12px,env(safe-area-inset-bottom))] max-md:mx-auto max-md:w-fit md:left-4 md:top-1/2 md:-translate-y-1/2 md:flex-col"
+        className="glass nav z-30 flex items-center gap-1 rounded-[26px] p-1.5 max-md:fixed max-md:gap-0.5 max-md:inset-x-0 max-md:bottom-[max(12px,env(safe-area-inset-bottom))] max-md:mx-auto max-md:w-fit md:flex-col"
       >
         {TABS.map((t) => {
           const on = path.startsWith(t.href);
@@ -72,7 +91,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
               {on && <motion.span layoutId="tab" transition={spring} className="pill absolute inset-0 rounded-[20px]" />}
               <motion.span whileTap={{ scale: 0.86 }} transition={spring} className={`relative transition-colors duration-300 ${on ? "text-accent" : "text-ink2 group-hover:text-ink"}`}>
                 <t.icon size={21} strokeWidth={on ? 2.2 : 1.8} />
-                {t.href === "/agents" && direct.any && <span aria-label="New message" className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent" />}
               </motion.span>
               <span className="pointer-events-none absolute left-full ml-3 hidden translate-x-[-4px] rounded-lg bg-ink px-2 py-1 text-[12px] font-medium text-bg opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 md:block">
                 {t.label}
@@ -94,6 +112,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </>
         )}
       </nav>
+      <DockButton kind="chat" open={panel === "chat"} onToggle={() => toggle("chat")} dot={direct.any} />
+      <DockPanels panel={panel} onClose={closePanel} />
+      </div>
       <main className="scroll h-dvh min-w-0 flex-1 transition-[padding] duration-500 ease-out-soft md:pl-[92px] min-[1100px]:group-data-[rail=open]/shell:pr-[calc(var(--rail-w)-8px)] md:group-data-[comments=open]/shell:pr-[var(--comments-w)]">
         <motion.div key={path.split("/")[1]} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} className="min-h-full px-4 pb-32 pt-10 md:px-8 md:pt-14">
           <Comments.Provider value={comments}>{children}</Comments.Provider>

@@ -98,6 +98,14 @@ export async function agentByHandle(handle: string, kind: "agent" | "guest"): Pr
   return q1<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE handle = $1 AND kind = $2 AND NOT archived`, [handle.toLowerCase(), kind]);
 }
 
+/**
+ * The agent that answers when the owner names nobody: the one the owner chose (role "default"),
+ * otherwise the first agent there was.
+ */
+export async function defaultAgent(): Promise<Agent | null> {
+  return q1<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE kind = 'agent' AND NOT archived ORDER BY ('default' = ANY(roles)) DESC, created_at, id LIMIT 1`);
+}
+
 export async function ownerAgent(): Promise<Agent> {
   const a = await q1<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE kind = 'human' ORDER BY created_at LIMIT 1`);
   if (!a) throw new Error("No owner");

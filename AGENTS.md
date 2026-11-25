@@ -223,3 +223,14 @@ being true. Read this list before starting work.
   so tests that rely on seeded content fail there; use it to reproduce a layout or tap problem.
 - When a command chain ends in `git commit && git push`, make the build's own exit status gate it
   (`xcodebuild ... | grep` returns grep's status, so a failed build was committed and pushed once).
+- `position: fixed` inside an ancestor that has a transform is placed against that ancestor, not
+  the screen. The wrapper round the menu is centred with a transform, so the search and chat panels
+  inside it are `absolute` on purpose (they open at their own buttons), and on a phone the wrapper
+  is `display: contents` so the bar and the two floating buttons still place against the screen.
+  Do not give that wrapper a box on phones, and do not put a `fixed` child in it on wide screens.
+- "New entry" in the journal with nothing in it returns today's blank entry when there is one
+  (`createEntry`), and clears blank ones from other days. A check that needs two separate entries
+  must give each a title or a body.
+- Previews of a branch share the production database and migrate it on their first request
+  (`db.ts`). Keep every migration additive and safe to repeat (`ADD COLUMN IF NOT EXISTS`), so
+  that the production deployment, which does not know the new column yet, carries on unharmed.

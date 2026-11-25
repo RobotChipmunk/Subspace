@@ -2124,6 +2124,91 @@ async function run(profile) {
     await shot("agents-realtime");
   });
 
+  // ---------- Search and chat, within reach on every screen ----------
+  await step("search everything", async () => {
+    await page.goto(`${BASE}/feed`);
+    await settle(1500);
+    const open = page.getByRole("button", { name: "Search", exact: true });
+    await reachable(open, "search button");
+    await press(open);
+    const panel = page.locator("[data-dock-panel=search]");
+    const field = page.getByLabel("Search everything");
+    await field.waitFor({ timeout: 5000 });
+    await settle(600);
+    await reachable(field, "search field");
+    // the field has the keyboard as the panel opens: nothing needs tapping first
+    await page.keyboard.type("robot", { delay: 15 });
+    if ((await field.inputValue()) !== "robot") fail("search: typing did not go into the field as the panel opened");
+    await panel.locator("[data-hit]").first().waitFor({ timeout: 6000 });
+    await settle(500);
+    const kinds = await panel.locator("[data-hit]").evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute("data-hit")))]);
+    for (const k of ["todo", "post", "tracker"]) if (!kinds.includes(k)) fail(`search: nothing of kind ${k} among the results for "robot" (${kinds.join(", ")})`);
+    if (!kinds.some((k) => ["context", "page", "journal"].includes(k))) fail(`search: no note or page among the results for "robot" (${kinds.join(", ")})`);
+    await reachable(panel.locator("[data-hit] > button").first(), "first search result");
+    await noSidewaysScroll("search panel");
+    await shot("search");
+    // a post has no place of its own: it is read where it was found
+    const post = panel.locator("[data-hit=post] > button").first();
+    await post.scrollIntoViewIfNeeded();
+    await press(post);
+    await settle(900);
+    if ((await post.getAttribute("aria-expanded")) !== "true") fail("search: a post did not open in place");
+    await shot("search-post");
+    // everything else opens where it lives
+    const task = panel.locator("[data-hit=todo] > button").first();
+    await task.scrollIntoViewIfNeeded();
+    await press(task);
+    await page.waitForURL((u) => u.pathname === "/todos", { timeout: 6000 }).catch(() => fail("search: a task among the results did not open on Todos"));
+    await settle(1500);
+    if (await panel.count()) fail("search: the panel stayed open after a result was opened");
+  });
+  await step("chat about what is on screen", async () => {
+    // the task opened from search is still on screen
+    const open = page.getByRole("button", { name: "Chat", exact: true });
+    await reachable(open, "chat button");
+    await press(open);
+    const panel = page.locator("[data-dock-panel=chat]");
+    const box = panel.locator("textarea");
+    await box.waitFor({ timeout: 5000 });
+    await settle(700);
+    await reachable(box, "chat field");
+    const about = (await panel.locator("[data-about-chip]").innerText().catch(() => "")).trim();
+    if (!about || about === "Todos") fail(`chat: the open task is not offered as what the message is about ("${about}")`);
+    const stamp = Date.now().toString(36).slice(-5);
+    const text = `What changed here ${stamp}`;
+    await page.keyboard.type(text, { delay: 15 });
+    if ((await box.inputValue()) !== text) fail("chat: typing did not go into the field as the panel opened");
+    await page.keyboard.press("Enter");
+    await panel.locator("[data-messages]").getByText(text).waitFor({ timeout: 5000 });
+    if (await box.inputValue()) fail("chat: the field was not cleared after sending");
+    // naming an agent sends it to that one
+    const named = `@scout anything new ${stamp}`;
+    await page.keyboard.type(named, { delay: 15 });
+    await page.keyboard.press("Enter");
+    await panel.locator("[data-messages]").getByText(`anything new ${stamp}`).waitFor({ timeout: 5000 });
+    await settle(500);
+    const { chat, me, feed } = await page.evaluate(async () => ({
+      chat: await fetch("/api/v1/chat").then((r) => r.json()),
+      me: await fetch("/api/v1/me").then((r) => r.json()),
+      feed: await fetch("/api/v1/feed?channel=feed").then((r) => r.json()),
+    }));
+    const first = chat.messages.find((m) => m.body === text);
+    const second = chat.messages.find((m) => m.body === named);
+    const scout = me.agents.find((a) => a.handle === "scout");
+    if (!first || !second) fail("chat: a message sent is not in the conversation");
+    else {
+      if (first.about?.type !== "todo" || !first.about?.id) fail(`chat: the message does not say which task was on screen (${JSON.stringify(first.about)})`);
+      if (first.channel !== `dm:${me.default_agent}`) fail("chat: a message naming nobody did not go to the default agent");
+      if (second.channel !== `dm:${scout?.id}`) fail("chat: a message naming an agent did not go to that agent");
+    }
+    if (feed.posts.some((p) => p.body.includes(stamp))) fail("chat: a message appeared in the feed");
+    await noSidewaysScroll("chat panel");
+    await shot("chat");
+    await page.keyboard.press("Escape");
+    await settle(600);
+    if (await panel.count()) fail("chat: Escape did not close the panel");
+  });
+
   await browser.close();
 }
 

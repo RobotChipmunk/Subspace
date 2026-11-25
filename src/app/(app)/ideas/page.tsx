@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Avatar } from "@/components/bits";
-import { ago, api, fetcher, hash, soft, spring, useMe } from "@/lib/client";
+import { ago, api, fetcher, hash, soft, spring, useMe, useShowing } from "@/lib/client";
 import type { Idea, IdeaCanvas, IdeaCard, IdeaItem, IdeaLink } from "@/lib/core/ideas";
 import { PALETTES } from "@/lib/palettes";
 
@@ -128,6 +128,7 @@ function without<T>(m: Record<string, T>, key: string): Record<string, T> {
 function Canvas({ id, onBack, onOpen }: { id: string; onBack: () => void; onOpen: (id: string) => void }) {
   const { agent } = useMe();
   const { data, mutate } = useSWR<IdeaCanvas>(`ideas/${id}`, fetcher, { refreshInterval: 15_000 });
+  useShowing("idea", data ? id : null, data?.idea.title);
   const surface = useRef<HTMLDivElement>(null);
   const life = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });

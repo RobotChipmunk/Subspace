@@ -35,6 +35,8 @@ struct ContextLinkPage: Codable {
 struct ContextHit: Codable, Identifiable, Hashable {
     let id: String
     var type: String
+    /// A context result that is not a plain note says what it is: "page" or "journal".
+    var kind: String?
     var title: String?
     var path: String?
     var snippet: String?

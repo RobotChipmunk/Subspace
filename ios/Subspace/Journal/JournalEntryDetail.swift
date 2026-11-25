@@ -49,6 +49,7 @@ struct JournalEntryDetail: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task { await poll() }
+        .showing(.journal, "journal", id: id, title: reply.map { $0.entry.title == "Untitled" ? "" : $0.entry.title })
     }
 
     /// The web page asks again every 20 seconds.
