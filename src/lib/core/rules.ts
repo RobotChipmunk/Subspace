@@ -230,6 +230,36 @@ export async function propose(
   };
 }
 
+/** How much of a change the rail shows before it points at Context for the rest. */
+const WHOLE_MAX = 6000;
+
+/**
+ * What a proposal would change, in full and in the agent's own words, for the owner to read before
+ * they answer. The module in the rail is stored with a short excerpt (it is also what a
+ * notification carries); opened, it must show all of it, or the owner approves what they cannot read.
+ */
+export function wholeChange(p: Pick<Proposal, "kind" | "title" | "patch" | "excerpt">): string {
+  const parts: string[] = [];
+  if (p.kind === "archive") return "Removes this rule.";
+  if (p.kind === "create") parts.push(`New rule, “${p.patch.title ?? p.title}”:\n${(p.patch.body || p.patch.summary || "").trim()}`);
+  else {
+    if (p.patch.title) parts.push(`Renames it “${p.patch.title}”.`);
+    if (p.patch.body !== undefined) parts.push(`Rewrites it:\n${p.patch.body.trim()}`);
+    else if (p.patch.body_append) parts.push(`Adds:\n${p.patch.body_append.trim()}`);
+    else if (p.patch.body_replace) parts.push(`Changes:\n${p.patch.body_replace.find.trim()}\n\nto:\n${p.patch.body_replace.replace.trim()}`);
+    if (p.patch.summary !== undefined) parts.push(`Changes its summary: ${p.patch.summary.trim()}`);
+  }
+  const all = parts.join("\n\n").trim() || p.excerpt;
+  return all.length > WHOLE_MAX ? all.slice(0, WHOLE_MAX).trimEnd() + "…\n\nThe rest is under Context, System." : all;
+}
+
+/** For the rail: the whole change behind each module that asks about a house rule, by module id. */
+export async function wholeChanges(moduleIds: string[]): Promise<Map<string, string>> {
+  if (!moduleIds.length) return new Map();
+  const rows = await q<Proposal & { module_id: string }>("SELECT * FROM rule_proposals WHERE module_id = ANY($1) AND status = 'pending'", [moduleIds]);
+  return new Map(rows.map((p) => [p.module_id, wholeChange(p)]));
+}
+
 async function withNames(rows: Proposal[]) {
   const agents = await listAgents(true);
   return rows.map((p) => ({ ...p, by: agents.find((a) => a.id === p.agent_id)?.handle ?? p.agent_id }));

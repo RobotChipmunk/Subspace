@@ -267,7 +267,16 @@ async function storedModules(): Promise<RailModule[]> {
   const pages = ids.length ? await q<{ id: string; title: string }>("SELECT id, title FROM context_nodes WHERE id = ANY($1) AND NOT archived", [ids]) : [];
   const taskIds = [...new Set(rows.map((r) => r.todo_id).filter(Boolean))] as string[];
   const tasks = taskIds.length ? await q<{ id: string; title: string }>("SELECT id, title FROM todos WHERE id = ANY($1)", [taskIds]) : [];
-  return rows.map((r) => ({ ...r, page: pages.find((p) => p.id === r.page_id) ?? null, task: tasks.find((t) => t.id === r.todo_id) ?? null }));
+  // A module that asks about a house rule is stored with a short excerpt of the change. Shown to
+  // the owner, it carries the whole change, so they can read all of what they are approving.
+  const { isProposalModule, wholeChanges } = await import("./rules");
+  const whole = await wholeChanges(rows.filter((r) => isProposalModule(r.key)).map((r) => r.id));
+  return rows.map((r) => ({
+    ...r,
+    ...(whole.has(r.id) ? { blocks: r.blocks.map((b) => (b.type === "callout" ? { ...b, text: whole.get(r.id)! } : b)) as AnyBlock[] } : {}),
+    page: pages.find((p) => p.id === r.page_id) ?? null,
+    task: tasks.find((t) => t.id === r.todo_id) ?? null,
+  }));
 }
 
 /** Everything not yet expired, including modules scheduled for later and ones the owner has cleared. For agents. */
