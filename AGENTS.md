@@ -259,3 +259,7 @@ being true. Read this list before starting work.
 - iOS CI: with 33 UI tests the iPhone suite took 2,422 seconds against a 2,700-second watchdog
   (25 Nov 2026), so the limit is now 3,600 and the job's timeout 80 minutes. The suite grows by
   about a minute a test: before adding more, consider folding a new check into an existing test.
+- `ui-check`: a panel that closes with an animation is still in the page until the animation
+  ends, and a loaded CI machine draws it slowly. "Escape did not close the panel" failed once in
+  CI because the check looked 600ms later. Wait for the element to be detached
+  (`waitFor({ state: "detached" })`), never for a fixed time, before saying something did not close.

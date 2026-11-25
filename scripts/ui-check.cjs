@@ -2253,8 +2253,8 @@ async function run(profile) {
     await noSidewaysScroll("chat panel");
     await shot("chat");
     await page.keyboard.press("Escape");
-    await settle(600);
-    if (await panel.count()) fail("chat: Escape did not close the panel");
+    // it leaves with a short animation, which a busy machine draws slowly: wait for it to have gone
+    await panel.waitFor({ state: "detached", timeout: 5000 }).catch(() => fail("chat: Escape did not close the panel"));
   });
   await step("task given to an agent, with a conversation", async () => {
     // still on the task that search opened; which one it is, the chat message just sent says
