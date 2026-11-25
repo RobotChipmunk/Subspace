@@ -1,6 +1,6 @@
 /** End-to-end check of the MCP surface against the database in DATABASE_URL. */
 import { agentActivity, createAgent, issueToken, updateAgent } from "../src/lib/core/agents";
-import { moduleActed, moduleLater, removeModule, sentAnswers } from "../src/lib/core/rail";
+import { activeModules, moduleActed, moduleLater, removeModule, sentAnswers } from "../src/lib/core/rail";
 import { assignRoutine, listRoutines, tick } from "../src/lib/core/routines";
 import { decide, ensureSystem, pendingProposals } from "../src/lib/core/rules";
 import { ensureCurrent, tellLapsed } from "../src/lib/core/current";
@@ -534,6 +534,16 @@ async function main() {
     } else await decide(owner, asked.id, true);
     const applied = await getNode(rule.id);
     if (!applied.body.endsWith("- Second line.") || applied.updated_by !== s.id) throw new Error("an approved proposal was not applied as written: " + JSON.stringify({ body: applied.body, by: applied.updated_by }));
+    // a long rule: the module the owner opens in the rail carries all of it, not the excerpt it is stored with
+    const long = "- " + Array.from({ length: 30 }, (_, i) => `Sentence ${i + 1} of the long rule ${tag}.`).join(" ") + `\n- The very last line ${tag}.`;
+    const big = await call(s, "context_write", { parent: "/context/system", title: "Long rule " + tag, summary: "A long rule.", body: long, why: "The smoke test needs a long rule." });
+    if (!big.proposed) throw new Error("a new house rule was not held as a proposal: " + JSON.stringify(big));
+    const bigModule = (await pendingProposals()).find((x) => x.id === big.id)?.module_id;
+    if (bigModule) {
+      const shown = ((await activeModules()).find((x) => x.id === bigModule)?.blocks[0] as { text?: string } | undefined)?.text ?? "";
+      if (!shown.includes("Sentence 30 of the long rule") || !shown.endsWith(`The very last line ${tag}.`)) throw new Error("the rail does not show the whole of a proposed house rule: …" + shown.slice(-140));
+    }
+    await decide(owner, big.id, false);
     // declined: nothing changes, and it stops waiting
     const removal = await call(s, "context_archive", { id: rule.id, why: "The smoke test is over." });
     if (!removal.proposed) throw new Error("removing a house rule was not held as a proposal: " + JSON.stringify(removal));

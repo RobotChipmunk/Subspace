@@ -387,7 +387,10 @@ Patterns:
   sentence of why in 15.5px medium, then the change in a `fill` box, then "Read the rule as it
   would be" to see the whole note, then Approve (accent-soft) and Decline (fill). Answering in
   either place does the same thing and clears both. Nothing shows when nothing is waiting: there
-  is no empty state and no count.
+  is no empty state and no count. In the rail, the module's face carries only its title; opened,
+  its callout carries the whole change in the agent's words, however long (a new rule in full,
+  what is added, or what changes to what), because what is approved must be readable where it is
+  approved. Its notification keeps the short excerpt.
 - **Answers sent to an agent** (`Sent` in `agents/page.tsx`; `AgentsRows.swift` in the app): what
   the owner has answered an agent from the rail is kept as a record on the Agents screen. Beside
   the agent's name, while any answer has not been read, a quiet `fill` chip says "1 waiting". In

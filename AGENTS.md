@@ -263,3 +263,9 @@ being true. Read this list before starting work.
   ends, and a loaded CI machine draws it slowly. "Escape did not close the panel" failed once in
   CI because the check looked 600ms later. Wait for the element to be detached
   (`waitFor({ state: "detached" })`), never for a fixed time, before saying something did not close.
+- A house-rule proposal's rail module was stored with a 180-character excerpt and nothing in the
+  rail showed more, so the owner was asked to approve a rule they could not read (26 Nov 2026).
+  The module is still stored short (its notification uses that), but what the owner's rail is
+  given carries the whole change (`wholeChange` in `core/rules.ts`, swapped in by
+  `storedModules`). When a limit exists for what agents may write, check what it does to text the
+  server itself puts there for the owner to decide on.
