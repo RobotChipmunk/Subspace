@@ -2261,11 +2261,13 @@ async function run(profile) {
     const chat = await page.evaluate(() => fetch("/api/v1/chat").then((r) => r.json()));
     const id = [...chat.messages].reverse().find((m) => m.about?.type === "todo")?.about.id;
     const pill = page.locator("label[data-assignee]");
+    // what the pill says (the menu inside it lists every agent, so its own words are read, not the whole label's)
+    const says = async () => (await pill.locator("span").first().innerText()).trim();
     await pill.scrollIntoViewIfNeeded();
     await reachable(pill, "the pill that gives a task to an agent");
     await page.getByLabel("Give to").selectOption({ label: "Scout" });
     await settle(1000);
-    if (!(await pill.innerText()).includes("Scout")) fail(`task: the pill does not name the agent the task was given to ("${await pill.innerText()}")`);
+    if ((await says()) !== "Scout") fail(`task: the pill does not name the agent the task was given to ("${await says()}")`);
     // the conversation is under the notes, and its field says who a message goes to
     const box = page.locator("[data-thread] textarea");
     await box.scrollIntoViewIfNeeded();
@@ -2293,7 +2295,7 @@ async function run(profile) {
     // as it was, for the next screen size
     await page.getByLabel("Give to").selectOption("");
     await settle(800);
-    if ((await pill.innerText()).trim() !== "Give to") fail("task: taking the task back did not clear the pill");
+    if ((await says()) !== "Give to") fail(`task: taking the task back did not clear the pill ("${await says()}")`);
   });
 
   await browser.close();
