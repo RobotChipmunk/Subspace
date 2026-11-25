@@ -122,6 +122,8 @@ def todos_for(view, plan=None):
 
 
 CHAT = []
+THREADS = {}
+SEEN = []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -153,6 +155,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "me":
             usual = next((a["id"] for a in AGENTS if a.get("kind") == "agent"), None)
             return self.reply(200, {"me": ME, "agents": AGENTS, "guests": [], "trackers": [], "timezone": "America/Los_Angeles", "default_agent": usual})
+        # what the owner opens: counted, never shown here
+        if path == "seen":
+            if m == "POST":
+                SEEN.extend(self.body().get("events", []))
+                return self.reply(200, {"kept": len(SEEN)})
+            if m == "DELETE":
+                SEEN.clear()
+            return self.reply(200, {"count": len(SEEN), "since": ago(600) if SEEN else None, "keep_days": 180})
         # chat from any screen: every message together; a new one says what was on screen
         if path == "chat":
             usual = next((a["id"] for a in AGENTS if a.get("kind") == "agent"), None)
@@ -194,6 +204,15 @@ class Handler(BaseHTTPRequestHandler):
             t = {"id": f"t_{random.randint(10000, 99999)}", "title": b.get("title", ""), "scope": "backlog" if view == "backlog" else "day", "date": None if view == "backlog" else TODAY, "done": False, "tags": b.get("tags", []), "position": len(TODOS) + 1, "created_at": ago(0), "updated_at": ago(0), "has_notes": False}
             TODOS.append(t)
             return self.reply(200, t)
+        # a task's conversation
+        mm = re.fullmatch(r"todos/([^/?]+)/thread", path)
+        if mm:
+            said = THREADS.setdefault(mm.group(1), [])
+            if m == "POST":
+                msg = {"id": f"p_{random.randint(10000, 99999)}", "author": ME["id"], "channel": "todo", "todo_id": mm.group(1), "body": self.body().get("body", ""), "created_at": ago(0)}
+                said.append(msg)
+                return self.reply(200, msg)
+            return self.reply(200, {"messages": said})
         mm = re.fullmatch(r"todos/([^/?]+)", path)
         if mm and mm.group(1) != "bin":
             t = next((t for t in TODOS if t["id"] == mm.group(1)), None)
@@ -208,6 +227,9 @@ class Handler(BaseHTTPRequestHandler):
                 places = {"today": ("day", TODAY), "next_week": ("week", NEXT_MONDAY), "backlog": ("backlog", None)}
                 if b.get("view") in places:
                     t["scope"], t["date"] = places[b["view"]]
+                # given to an agent, or taken back
+                if "assignee" in b:
+                    t["assignee"] = None if b["assignee"] in (None, "", "none") else b["assignee"]
             return self.reply(200, {**t, "notes": ""})
         if path == "plan":
             return self.reply(200, {"plan": FOLDERS_PLAN})

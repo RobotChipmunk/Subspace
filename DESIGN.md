@@ -165,6 +165,19 @@ Patterns:
     agent a message goes to when it names nobody ("Message Claude"); typing @ offers the others.
   - An accent dot on the chat button says an agent has answered since chat was last open. The
     Agents tab no longer carries that dot.
+- **Following, by standing** (`following/page.tsx`; `FollowingScreen.swift` in the app): topics are
+  listed by where they stand, with no headings: those with something new since the owner last
+  opened them, then those going along, then those gone quiet (no update for seven days), then
+  those that never started. Beside the title sits one small status: an accent dot and "3 new" in
+  accent; or how long ago it last had an update; or "Quiet for 9 days". Quiet and never-updated
+  rows stand back at 60% until opened. Opening a topic reads it: its count clears, and in its
+  timeline the updates that were new keep the accent dot while it stays open (with nothing new,
+  the latest has it). A topic keeps the place it had when the screen opened, so reading one does
+  not move it under the finger.
+- **What is kept** (`Kept` in `agents/page.tsx`; `AgentsKept` in the app): at the foot of the
+  Agents screen, centred 13px `ink3` text says plainly what the app keeps about how it is used
+  (which screens and things are opened, what is searched for; nothing typed) and how much, with
+  one Confirm delete, "Clear this record". No heading, no settings.
 - **Rows** (todos, links): no dividers; hover fill; title, one secondary line, one meta line.
   A row that stands for something in another place (a task in a person's list) names that place
   in a word or two at its end, in meta type.
@@ -382,6 +395,13 @@ Patterns:
   each one in two lines: the button in quotes and the module it was on, then when, and "waiting
   for Scout" or "Scout has picked it up" in `ink3`. Nothing in it can be tapped. An answer goes
   from the list when the agent removes its module, or after two weeks.
+- **What an agent did, and its standing brief** (`Did` and `Brief` in `agents/page.tsx`;
+  `AgentsBrief.swift` in the app): an agent's opened details begin with one plain sentence in
+  `ink2` on what it contributed this week ("This week: 14 posts, 3 replies and 2 notes in context.
+  Last wrote in context 3d ago."), never a table of numbers; an agent that only reads is not said
+  to have written nothing. Under it, one field on `fill` with 16px corners and no label: the
+  standing brief, whose placeholder says what it is for and that the agent reads it every
+  session. It saves as the keyboard leaves it, like every text field.
 - **Routines** (`Routines` in `agents/page.tsx`; `AgentsRoutines.swift` in the app): in an agent's
   open panel, after Access, a `fill` list headed "Routines", one row per duty that comes round on
   a schedule. A row is the routine's name, one line on what it is, and a line in `ink3` on where
@@ -431,6 +451,20 @@ Patterns:
 - **Repeat** (todo detail): a pill beside the date that opens the system menu (Never, Every day,
   Every 3 days, Every week, Every 2 weeks, Every month, Every year); it turns `accent-soft` while set, and one
   meta line beneath says what finishing will do. A repeating row carries a small repeat icon.
+- **Give to** (todo detail; `TodosGiveToMenu` in the app): a pill after Repeat, built the same
+  way, that opens the system menu of the owner's agents with "Nobody" first. Quiet ("Give to", a
+  small bot icon) while the task is nobody's; `accent-soft` with the agent's face and name while it
+  is given to one. In a list, a task that is given to an agent ends its row with that agent's
+  face, 18px, and nothing else. It is only shown once there is an agent to give a task to.
+- **A task's conversation** (`Thread` in `todos/page.tsx`; `TodosThread.swift` in the app): under
+  the notes, with no heading. It is built of the same bubbles as chat (`Bubble` in `Dock.tsx`,
+  `ChatRow` in the app): the owner's on the right on `accent-soft`, an agent's on the left on
+  `fill` with its face where the speaker changes. It ends in one message field whose placeholder
+  names who will hear ("Message Scout": whoever the task is given to, else the default agent).
+  An empty conversation is just that field. Notes hold what should last; the conversation holds
+  the back and forth, so nothing an agent says there is marked for review. A task an agent has
+  spoken on is marked in its list like one whose notes an agent changed, until it is opened. On
+  a task shared with another person the line under the title says they can see what is said.
 - **Next one added** (`NextNote` in `todos/page.tsx`): finishing a repeating task adds the next
   one, counted from the day it was finished, not from its date. The finished task then carries
   one meta line, in its row and in its detail: "Next one added for <day>" with an accent "Open"

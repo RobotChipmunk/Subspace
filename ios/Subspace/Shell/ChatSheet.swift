@@ -233,14 +233,16 @@ struct ChatSheet: View {
 }
 
 /// One message: the owner's on the right in accent, an agent's on the left with its face where the
-/// speaker changes.
-private struct ChatRow: View {
+/// speaker changes. Chat and a task's conversation are both built of these.
+struct ChatRow: View {
     var post: Post
     var mine: Bool
     var gap: String?
     var about: String?
     var face: Agent?
     var handles: [String]
+    /// The start of its name for the UI tests: "chat", or "todos.thread" in a task.
+    var tag = "chat"
     var onPage: (String) -> Void
 
     var body: some View {
@@ -259,7 +261,7 @@ private struct ChatRow: View {
                     .padding(.trailing, 4)
                     .padding(.top, 4)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .accessibilityIdentifier("chat.about.\(post.id)")
+                    .accessibilityIdentifier("\(tag).about.\(post.id)")
             }
             HStack(alignment: .bottom, spacing: 6) {
                 if !mine {
@@ -273,7 +275,7 @@ private struct ChatRow: View {
             .padding(mine ? .leading : .trailing, 44)
             .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         }
-        .accessibilityIdentifier("chat.bubble.\(post.id)")
+        .accessibilityIdentifier("\(tag).bubble.\(post.id)")
     }
 
     private var bubble: some View {

@@ -87,6 +87,28 @@ the seed): read the job log for compile errors and the test summary, and the
 batch changes and re-read Swift carefully before pushing. When you change behaviour, change the
 matching UI test in `ios/SubspaceUITests` in the same commit.
 
+## The improving session
+
+Subspace is meant to get better from how it is used. The record of what the owner opens
+(`usage().owner`), what they say to agents in chat, and `/context/self-improving-app` on the live
+Subspace are the evidence; `guide("improving")` (`src/lib/mcp/guide.ts`) says how a change is put
+to the owner; `/improve` (`.claude/commands/improve.md`) is the brief for a session that does it.
+
+The owner's decisions (25 Nov 2026), which a session follows without asking again:
+
+- A **small** change (one screen, no change to stored data or to the tools and endpoints agents
+  use, every check green) may be merged to `main` first and shown to the owner afterwards, with
+  before and after pictures and Keep / Undo. "Undo" means reverting it the same day.
+- A **large** change is never merged first. It is tried on a preview, and merged only after the
+  owner approves it.
+- The iPhone and iPad apps cannot show a preview: they show that there is a proposal and link to
+  the web.
+- The feed is left as it is, and the task list is left alone for now. Ideas is parked.
+
+Previews share the production database unless the hosting gives each preview its own (see
+Lessons), so until that is set up a large change that alters stored data must not be exercised on
+a preview: say so in the proposal instead.
+
 ## Lessons
 
 When something costs you time in this repo (a wrong assumption, a setup step that failed, a

@@ -6,7 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { ago, api, fetcher, soft, spring, useDirectUnread, useMe, useShown } from "@/lib/client";
 import type { About, Post } from "@/lib/core/posts";
+import type { Agent } from "@/lib/core/util";
 import { Avatar, PageCard, Rich, SendButton } from "./bits";
+import { reportSearch, screenOf } from "@/lib/seen";
 import { MentionInput } from "./MentionInput";
 
 /**
@@ -17,11 +19,6 @@ import { MentionInput } from "./MentionInput";
 export type DockPanel = "search" | "chat" | null;
 
 const SCREENS: Record<string, string> = { feed: "Feed", todos: "Todos", journal: "Journal", ideas: "Ideas", context: "Context", following: "Following", agents: "Agents" };
-/** Which screen an address belongs to. A page opened by its own address is part of Context. */
-export const screenOf = (path: string) => {
-  const first = path.split("/")[1] ?? "";
-  return first === "page" ? "context" : first in SCREENS ? first : "feed";
-};
 
 export function DockButton({ kind, open, onToggle, dot }: { kind: "search" | "chat"; open: boolean; onToggle: () => void; dot?: boolean }) {
   const Icon = kind === "search" ? Search : MessageCircle;
@@ -117,6 +114,7 @@ const marked = (s: string) => s.split("**").map((part, i) => (i % 2 ? <mark key=
 
 function SearchPanel({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const path = usePathname();
   const [query, setQuery] = useState("");
   const [reading, setReading] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -127,8 +125,21 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => field.current?.focus({ preventScroll: true }), []);
   useEffect(() => setReading(null), [q]);
 
+  // What was searched for, how much it found and whether a result was opened is kept (never the
+  // results themselves): once for the words in the field when a result is opened or the panel closes.
+  const last = useRef({ q: "", count: 0, path, told: "" });
+  last.current = { ...last.current, q, count: hits.length, path };
+  const tell = (opened: string | null) => {
+    const { q: words, count, path: at, told } = last.current;
+    if (words.length < 2 || (told === words && !opened)) return;
+    last.current.told = words;
+    reportSearch(at, words, count, opened);
+  };
+  useEffect(() => () => tell(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   function open(h: Hit) {
     const href = hitHref(h);
+    tell(h.id);
     if (!href) return setReading(reading === h.id ? null : h.id);
     onClose();
     router.push(href, { scroll: false });
@@ -269,13 +280,7 @@ function ChatPanel() {
             <div key={m.id} className="flex flex-col">
               {gap && <div className="py-1.5 text-center text-[12px] text-ink3">{/^\d+[mhd]$/.test(ago(m.created_at)) ? `${ago(m.created_at)} ago` : ago(m.created_at)}</div>}
               {label && (label !== lastAbout || gap) && <div data-about className="mb-0.5 mt-1 max-w-[85%] self-end truncate pr-1 text-[12px] text-ink3">{label}</div>}
-              <div className={`flex max-w-[88%] items-end gap-1.5 ${mine ? "self-end" : "self-start"}`}>
-                {!mine && <span className="w-[22px] flex-none">{from && who && <Avatar agent={who} size={22} />}</span>}
-                <div className={`min-w-0 whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2 text-[15px] leading-[1.42] ${mine ? "bg-accent-soft" : "bg-fill"}`}>
-                  <Rich text={m.body} handles={handles} />
-                  {m.page && <PageCard page={m.page} />}
-                </div>
-              </div>
+              <Bubble post={m} mine={mine} face={from ? who : undefined} handles={handles} />
             </div>
           );
         })}
@@ -294,6 +299,22 @@ function ChatPanel() {
         {error && <p className="ml-1 mt-1.5 text-[12.5px] text-danger">{error}</p>}
       </div>
     </>
+  );
+}
+
+/**
+ * One message in a conversation: the owner's on the right on the accent wash, anyone else's on the
+ * left with their face where the speaker changes. Chat and a task's conversation are both built of these.
+ */
+export function Bubble({ post, mine, face, handles }: { post: Post; mine: boolean; face?: Agent; handles: string[] }) {
+  return (
+    <div data-bubble className={`flex max-w-[88%] items-end gap-1.5 ${mine ? "self-end" : "self-start"}`}>
+      {!mine && <span className="w-[22px] flex-none">{face && <Avatar agent={face} size={22} />}</span>}
+      <div className={`min-w-0 whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2 text-[15px] leading-[1.42] ${mine ? "bg-accent-soft" : "bg-fill"}`}>
+        <Rich text={post.body} handles={handles} />
+        {post.page && <PageCard page={post.page} />}
+      </div>
+    </div>
   );
 }
 

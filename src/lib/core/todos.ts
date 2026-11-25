@@ -2,7 +2,8 @@ import { checkBlocks, mendBlocks } from "../blocks";
 import { q, q1 } from "../db";
 import { listPlan, planScope, readPlan, type PlanItem } from "./plan";
 import { TODO_RAIL, taskChanged, type TodoRail } from "./rail";
-import { addDays, bad, cleanTags, findMentions, indexDoc, listGuests, logEvent, mondayOf, newId, notFound, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
+import { getPost, REPLY_MAX, REPLY_SLACK, resolvePage, tooLong, withPages, type Post } from "./posts";
+import { addDays, agentById, bad, cleanTags, defaultAgent, findMentions, indexDoc, listGuests, logEvent, mondayOf, newId, notFound, oneLine, timezone, todayIn, unindexDoc, weekday, type Agent } from "./util";
 
 export type Todo = {
   id: string;
@@ -33,6 +34,10 @@ export type Todo = {
   plan_id: string | null;
   /** That line's name, as the lists show it. */
   plan?: string | null;
+  /** The agent the task has been given to, if any (an agent's id). */
+  assignee?: string | null;
+  /** How many things have been said in the task's conversation. */
+  said?: number;
   /** The rail module this task is tied to, while that module exists: the one pointing at it, or the one it was kept from with "Later". */
   rail?: TodoRail | null;
   created_at: string;
@@ -67,7 +72,8 @@ const PLAN_NAME = "(SELECT p.title FROM plan_items p WHERE p.id = todos.plan_id)
 const NEXT_DATE = "(SELECT n.date FROM todos n WHERE n.id = todos.next_id AND n.deleted_at IS NULL) AS next_date";
 /** What makes two tasks neighbours in one ordered list: the same day, week or list (and, while waiting on a guest's list, the same guest). */
 const PLACE = "scope, date, (CASE WHEN scope = 'guest' THEN guest_id END)";
-const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, tags, plan_id, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}, ${PLAN_NAME}`;
+const SAID = "(SELECT count(*)::int FROM posts s WHERE s.todo_id = todos.id) AS said";
+const LIST_COLS = `id, title, scope, date, position, done, done_at, ai_unseen, created_by, guest_id, repeat, next_id, tags, plan_id, assignee, created_at, updated_at, (notes <> '') AS has_notes, ${NEXT_DATE}, ${PLAN_NAME}, ${SAID}`;
 
 /** Unfinished tasks never get left behind: past days roll to today, past weeks roll to this week. */
 async function rollover(today: string) {
@@ -207,7 +213,7 @@ export async function listTodos(view: string, opts: { tags?: string[]; /** a lin
 }
 
 export async function getTodo(id: string): Promise<Todo> {
-  const t = await q1<Todo>(`SELECT *, ${NEXT_DATE}, ${PLAN_NAME}, ${TODO_RAIL} FROM todos WHERE id = $1`, [id]);
+  const t = await q1<Todo>(`SELECT *, ${NEXT_DATE}, ${PLAN_NAME}, ${TODO_RAIL}, ${SAID} FROM todos WHERE id = $1`, [id]);
   if (!t) throw notFound("No such todo");
   return t;
 }
@@ -278,11 +284,11 @@ export function markAgentText(md: string, handle: string): string {
     .join("\n");
 }
 
-async function afterWrite(actor: Agent, t: Todo, type: string, summary: string, extraMentions: string[] = []) {
+async function afterWrite(actor: Agent, t: Todo, type: string, summary: string, extraMentions: string[] = [], extraData: Record<string, unknown> = {}) {
   await indexTodo(t);
   // A guest's task carries someone else's words: an @handle in its title must not call on the owner's agents.
   const mentions = [...new Set([...(t.guest_id ? [] : await findMentions(t.title)), ...extraMentions])];
-  await logEvent({ actor: actor.id, type, entity_type: "todo", entity_id: t.id, summary, mentions, data: { scope: t.scope, date: t.date } });
+  await logEvent({ actor: actor.id, type, entity_type: "todo", entity_id: t.id, summary, mentions, data: { scope: t.scope, date: t.date, ...extraData } });
 }
 
 function readRepeat(v: unknown): Repeat | null {
@@ -304,7 +310,17 @@ async function createNext(actor: Agent, t: Todo, today: string): Promise<string>
   return id;
 }
 
-export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null; tags?: string[] | string; /** the line of the plan it is part of */ plan?: string | null; /** where it goes among the tasks of its day or list, 1 first; left out, it goes last */ order?: number }) {
+/** The agent a task is given to, from an id or an @handle; null, "" or "none" for nobody. */
+async function readAssignee(v: unknown): Promise<Agent | null> {
+  if (v === null || v === "" || v === "none") return null;
+  if (typeof v !== "string") throw bad("assignee is an agent's @handle, or null to take the task back.");
+  const ref = v.trim().replace(/^@/, "");
+  const a = await q1<{ id: string }>("SELECT id FROM agents WHERE (id = $1 OR handle = lower($1)) AND kind = 'agent' AND NOT archived", [ref]);
+  if (!a) throw bad(`No agent "${v}". A task is given to one of the owner's agents, by its @handle.`);
+  return agentById(a.id);
+}
+
+export async function createTodo(actor: Agent, input: { title: string; view?: string; notes?: string; repeat?: string | null; tags?: string[] | string; /** the line of the plan it is part of */ plan?: string | null; /** where it goes among the tasks of its day or list, 1 first; left out, it goes last */ order?: number; /** the agent it is given to, by @handle or id */ assignee?: string | null }) {
   const title = (input.title ?? "").trim();
   if (!title) throw bad("Todo needs a title.");
   const cal = await calendar();
@@ -319,12 +335,14 @@ export async function createTodo(actor: Agent, input: { title: string; view?: st
   const tags = input.tags === undefined ? [] : await readTags(input.tags);
   const order = input.order === undefined || input.order === null ? null : readOrder(input.order);
   const plan = input.plan === undefined ? null : await readPlan(input.plan);
-  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat, tags, plan_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", [
-    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat, tags, plan,
+  const to = input.assignee === undefined ? null : await readAssignee(input.assignee);
+  await q("INSERT INTO todos (id, title, notes, scope, date, position, created_by, ai_unseen, guest_id, repeat, tags, plan_id, assignee) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", [
+    id, title.slice(0, 300), notes, add.scope, add.date, await nextPosition(add.scope, add.date), actor.id, actor.kind === "agent", add.guest_id ?? null, repeat, tags, plan, to?.id ?? null,
   ]);
   if (order !== null) await placeAt({ id, scope: add.scope, date: add.date, guest_id: add.guest_id ?? null }, order);
   const t = await getTodo(id);
-  await afterWrite(actor, t, "todo.created", title, await findMentions(notes));
+  // whoever it is given to is told, as if named
+  await afterWrite(actor, t, "todo.created", to && to.id !== actor.id ? `${title} (given to @${to.handle})` : title, [...(await findMentions(notes)), ...(to && to.id !== actor.id ? [to.handle] : [])], to && to.id !== actor.id ? { assignee: to.handle } : {});
   return t;
 }
 
@@ -347,6 +365,8 @@ export async function updateTodo(
     plan?: string | null;
     /** where it goes among the tasks of its day or list (after any move in the same change), 1 first */
     order?: number;
+    /** the agent it is given to, by @handle or id; null, "" or "none" takes it back */
+    assignee?: string | null;
   },
 ) {
   const before = await getTodo(id);
@@ -374,6 +394,15 @@ export async function updateTodo(
   if (patch.plan !== undefined) {
     const plan = await readPlan(patch.plan);
     if (plan !== (before.plan_id ?? null)) set("plan_id", plan);
+  }
+  // Giving the task to an agent tells that agent, as naming it would.
+  let given: Agent | null = null;
+  if (patch.assignee !== undefined) {
+    const to = await readAssignee(patch.assignee);
+    if ((to?.id ?? null) !== (before.assignee ?? null)) {
+      set("assignee", to?.id ?? null);
+      if (to && to.id !== actor.id) given = to;
+    }
   }
   // made after the update, so the next round carries any new title or notes from the same change
   let makeNext = false;
@@ -449,9 +478,51 @@ export async function updateTodo(
   // Routine typing in notes by the owner isn't news; everything else is logged.
   const quiet = actor.kind === "human" && type === "todo.updated" && notes !== undefined && sets.length === 2;
   const onlySeen = patch.seen && sets.length === 2;
-  if (!quiet && !onlySeen) await afterWrite(actor, t, type, summary, newMentions);
+  if (given) {
+    // one event says it was given, whatever else changed with it
+    await afterWrite(actor, t, "todo.assigned", `${t.title}: given to @${given.handle}`, [...newMentions, given.handle], { assignee: given.handle });
+  } else if (!quiet && !onlySeen) await afterWrite(actor, t, type, summary, newMentions);
   else await indexTodo(t);
   return t;
+}
+
+// ---------- A task's conversation ----------
+// What is asked and answered about a task is said on the task: one conversation each, kept apart
+// from its notes, which hold the lasting result. The owner and any agent can speak in it. Whoever
+// the task is given to hears everything said there, as does everyone who has already spoken; the
+// owner sees the task marked until they have looked. On a task shared with another person, that
+// person reads the whole conversation.
+
+/** Everything said on a task, oldest first. */
+export async function todoThread(id: string, limit = 200): Promise<Post[]> {
+  return withPages(await q<Post>("SELECT * FROM posts WHERE todo_id = $1 ORDER BY id LIMIT $2", [id, Math.min(limit, 500)]));
+}
+
+export async function sayOnTodo(actor: Agent, id: string, bodyIn: string, page?: string | null): Promise<Post> {
+  if (actor.kind === "guest") throw bad("Only the owner and their agents speak in a task's conversation.");
+  const t = await getTodo(id);
+  if ((t as Todo & { deleted_at?: string | null }).deleted_at) throw notFound("No such todo");
+  const body = (bodyIn ?? "").trim();
+  if (!body) throw bad("Message is empty.");
+  if (body.length > REPLY_MAX + REPLY_SLACK) throw tooLong("Message", body.length, REPLY_MAX);
+  const postId = newId("p");
+  const mentions = await findMentions(body);
+  const pageId = await resolvePage(page);
+  await q("INSERT INTO posts (id, author, channel, body, mentions, page_id, todo_id) VALUES ($1,$2,'todo',$3,$4,$5,$6)", [postId, actor.id, body, mentions, pageId, id]);
+  await indexDoc("post", postId, t.title, body);
+  // who hears it: whoever the task is given to, every agent that has spoken on it, anyone named
+  const spoke = await q<{ handle: string }>("SELECT DISTINCT a.handle FROM posts p JOIN agents a ON a.id = p.author WHERE p.todo_id = $1 AND a.kind = 'agent' AND NOT a.archived AND p.author <> $2", [id, actor.id]);
+  const holder = t.assignee && t.assignee !== actor.id ? await agentById(t.assignee) : null;
+  const tell = [...new Set([...mentions, ...spoke.map((s) => s.handle), ...(holder && !holder.archived ? [holder.handle] : [])])];
+  // the owner speaking to nobody in particular, on a task given to nobody, is heard by the default agent, as in chat
+  if (!tell.length && actor.kind === "human") {
+    const usual = await defaultAgent();
+    if (usual) tell.push(usual.handle);
+  }
+  // an agent's words are new to the owner: the task shows that until they have looked
+  await q(`UPDATE todos SET updated_at = now()${actor.kind === "agent" ? ", ai_unseen = true" : ""} WHERE id = $1`, [id]);
+  await logEvent({ actor: actor.id, type: "todo.said", entity_type: "todo", entity_id: id, summary: `${t.title}: ${oneLine(body, 200)}`, mentions: tell, data: { post: postId, named: mentions } });
+  return (await getPost(postId))!;
 }
 
 export async function reorderTodos(actor: Agent, ids: string[]) {
@@ -463,7 +534,7 @@ export async function reorderTodos(actor: Agent, ids: string[]) {
 export async function deleteTodo(actor: Agent, id: string, forever = false) {
   const t = await getTodo(id);
   if (forever) {
-    await q("DELETE FROM todos WHERE id = $1 AND deleted_at IS NOT NULL", [id]);
+    if (await q1("DELETE FROM todos WHERE id = $1 AND deleted_at IS NOT NULL RETURNING id", [id])) await dropThreads([id]);
     return;
   }
   if ((t as Todo & { deleted_at?: string | null }).deleted_at) return;
@@ -495,5 +566,12 @@ export async function binnedTodos(): Promise<BinnedTodo[]> {
 
 /** Tasks binned more than BIN_DAYS days ago are removed for good. Runs whenever the lists are read; no scheduler needed. */
 async function emptyOldBin() {
-  await q("DELETE FROM todos WHERE deleted_at < now() - make_interval(days => $1)", [BIN_DAYS]);
+  const gone = await q<{ id: string }>("DELETE FROM todos WHERE deleted_at < now() - make_interval(days => $1) RETURNING id", [BIN_DAYS]);
+  if (gone.length) await dropThreads(gone.map((g) => g.id));
+}
+
+/** A task removed for good takes its conversation with it. */
+async function dropThreads(ids: string[]) {
+  const posts = await q<{ id: string }>("DELETE FROM posts WHERE todo_id = ANY($1) RETURNING id", [ids]);
+  if (posts.length) await q("DELETE FROM search_docs WHERE entity_type = 'post' AND entity_id = ANY($1)", [posts.map((p) => p.id)]);
 }

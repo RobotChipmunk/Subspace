@@ -507,6 +507,8 @@ struct AgentsAgentRow: View {
         let origin = agentsOrigin(app.api)
         return VStack(alignment: .leading, spacing: 14) {
             Rectangle().fill(Theme.line).frame(height: 1)
+            AgentsDid(agent: agent)
+            AgentsBrief(agent: agent)
             Text("Add this address as a custom connector (MCP server) in \(agent.name). The app will open a Subspace page where you approve it. The address is not a secret: nothing works until you approve. In Claude: Settings → Connectors → Add custom connector.")
                 .font(.ssSecondary)
                 .foregroundStyle(Theme.ink2)

@@ -1,18 +1,21 @@
 "use client";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Eye, EyeOff, Flag, Pencil, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
+import { ArrowUpRight, Bot, Check, ChevronLeft, ChevronRight, Eye, EyeOff, Flag, Pencil, Plus, Repeat as RepeatIcon, Tag as TagIcon, Undo2 } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { Avatar } from "@/components/bits";
+import { Avatar, SendButton } from "@/components/bits";
+import { Bubble } from "@/components/Dock";
+import { MentionInput } from "@/components/MentionInput";
 import { DatePill } from "@/components/DatePicker";
 import { Editor } from "@/components/Editor";
 import { Floating } from "@/components/Floating";
 import { TagPills } from "@/components/TagPills";
 import { api, fetcher, soft, spring, useMe, useSaver, useShowing } from "@/lib/client";
 import type { PlanItem } from "@/lib/core/plan";
+import type { Post } from "@/lib/core/posts";
 import type { RailAction } from "@/lib/core/rail";
 import type { BinnedTodo, Folder, Repeat, TagCount, Todo } from "@/lib/core/todos";
 
@@ -516,6 +519,8 @@ function TodoRow({
   const over = useRef<string | null>(null);
   const overGroup = useRef<string | null>(null);
   const [up, setUp] = useState(false);
+  // the agent the task is given to, shown as a face at the end of the row
+  const holder = useMe().agent(r.assignee);
   // how far the carried row has stepped back: 0 in the list, 1 away from it, 2 over a list it can land in
   const [out, setOut] = useState(0);
 
@@ -646,6 +651,11 @@ function TodoRow({
           </span>
         )}
         {r.repeat && !r.done && <RepeatIcon size={14} aria-label="Repeats" className="mt-[6px] flex-none text-ink3" />}
+        {holder && (
+          <span data-assignee aria-label={`Given to ${holder.name}`} className="mt-[3px] flex-none">
+            <Avatar agent={holder} size={18} />
+          </span>
+        )}
         {place && <span data-place className="mt-[4px] flex-none whitespace-nowrap text-[12.5px] text-ink3">{place}</span>}
       </div>
     </Reorder.Item>
@@ -1506,8 +1516,54 @@ function List({
   );
 }
 
+/**
+ * A task's conversation: what is asked and answered about it, under its notes and apart from them.
+ * What the owner writes goes to whoever the task is given to, else to the agent they name, else to
+ * the default agent; every agent that has spoken hears the rest.
+ */
+function Thread({ id, to }: { id: string; to?: string }) {
+  const { agents, me, agent, defaultAgent } = useMe();
+  const { mutate: globalMutate } = useSWRConfig();
+  const { data, mutate } = useSWR<{ messages: Post[] }>(`todos/${id}/thread`, fetcher, { refreshInterval: 6_000 });
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const handles = agents.map((a) => a.handle);
+  const messages = data?.messages ?? [];
+
+  async function send() {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    setError("");
+    setText("");
+    try {
+      const said = await api<Post>(`todos/${id}/thread`, { body: { body } });
+      await mutate((cur) => ({ messages: [...(cur?.messages ?? []).filter((m) => m.id !== said.id), said] }), { revalidate: true });
+      globalMutate((k) => typeof k === "string" && k.startsWith("todos?"));
+    } catch (e) {
+      setText(body);
+      setError((e as Error).message);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div data-thread className="mt-8 flex flex-col gap-1.5">
+      {messages.map((m, i) => (
+        <Bubble key={m.id} post={m} mine={m.author === me?.id} face={m.author !== me?.id && messages[i - 1]?.author !== m.author ? agent(m.author) : undefined} handles={handles} />
+      ))}
+      <form onSubmit={(e) => (e.preventDefault(), send())} className={`flex gap-2 rounded-[20px] bg-fill py-1.5 pl-3.5 pr-1.5 ${messages.length ? "mt-2" : ""}`}>
+        <MentionInput value={text} onChange={setText} onSubmit={send} placeholder={`Message ${to ?? defaultAgent?.name ?? "an agent"}`} className="py-[5px] text-[15px]" />
+        <SendButton show={!!text.trim()} busy={busy} />
+      </form>
+      {error && <p className="ml-1 text-[12.5px] text-danger">{error}</p>}
+    </div>
+  );
+}
+
 function Detail({ id, backLabel, folders, tags, plan, today, onOpen, onBack }: { id: string; backLabel: string; folders: Folder[]; /** the tags tasks already carry, offered when one is added */ tags: TagCount[]; /** the lines of the plan the task can be part of */ plan: PlanItem[]; today?: string; onOpen: (id: string) => void; onBack: () => void }) {
-  const { agent } = useMe();
+  const { agent, agents } = useMe();
   const { mutate: globalMutate } = useSWRConfig();
   // While notes typed here are waiting to be saved, background refreshes are held back: nothing
   // re-renders the page under the keyboard, and an older copy can never arrive mid-sentence.
@@ -1544,6 +1600,8 @@ function Detail({ id, backLabel, folders, tags, plan, today, onOpen, onBack }: {
 
   if (!todo || notes === null) return <div className="shimmer mt-16 h-8 w-2/3 rounded-full" />;
   const creator = agent(todo.created_by);
+  const helpers = agents.filter((a) => a.kind === "agent");
+  const holder = helpers.find((a) => a.id === todo.assignee);
 
   return (
     <div>
@@ -1604,6 +1662,21 @@ function Detail({ id, backLabel, folders, tags, plan, today, onOpen, onBack }: {
             ))}
           </select>
         </label>
+        {/* the agent it is given to: that agent is told, and hears what is said on the task */}
+        {helpers.length > 0 && (
+          <label data-assignee className={`relative flex h-8 max-w-[200px] cursor-pointer items-center gap-1.5 rounded-full text-[13px] font-medium transition-colors ${holder ? "bg-accent-soft pl-1.5 pr-3 text-accent" : "bg-fill px-3 text-ink2 hover:bg-fill2"}`}>
+            {holder ? <Avatar agent={holder} size={20} /> : <Bot size={14} className="flex-none" />}
+            <span className="truncate">{holder ? holder.name : "Give to"}</span>
+            <select aria-label="Give to" value={todo.assignee ?? ""} onChange={(e) => (mutate({ ...todo, assignee: e.target.value || null }, false), patch({ assignee: e.target.value || null }))} className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+              <option value="">Nobody</option>
+              {helpers.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {/* the line of the plan it is part of; only once there is a plan */}
         {plan.length > 0 && (
           <label data-part-of className={`relative flex h-8 max-w-[240px] cursor-pointer items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors ${todo.plan_id ? "bg-accent-soft text-accent" : "bg-fill text-ink2 hover:bg-fill2"}`}>
@@ -1639,12 +1712,13 @@ function Detail({ id, backLabel, folders, tags, plan, today, onOpen, onBack }: {
       {todo.guest_id && (
         <div className="ml-[40px] mt-1.5 text-[13px] text-ink2 [&>span]:ml-0">
           <FromTag id={todo.guest_id} />
-          <span className="ml-2">{todo.scope === "guest" ? `Not on a day yet. ${agent(todo.guest_id)?.name ?? "They"} can see where you put it.` : `${agent(todo.guest_id)?.name ?? "They"} can see this task, its notes and its day.`}</span>
+          <span className="ml-2">{todo.scope === "guest" ? `Not on a day yet. ${agent(todo.guest_id)?.name ?? "They"} can see where you put it.` : `${agent(todo.guest_id)?.name ?? "They"} can see this task, its notes, its day and what is said below.`}</span>
         </div>
       )}
 
       <div className="ml-[40px] mt-10 max-md:ml-0">
         <Editor value={notes} onChange={onNotes} onReviewed={() => patch({ seen: true })} />
+        {helpers.length > 0 && <Thread id={id} to={holder?.name} />}
       </div>
     </div>
   );

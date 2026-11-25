@@ -11,6 +11,8 @@ struct FollowingScreen: View {
     @State private var trackers: [Tracker]? = nil
     @State private var openID: String? = nil
     @State private var adding = false
+    /// Each topic's standing as it was when first shown: what the order is kept by.
+    @State private var placed: [String: Int] = [:]
 
     init() {}
 
@@ -36,6 +38,15 @@ struct FollowingScreen: View {
             }
         }
         .showing(.following, "tracker", id: openID, title: (trackers ?? app.trackers).first { $0.id == openID }?.title)
+        .onChange(of: (trackers ?? app.trackers).map { $0.id }, initial: true) { _, _ in
+            for t in trackers ?? app.trackers where placed[t.id] == nil { placed[t.id] = t.standing }
+        }
+        // opening a topic reads it: a moment later the list hears that nothing in it is new any more
+        .task(id: openID) {
+            guard openID != nil else { return }
+            try? await Task.sleep(for: .milliseconds(1500))
+            if !Task.isCancelled { await load() }
+        }
         // an address that names a topic ("/following?topic=<id>", as a search result does) opens it
         .onChange(of: app.pendingTopicID, initial: true) { _, id in
             guard let id else { return }
@@ -44,8 +55,20 @@ struct FollowingScreen: View {
         }
     }
 
-    private var rows: some View {
+    /// By standing: what has something new first, then what is going along, then what has gone
+    /// quiet, then what never started. A topic keeps the place it had when it was first shown, so
+    /// reading one does not send it down the list under the owner's finger.
+    private var ordered: [Tracker] {
         let list: [Tracker] = trackers ?? app.trackers
+        return list.enumerated().sorted { a, b in
+            let pa = placed[a.element.id] ?? a.element.standing
+            let pb = placed[b.element.id] ?? b.element.standing
+            return pa == pb ? a.offset < b.offset : pa < pb
+        }.map { $0.element }
+    }
+
+    private var rows: some View {
+        let list = ordered
         return VStack(spacing: 10) {
             ForEach(list, id: \.id) { t in
                 FollowingRow(
@@ -244,9 +267,20 @@ struct FollowingRow: View {
         return assigned.isEmpty ? "No agent assigned yet." : "Waiting for the first update."
     }
 
+    /// Beside the title: what is new since the owner last looked, how long it has been quiet, or when it last had an update.
+    private var status: String {
+        let fresh = tracker.new_count ?? 0
+        if !open && fresh > 0 { return "\(fresh) new" }
+        if let days = tracker.quietDays, days >= Tracker.quietAfter { return "Quiet for \(days) days" }
+        return ago(tracker.latest_at)
+    }
+
     private var header: some View {
         let hasLatest = !(tracker.latest ?? "").isEmpty
         let assigned = Array((tracker.agents ?? []).prefix(3))
+        let fresh = !open && (tracker.new_count ?? 0) > 0
+        // quiet and never-updated topics stand back until they are opened
+        let dim = !open && tracker.standing >= 2
         return Button(action: onToggle) {
             HStack(spacing: 14) {
                 TrackerTile(tracker: tracker)
@@ -258,9 +292,12 @@ struct FollowingRow: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(Theme.ink)
                             .lineLimit(1)
-                        Text(ago(tracker.latest_at))
-                            .font(.ssMeta)
-                            .foregroundStyle(Theme.ink3)
+                        if fresh {
+                            Circle().fill(Theme.accent).frame(width: 8, height: 8).alignmentGuide(.firstTextBaseline) { d in d[.bottom] + 1 }
+                        }
+                        Text(status)
+                            .font(fresh ? .system(size: 12.5, weight: .medium) : .ssMeta)
+                            .foregroundStyle(fresh ? Theme.accent : Theme.ink3)
                             .lineLimit(1)
                             .fixedSize()
                     }
@@ -281,11 +318,12 @@ struct FollowingRow: View {
                     .rotationEffect(.degrees(open ? 180 : 0))
             }
             .padding(14)
+            .opacity(dim ? 0.6 : 1)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle(scale: 0.985))
         .accessibilityLabel(tracker.title)
-        .accessibilityValue(latestLine)
+        .accessibilityValue("\(status). \(latestLine)")
         .accessibilityAddTraits(open ? .isSelected : [])
         .accessibilityIdentifier("following.row.\(tracker.id)")
     }

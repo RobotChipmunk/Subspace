@@ -23,6 +23,8 @@ struct RootView: View {
         .onChange(of: phase) { _, now in
             if now == .active, app.signedIn { Task { await app.refresh() } }
             if now == .background, app.signedIn { Notifier.scheduleRefresh() }
+            // an app put away is not being looked at; the look starts again when it comes back
+            app.lookChanged(active: now == .active)
         }
     }
 }
@@ -139,7 +141,12 @@ struct ShellView: View {
             .environment(app)
             .presentationDragIndicator(.visible)
         }
-        .onChange(of: app.tab, initial: true) { _, tab in visited.insert(tab) }
+        .onChange(of: app.tab, initial: true) { _, tab in
+            visited.insert(tab)
+            app.lookChanged()
+        }
+        // which thing is open on the screen in front is part of what is being looked at
+        .onChange(of: app.showing) { _, _ in app.lookChanged() }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
     }

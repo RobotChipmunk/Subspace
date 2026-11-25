@@ -36,14 +36,29 @@ export const ROUTINES: BuiltIn[] = [
 8. Finish with routine_done and one line on what you found. Finding no gap is a fine result: say so and raise nothing.`,
   },
   {
+    key: "context-keeper",
+    title: "Context keeper",
+    about: "Each day: bring what the agents know into step with what the owner is doing now, from their journal, tasks and plan.",
+    every: "daily",
+    brief: `Keep what the agents know in step with what the owner is doing now. Shared context is read by every agent at the start of its work; when it is behind, they all work from an old picture.
+
+1. What is new since you last ran: explore("/journal") for entries written since (read the ones that bear on their work, plans or life in full), the plan in your briefing, todo_list(view: "all") for what they have added, and changes() for what they finished or decided.
+2. What context says: your briefing's current notes, explore("/context/current"), and the notes under /context/me and /context/work, plus any note the journal points at. Look for two things: what a note says that is no longer so, and what the owner now says that no note holds.
+3. What is true for now (this week's focus, a deadline, a trip, a decision they are in the middle of) goes under /context/current with until. Write these without asking, as guide("context") says: one note per thing, the summary saying plainly what is true and since when, the body saying where you got it ("from the journal, 24 Nov"). Update a note that is there before adding another, and give a new until to one that still holds.
+4. What has changed for good (their role, a project that ended, a goal they restated) is a correction to a long-term note: context_write, keeping what is still true, with the date and where it came from. Where the owner has said it plainly, make the change. Where you are inferring, put it to them first: one rail module naming the note and the change in a sentence, with buttons that come back to you: actions [{ label: "Update it", send: "update:<slug>" }, { label: "Leave it", send: "leave:<slug>" }]. Act only on the answer.
+5. Carry over the fact, not their words about it. The journal is theirs: never copy an entry into context, and leave out how they felt unless it changes what an agent should do.
+6. Your own record: the note at /context/agents/routines/context-keeper (create it under /context/agents if missing): what you changed each day and what was left alone at their word, so nothing declined is put to them twice.
+7. Finish with routine_done and one line saying what changed. A day with nothing new is a fine result: say so.`,
+  },
+  {
     key: "system-review",
     title: "System review",
     about: "Each week: look at how Subspace was used and suggest improvements, to the agents' ways of working or to the app itself.",
     every: "weekly",
     brief: `Look at how the system was used this week and suggest what would make it work better for the owner.
 
-1. usage({ days: 7 }) gives the week in numbers: calls and failures by agent and tool, searches that found nothing, what happened to rail modules, tasks added and finished.
-2. Look for what is wasteful or not working: a tool that keeps failing and why; searches that found nothing (content that is missing, or agents using words that are not there); an agent that reads far more than it uses, or was silent; modules the owner dismissed without acting (noise) against those they acted on; tasks agents added that were deleted; context that is stale, duplicated or has summaries that no longer fit.
+1. usage({ days: 7 }) gives the week in numbers: calls and failures by agent and tool, searches that found nothing, what happened to rail modules, tasks added and finished, and under owner what the owner themselves opened: which screens and things, for how long, what they searched for, and which followed topics they looked at.
+2. Look for what is wasteful or not working: a tool that keeps failing and why; searches that found nothing (content that is missing, or agents using words that are not there); an agent that reads far more than it uses, or was silent; modules the owner dismissed without acting (noise) against those they acted on; tasks agents added that were deleted; context that is stale, duplicated or has summaries that no longer fit. And on the owner's side: a screen they did not open all week; a topic that had updates and that they have not opened (it is being written for nobody: ask whether it is still wanted before changing it); a search of theirs that opened no result; a task given to an agent that has had no answer. Read what they wrote to agents in chat about the app itself, too: it says what they want changed in their own words.
 3. Your own record: the note at /context/agents/routines/system-review (create it under /context/agents if missing). It lists what was suggested and what came of it. Do not repeat a suggestion the owner declined.
 4. Sort each improvement worth making into one of two kinds.
    a. Something agents can change themselves (how a topic is described, a note that should be split or archived, a standing instruction): raise one rail module that says the change in a few words, with buttons that come back to you: actions [{ label: "Do it", send: "approve:<slug>" }, { label: "Not this", send: "decline:<slug>" }]. On "approve", make the change; on "decline", record it.
@@ -163,6 +178,8 @@ export async function tick(): Promise<{ due: string[] }> {
   await import("./current").then((c) => c.tellLapsed()).catch((e) => console.error("current: tellLapsed failed", (e as Error).message));
   // and gives what was written lately its place in search by meaning (core/meaning.ts)
   await import("./meaning").then((m) => m.embedPending()).catch((e) => console.error("meaning: embedPending failed", (e as Error).message));
+  // and lets go of what the owner opened longer ago than it is kept (core/seen.ts)
+  await import("./seen").then((s) => s.pruneSeen()).catch((e) => console.error("seen: prune failed", (e as Error).message));
   if (!(await q1("SELECT 1 FROM routines WHERE agent_id IS NOT NULL AND next_at <= now() LIMIT 1").catch(() => null))) return { due: [] };
   const due: string[] = [];
   for (const r of ROUTINES) {
@@ -236,7 +253,7 @@ export async function routineDone(agent: Agent, jobId: string, note: unknown) {
  * The week (or any number of days) in numbers, for the system review: who called what and how
  * often it failed, searches that found nothing, what became of rail modules, and tasks.
  */
-export async function usage(days: unknown) {
+export async function usage(days: unknown, opts: { /** leave out what the owner opened: for an agent that may not see everything */ withoutOwner?: boolean } = {}) {
   const n = Math.min(Math.max(Math.round(Number(days) || 7), 1), 60);
   const since = `now() - make_interval(days => ${n})`;
   const [agents, tools, failures, empty, rail, tasks, notes, runs] = await Promise.all([
@@ -283,6 +300,8 @@ export async function usage(days: unknown) {
     // notes other agents cannot judge from far away (no summary) or should not have to read whole (long)
     // search by meaning: whether it is on, how much it covers, and what last went wrong with it
     search_by_meaning: await import("./meaning").then((m) => m.meaningStatus()).catch(() => ({ on: false })),
+    // the owner's own use of the app: which screens and things they opened, what they searched for, which topics they looked at
+    ...(opts.withoutOwner ? {} : { owner: await import("./seen").then((s) => s.seenSummary(n)).catch(() => ({ recorded: false })) }),
     context_to_tidy: notes.map((n) => ({ path: "/context/" + n.path, title: n.title, ...(n.no_summary ? { problem: "no summary" } : { problem: `long (${n.chars} characters): split it into child notes` }) })),
     reading: "calls are tool calls. chars_read is how much text each agent was given. In rail, acted is a tap on one of the module's buttons, sent a button that sent its answer to the agent, and dismissed is closed without acting: many dismissals for one agent is noise.",
   };

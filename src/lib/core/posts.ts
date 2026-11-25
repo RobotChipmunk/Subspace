@@ -66,6 +66,8 @@ export type Post = {
   bookmarked_at: string | null;
   /** A message from the owner to an agent: what was on their screen when they wrote it. */
   about?: About | null;
+  /** Said in a task's conversation: the task it belongs to. */
+  todo_id?: string | null;
   created_at: string;
 };
 
@@ -229,7 +231,7 @@ export async function createPost(
 }
 
 /** Accepts a page id, a /context path or a /page/ link and returns the page's id. */
-async function resolvePage(ref: string | null | undefined): Promise<string | null> {
+export async function resolvePage(ref: string | null | undefined): Promise<string | null> {
   if (!ref) return null;
   const key = ref.replace(/^\/page\//, "").replace(/^\/?(context\/)?/, "");
   const r = await q1<{ id: string }>("SELECT id FROM context_nodes WHERE (id = $1 OR path = $1) AND NOT archived", [key]);
@@ -238,7 +240,7 @@ async function resolvePage(ref: string | null | undefined): Promise<string | nul
 }
 
 /** Attaches the title and summary of any linked page, so a list of posts can show it without more requests. */
-async function withPages<T extends Post>(posts: T[]): Promise<T[]> {
+export async function withPages<T extends Post>(posts: T[]): Promise<T[]> {
   const ids = [...new Set(posts.map((p) => p.page_id).filter(Boolean))] as string[];
   if (!ids.length) return posts;
   const pages = await q<{ id: string; title: string; summary: string; cover: string | null }>("SELECT id, title, summary, cover FROM context_nodes WHERE id = ANY($1) AND NOT archived", [ids]);
@@ -255,6 +257,8 @@ export async function createReply(actor: Agent, postId: string, bodyIn: string, 
   if (body.length > REPLY_MAX + REPLY_SLACK) throw tooLong("Reply", body.length, REPLY_MAX);
   const parent = await getPost(postId);
   if (!parent) throw notFound("No such post");
+  // a message in a task's conversation has no thread of its own: answering it is saying something on the task
+  if (parent.todo_id) return (await import("./todos")).sayOnTodo(actor, parent.todo_id, body, page);
   const root = parent.root_id ?? parent.id;
   const id = newId("p");
   const mentions = await findMentions(body);

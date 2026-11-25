@@ -168,6 +168,7 @@ final class AppModel {
         presentedPage = nil
         dock = nil
         shown = [:]
+        look = nil
         railSheet = false
         tab = .feed
         withAnimation(.ssSoft) { signedIn = false }
@@ -323,6 +324,49 @@ final class AppModel {
     /// That thing has closed. Only what is still shown is forgotten: the screen may have opened another since.
     func unshow(_ tab: AppTab, id: String) {
         if shown[tab]?.id == id { shown[tab] = nil }
+    }
+
+    // What the owner opens (core/seen.ts on the server): which screen and thing is in front, and
+    // for how long. Nothing typed is ever sent. A look is reported when it ends.
+
+    @ObservationIgnored private var look: (screen: String, item: Showing?, since: Date)?
+
+    /// One look ends and the next begins whenever the screen or the open thing changes; with
+    /// `active` false (the app has been put away) nothing new begins.
+    func lookChanged(active: Bool = true) {
+        let ended = look
+        look = active && signedIn ? (tab.rawValue, showing, Date()) : nil
+        guard let ended else { return }
+        let seconds = Int(Date().timeIntervalSince(ended.since).rounded())
+        guard seconds >= 2 else { return }
+        var event: [String: Any] = ["screen": ended.screen, "seconds": seconds]
+        if let item = ended.item {
+            event["type"] = item.type
+            event["id"] = item.id
+            event["title"] = item.title
+        }
+        report([event])
+    }
+
+    /// A search the owner made: its words, how much it found, and the result they opened, if any.
+    func reportSearch(_ words: String, results: Int, opened: String?) {
+        guard words.count > 1 else { return }
+        var event: [String: Any] = ["screen": tab.rawValue, "search": words, "results": results]
+        if let opened { event["opened"] = opened }
+        report([event])
+    }
+
+    /// Failing to send is never shown: it is only a count.
+    private func report(_ events: [[String: Any]]) {
+        guard signedIn else { return }
+        let body: [String: Any] = ["events": events, "device": "ios"]
+        Task {
+            do {
+                try await api.send("POST", "seen", body: body)
+            } catch {
+                // nothing to do: the next look is reported on its own
+            }
+        }
     }
 
     // Links

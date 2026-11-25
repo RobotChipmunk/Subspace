@@ -598,6 +598,35 @@ const MIGRATIONS: string[] = [
   // Chat from anywhere: a message the owner sends an agent says what was on their screen when
   // they wrote it ({ screen, type, id, title }), so "this" in the message means something.
   `ALTER TABLE posts ADD COLUMN IF NOT EXISTS about jsonb`,
+  // A task can be given to an agent (todos.assignee), and has a conversation of its own: posts
+  // whose todo_id names it (channel 'todo'), so what was asked and answered stays with the task
+  // and out of its notes.
+  `ALTER TABLE todos ADD COLUMN IF NOT EXISTS assignee text;
+   ALTER TABLE posts ADD COLUMN IF NOT EXISTS todo_id text;
+   CREATE INDEX IF NOT EXISTS posts_todo ON posts (todo_id, id) WHERE todo_id IS NOT NULL;
+   CREATE INDEX IF NOT EXISTS todos_assignee ON todos (assignee) WHERE assignee IS NOT NULL`,
+  // What the owner opens (core/seen.ts): which screen and which thing, for how long, and what was
+  // searched for. Never what was typed. And when the owner last opened each followed topic, so
+  // the Following screen can say what is new since then.
+  `CREATE TABLE IF NOT EXISTS owner_views (
+     id bigserial PRIMARY KEY,
+     ts timestamptz NOT NULL DEFAULT now(),
+     kind text NOT NULL,
+     screen text NOT NULL,
+     type text,
+     ref text,
+     title text,
+     seconds int,
+     query text,
+     results int,
+     opened text,
+     device text
+   );
+   CREATE INDEX IF NOT EXISTS owner_views_ts ON owner_views (ts);
+   ALTER TABLE trackers ADD COLUMN IF NOT EXISTS seen_at timestamptz`,
+  // An agent's standing brief: what the owner wants from it, in their words. It is given to the
+  // agent at the start of every session, so it holds without being repeated.
+  `ALTER TABLE agents ADD COLUMN IF NOT EXISTS brief text NOT NULL DEFAULT ''`,
 ];
 
 // The key of the lock that lets one server instance at a time change the schema.

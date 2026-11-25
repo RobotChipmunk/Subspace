@@ -1,6 +1,6 @@
 import { actorFromRequest, SESSION_COOKIE, signIn } from "@/lib/auth";
 import { restAllowed } from "@/lib/core/access";
-import { createAgent, issueToken, updateAgent } from "@/lib/core/agents";
+import { agentActivity, createAgent, issueToken, updateAgent } from "@/lib/core/agents";
 import { createGuest, issuePasscode, removeGuest } from "@/lib/core/guests";
 import { listGrants, revokeGrant } from "@/lib/core/oauth";
 import { archiveNode, breadcrumb, children, createNode, getNode, recentPages, updateNode } from "@/lib/core/context";
@@ -17,8 +17,9 @@ import { decide, ensureSystem, pendingProposals } from "@/lib/core/rules";
 import { configureRuntime, CONTEXTS, EFFORTS, MODELS } from "@/lib/core/runtime";
 import { createPost, createReply, deletePost, directActivity, getThread, listChat, listDirect, listFeed, sendChat, sendDirect, setBookmark } from "@/lib/core/posts";
 import { createPlanItem, deletePlanItem, listPlan, updatePlanItem } from "@/lib/core/plan";
-import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, updateTodo } from "@/lib/core/todos";
-import { archiveTracker, createTracker, getTracker, listTrackers, updateTracker } from "@/lib/core/trackers";
+import { BIN_DAYS, binnedTodos, createTodo, deleteTodo, folders, listTodos, openTodo, reorderTodos, restoreTodo, sayOnTodo, todoThread, updateTodo } from "@/lib/core/todos";
+import { archiveTracker, createTracker, getTracker, listTrackers, seenTracker, updateTracker } from "@/lib/core/trackers";
+import { clearSeen, recordSeen, seenKept } from "@/lib/core/seen";
 import { ApiError, defaultAgent, listAgents, listGuests, setSetting, timezone, type Agent } from "@/lib/core/util";
 
 /**
@@ -67,7 +68,11 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^todos\/([^/]+)\/restore$/, ({ actor }, id) => restoreTodo(actor, id)],
   // reading one task is the owner opening it: a rail module that points at it leaves the rail
   ["GET", /^todos\/([^/]+)$/, ({ actor }, id) => openTodo(actor, id)],
+  // give it to an agent with { assignee: <agent id or @handle> }, take it back with { assignee: null }
   ["PATCH", /^todos\/([^/]+)$/, ({ actor, body }, id) => updateTodo(actor, id, body)],
+  // a task's conversation: everything said on it, oldest first; POST { body } says something (whoever it is given to hears it)
+  ["GET", /^todos\/([^/]+)\/thread$/, async (_c, id) => ({ messages: await todoThread(id) })],
+  ["POST", /^todos\/([^/]+)\/thread$/, ({ actor, body }, id) => sayOnTodo(actor, id, body?.body)],
   // deleting moves a task to the bin; ?forever=1 removes one that is already there
   ["DELETE", /^todos\/([^/]+)$/, async ({ actor, url }, id) => (await deleteTodo(actor, id, url.searchParams.get("forever") === "1"), { ok: true })],
 
@@ -108,8 +113,10 @@ const routes: [string, RegExp, Handler][] = [
 
   ["GET", /^trackers$/, async () => ({ trackers: await listTrackers() })],
   ["POST", /^trackers$/, ({ actor, body }) => createTracker(actor, body)],
-  ["GET", /^trackers\/([^/]+)$/, async ({ url }, id) => {
+  // reading one topic is the owner opening it: what it had that was new is new no longer
+  ["GET", /^trackers\/([^/]+)$/, async ({ actor, url }, id) => {
     const tracker = await getTracker(id);
+    if (actor.kind === "human" && !url.searchParams.get("before")) await seenTracker(tracker.id);
     return { tracker, updates: await listFeed({ tracker: tracker.id, before: url.searchParams.get("before") ?? undefined, limit: 30 }) };
   }],
   ["PATCH", /^trackers\/([^/]+)$/, ({ actor, body }, id) => updateTracker(actor, id, body)],
@@ -133,6 +140,13 @@ const routes: [string, RegExp, Handler][] = [
   // the apps' own search covers everything the owner has: notes, pages, journal entries, links, tasks, posts, topics and ideas.
   // ?types= narrows it (the Context screen's own box asks for context,link).
   ["GET", /^search$/, ({ url }) => search({ query: url.searchParams.get("q") ?? "", types: url.searchParams.get("types")?.split(",").filter(Boolean) ?? [], limit: 20 })],
+
+  // What the owner opens: the apps report which screen and thing was in front and for how long, and what was searched for
+  // ({ events: [{ screen, type, id, title, seconds } | { screen, search, results, opened }], device }). Never what was typed.
+  // GET says how much is kept; DELETE clears it.
+  ["POST", /^seen$/, ({ actor, body }) => recordSeen(actor, body)],
+  ["GET", /^seen$/, ({ actor }) => ownerOnly(actor, () => seenKept())],
+  ["DELETE", /^seen$/, ({ actor }) => clearSeen(actor)],
 
   // Chat: what the owner writes from the chat button on any screen. { body, about } where about says what was on
   // screen ({ screen, type, id, title }). It goes to the first agent named in it, else the default agent; answers { message, to }.
@@ -174,6 +188,8 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^rules\/proposals\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => decide(actor, id, body?.approve === true))],
 
   ["POST", /^agents$/, ({ actor, body }) => ownerOnly(actor, () => createAgent(actor, body))],
+  // what each agent contributed over the last ?days (7): posts, replies, context written, tasks added, routines done, calls
+  ["GET", /^agents\/activity$/, ({ actor, url }) => ownerOnly(actor, () => agentActivity(url.searchParams.get("days")))],
   ["PATCH", /^agents\/([^/]+)$/, ({ actor, body }, id) => ownerOnly(actor, () => updateAgent(actor, id, body))],
   ["PATCH", /^agents\/([^/]+)\/runtime$/, ({ actor, body }, id) => ownerOnly(actor, () => configureRuntime(id, body))],
   ["GET", /^agents\/([^/]+)\/messages$/, ({ actor }, id) => ownerOnly(actor, async () => ({ messages: await listDirect(id) }))],

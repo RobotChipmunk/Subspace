@@ -15,6 +15,10 @@ export type Tracker = {
   created_by: string;
   archived: boolean;
   created_at: string;
+  /** When the owner last opened this topic; null when they never have. */
+  seen_at?: string | null;
+  /** How many updates it has had since then (since it was made, when never opened). Lists only. */
+  new_count?: number;
 };
 
 export const LABEL_MAX = 18;
@@ -26,7 +30,15 @@ function shortLabel(s: string) {
 }
 
 export async function listTrackers(): Promise<Tracker[]> {
-  return q<Tracker>("SELECT * FROM trackers WHERE NOT archived ORDER BY latest_at DESC NULLS LAST, created_at DESC");
+  return q<Tracker>(
+    `SELECT t.*, (SELECT count(*)::int FROM posts p WHERE p.tracker_id = t.id AND p.parent_id IS NULL AND p.created_at > COALESCE(t.seen_at, t.created_at)) AS new_count
+     FROM trackers t WHERE NOT t.archived ORDER BY t.latest_at DESC NULLS LAST, t.created_at DESC`,
+  );
+}
+
+/** The owner has the topic open in front of them: nothing in it is new any more. */
+export async function seenTracker(id: string) {
+  await q("UPDATE trackers SET seen_at = now() WHERE id = $1", [id]);
 }
 
 export async function getTracker(ref: string): Promise<Tracker> {

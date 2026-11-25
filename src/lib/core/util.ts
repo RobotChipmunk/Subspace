@@ -10,6 +10,8 @@ export type Agent = {
   /** human: the owner. agent: one of the owner's agents. guest: another person, who reaches only their shared tasks. */
   kind: "human" | "agent" | "guest";
   bio: string;
+  /** The owner's standing brief for an agent: what it is for, what it keeps current, how often it should look. */
+  brief?: string;
   roles: string[];
   cursor_seq: number;
   last_seen_at: string | null;
@@ -75,7 +77,7 @@ export function oneLine(s: string, max = 140): string {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
 }
 
-const AGENT_COLS = "id, handle, name, kind, bio, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token, passcode_hash IS NOT NULL AS has_passcode, runtime - 'key_enc' AS runtime, access";
+const AGENT_COLS = "id, handle, name, kind, bio, brief, roles, cursor_seq, last_seen_at, archived, created_at, token_hash IS NOT NULL AS has_token, passcode_hash IS NOT NULL AS has_passcode, runtime - 'key_enc' AS runtime, access";
 
 export async function listAgents(includeArchived = false): Promise<Agent[]> {
   return q<Agent>(`SELECT ${AGENT_COLS} FROM agents WHERE kind <> 'guest' ${includeArchived ? "" : "AND NOT archived"} ORDER BY kind DESC, created_at`);

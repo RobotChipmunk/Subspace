@@ -16,6 +16,8 @@ struct SearchSheet: View {
     /// The post being read in place, and its thread once it has arrived.
     @State private var reading: String? = nil
     @State private var threads: [String: [Post]] = [:]
+    /// The words already reported as searched for, so each search is told once.
+    @State private var told = ""
     @FocusState private var typing: Bool
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -49,6 +51,16 @@ struct SearchSheet: View {
         .background(Theme.bg.ignoresSafeArea())
         .task(id: trimmed) { await search() }
         .onAppear { typing = true }
+        .onDisappear { tell(nil) }
+    }
+
+    /// What was searched for, how much it found and whether a result was opened is kept (never the
+    /// results themselves): once for the words in the field, when a result is opened or the sheet closes.
+    private func tell(_ opened: String?) {
+        let words = trimmed
+        guard words.count > 1, !(told == words && opened == nil) else { return }
+        told = words
+        app.reportSearch(words, results: hits?.count ?? 0, opened: opened)
     }
 
     private var field: some View {
@@ -220,6 +232,7 @@ struct SearchSheet: View {
     }
 
     private func open(_ hit: ContextHit) {
+        tell(hit.id)
         switch kind(hit) {
         case "post":
             withAnimation(.ssSoft) { reading = reading == hit.id ? nil : hit.id }

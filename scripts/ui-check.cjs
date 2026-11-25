@@ -1872,8 +1872,18 @@ async function run(profile) {
     await settle(1200);
     await noSidewaysScroll("following");
     await shot("following");
+    // each topic says where it stands: what is new since it was last opened is counted on its row, in accent
+    const topics = async () => (await page.evaluate(() => fetch("/api/v1/trackers").then((r) => r.json()))).trackers;
+    const was = (await topics()).find((t) => t.title === "West Seattle news");
+    const row = page.locator("[data-standing]", { hasText: "West Seattle news" });
+    if (!(await row.count())) fail("following: a topic does not say where it stands");
+    if (was?.new_count > 0 && !(await row.locator("[data-new]").innerText().catch(() => "")).includes(`${was.new_count} new`)) fail(`following: a topic with ${was.new_count} new updates does not say so on its row`);
     await press(page.getByRole("button", { name: /West Seattle news/ }));
-    await settle(1100);
+    await settle(2600);
+    // opening it reads it
+    const now = (await topics()).find((t) => t.title === "West Seattle news");
+    if (!now?.seen_at || now.new_count !== 0) fail(`following: opening a topic did not count as reading it (${JSON.stringify({ seen_at: now?.seen_at, new_count: now?.new_count })})`);
+    if (await row.locator("[data-new]").count()) fail("following: a topic still says it has something new while it is open");
     const plus = page.getByRole("button", { name: "Agent", exact: true });
     await reachable(plus, "add agent button");
     await press(plus);
@@ -2123,6 +2133,44 @@ async function run(profile) {
     await noSidewaysScroll("agents realtime panel");
     await shot("agents-realtime");
   });
+  await step("an agent's standing brief and what it did", async () => {
+    await page.locator("main").evaluate((m) => m.scrollTo(0, 0));
+    const row = page.locator("div.glass", { hasText: "@scout" }).first();
+    await press(row.getByRole("button", { name: "Connect" }));
+    const did = row.locator("[data-did]");
+    await did.waitFor({ timeout: 6000 });
+    await settle(600);
+    await reachable(did, "what the agent did this week");
+    if (!/^(This week|Nothing this week)/.test(await did.innerText())) fail(`agents: the line on what an agent did does not read as a sentence ("${await did.innerText()}")`);
+    const brief = row.getByLabel("Standing brief for Scout");
+    await reachable(brief, "the standing brief field");
+    const text = `Watch robotics funding and keep the work notes current ${Date.now().toString(36).slice(-5)}`;
+    await typeIn(brief, text);
+    await press(did); // a tap elsewhere saves it
+    await settle(1200);
+    const saved = (await page.evaluate(() => fetch("/api/v1/me").then((r) => r.json()))).agents.find((a) => a.handle === "scout")?.brief;
+    if (saved !== text) fail(`agents: the standing brief was not saved ("${saved}")`);
+    await noSidewaysScroll("agents, standing brief");
+    await shot("agents-brief");
+    // as it was, for the next screen size
+    await brief.fill("");
+    await press(did);
+    await settle(900);
+    await press(row.getByRole("button", { name: "Done" }));
+    await settle(500);
+  });
+  await step("what is kept about how the app is used", async () => {
+    // the app has been reporting which screens were open throughout this run; the Agents screen says so, and can clear it
+    const kept = await page.evaluate(() => fetch("/api/v1/seen").then((r) => r.json()));
+    if (!(kept.count > 0)) fail("kept: nothing was recorded of the screens opened in this run");
+    const line = page.locator("[data-kept]");
+    await line.scrollIntoViewIfNeeded();
+    await reachable(line.locator("p"), "the line saying what is kept");
+    if (!/Nothing you type is kept/.test(await line.innerText())) fail("kept: the line does not say that nothing typed is kept");
+    await reachable(line.getByRole("button", { name: "Clear this record" }), "the way to clear what is kept");
+    await noSidewaysScroll("agents, what is kept");
+    await shot("agents-kept");
+  });
 
   // ---------- Search and chat, within reach on every screen ----------
   await step("search everything", async () => {
@@ -2207,6 +2255,45 @@ async function run(profile) {
     await page.keyboard.press("Escape");
     await settle(600);
     if (await panel.count()) fail("chat: Escape did not close the panel");
+  });
+  await step("task given to an agent, with a conversation", async () => {
+    // still on the task that search opened; which one it is, the chat message just sent says
+    const chat = await page.evaluate(() => fetch("/api/v1/chat").then((r) => r.json()));
+    const id = [...chat.messages].reverse().find((m) => m.about?.type === "todo")?.about.id;
+    const pill = page.locator("label[data-assignee]");
+    await pill.scrollIntoViewIfNeeded();
+    await reachable(pill, "the pill that gives a task to an agent");
+    await page.getByLabel("Give to").selectOption({ label: "Scout" });
+    await settle(1000);
+    if (!(await pill.innerText()).includes("Scout")) fail(`task: the pill does not name the agent the task was given to ("${await pill.innerText()}")`);
+    // the conversation is under the notes, and its field says who a message goes to
+    const box = page.locator("[data-thread] textarea");
+    await box.scrollIntoViewIfNeeded();
+    await reachable(box, "the task's message field");
+    if ((await box.getAttribute("placeholder")) !== "Message Scout") fail(`task: the message field does not name the agent the task is given to ("${await box.getAttribute("placeholder")}")`);
+    const text = `Is the twelfth still right ${Date.now().toString(36).slice(-5)}`;
+    await typeIn(box, text);
+    await page.keyboard.press("Enter");
+    await page.locator("[data-thread] [data-bubble]").getByText(text).waitFor({ timeout: 5000 });
+    if (await box.inputValue()) fail("task: the message field was not cleared after sending");
+    await settle(500);
+    const kept = await page.evaluate(async (id) => ({
+      thread: await fetch(`/api/v1/todos/${id}/thread`).then((r) => r.json()),
+      all: await fetch("/api/v1/todos?view=all").then((r) => r.json()),
+      me: await fetch("/api/v1/me").then((r) => r.json()),
+      feed: await fetch("/api/v1/feed?channel=feed").then((r) => r.json()),
+      chat: await fetch("/api/v1/chat").then((r) => r.json()),
+    }), id);
+    const scout = kept.me.agents.find((a) => a.handle === "scout");
+    if (kept.thread.messages?.at(-1)?.body !== text) fail("task: what was said is not in the task's conversation");
+    if (kept.all.todos.find((t) => t.id === id)?.assignee !== scout?.id) fail("task: the task is not given to the agent chosen");
+    if (kept.feed.posts.some((p) => p.body === text) || kept.chat.messages.some((m) => m.body === text)) fail("task: what was said on a task showed in the feed or in chat");
+    await noSidewaysScroll("task conversation");
+    await shot("todo-conversation");
+    // as it was, for the next screen size
+    await page.getByLabel("Give to").selectOption("");
+    await settle(800);
+    if ((await pill.innerText()).trim() !== "Give to") fail("task: taking the task back did not clear the pill");
   });
 
   await browser.close();

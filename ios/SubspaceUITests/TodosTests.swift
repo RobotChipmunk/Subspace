@@ -181,6 +181,48 @@ final class TodosTests: SubspaceTestCase {
         waitToVanish(app.buttons["Close \(renamed)"], "the removed priority")
     }
 
+    /// A task can be given to an agent, and has a conversation of its own under its notes: what
+    /// the owner writes there goes to that agent.
+    func testATaskGivenToAnAgentHasAConversation() {
+        let stamp = Int.random(in: 1000...9999)
+        let title = "Check the lock-up date \(stamp)"
+        let id = Self.request("POST", "todos", ["title": title, "view": "today"])?["id"] as? String
+        XCTAssertNotNil(id, "The test's task could not be made on the server")
+        launchSignedIn()
+        go("todos")
+        folder("today").tap()
+        expect(row(title), "the task in Today").tap()
+
+        // "Give to" follows the date and repeat pills. Choosing an agent names it on the pill.
+        let give = expect(element("todos.detail.giveTo"), "the Give to pill on the task")
+        XCTAssertEqual(give.label, "Give to. Now: Nobody")
+        give.tap()
+        expect(app.buttons["Scout"], "Scout among the agents a task can be given to").tap()
+        wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Give to. Now: Scout"), object: give)], timeout: 10)
+
+        // The conversation is under the notes. Its field names who the message goes to.
+        let field = element("todos.thread.message")
+        bringIntoView(field)
+        expect(field, "the task's message field")
+        let words = "Is the twelfth still right \(stamp)"
+        enter(words, into: field, "the task's message field")
+        expect(app.buttons["todos.thread.send"], "the send button, once there is something to send").tap()
+        expect(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'todos.thread.bubble.' AND label CONTAINS %@", words)).firstMatch, "the message, in the task's conversation")
+        shot("17-todos-conversation")
+
+        // What the server kept: who it is given to, and what was said.
+        if let id {
+            let scout = (Self.request("GET", "me")?["agents"] as? [[String: Any]] ?? []).first { $0["handle"] as? String == "scout" }?["id"] as? String
+            let rows = Self.request("GET", "todos?view=today")?["todos"] as? [[String: Any]] ?? []
+            XCTAssertEqual(rows.first { $0["id"] as? String == id }?["assignee"] as? String, scout, "The task should be given to Scout")
+            let said = Self.request("GET", "todos/\(id)/thread")?["messages"] as? [[String: Any]] ?? []
+            XCTAssertEqual(said.last?["body"] as? String, words, "The message should be in the task's conversation")
+            // Gone for good, so the next test finds the list as it was (a second run of this test included).
+            Self.request("DELETE", "todos/\(id)")
+            Self.request("DELETE", "todos/\(id)?forever=1")
+        }
+    }
+
     func testAddATagToATaskAndTakeItOff() {
         launchSignedIn()
         go("todos")

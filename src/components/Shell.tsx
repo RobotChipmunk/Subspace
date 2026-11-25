@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, spring, useDirectUnread, useMe } from "@/lib/client";
+import { useSeenRecorder } from "@/lib/seen";
 import { DockButton, DockPanels, type DockPanel } from "./Dock";
 import { Rail, useRail } from "./Rail";
 
@@ -30,6 +31,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const { me } = useMe();
   const rail = useRail();
   const direct = useDirectUnread();
+  // which screen and thing is in front, and for how long: what lets the app be improved from how it is used
+  useSeenRecorder();
   const [commentsOpen, setComments] = useState(false);
   // Search and chat are within reach on every screen; one of them is open at a time.
   const [panel, setPanel] = useState<DockPanel>(null);

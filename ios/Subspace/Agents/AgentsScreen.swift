@@ -25,6 +25,7 @@ struct AgentsScreen: View {
                 agentsNote
                 peopleHeader
                 peopleRows
+                AgentsKept()
                 AgentsSignOut()
             }
             .padding(.horizontal, 16)
@@ -304,5 +305,57 @@ struct AgentsSignOut: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 40)
+    }
+}
+
+struct AgentsKeptReply: Decodable {
+    var count: Int
+    var since: String?
+}
+
+/// What the app keeps about how the owner uses it (which screens and things they open, what they
+/// search for), said plainly at the foot of the screen, with the way to clear it.
+struct AgentsKept: View {
+    @Environment(AppModel.self) private var app
+    @State private var kept: AgentsKeptReply? = nil
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if let kept {
+                Text(line(kept))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.ink3)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("agents.kept")
+                if kept.count > 0 {
+                    ConfirmDelete(label: "Clear this record", confirm: "Clear", size: 15) {
+                        try? await app.api.send("DELETE", "seen")
+                        await load()
+                    }
+                    .accessibilityIdentifier("agents.kept.clear")
+                }
+            }
+        }
+        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 48)
+        .task { await load() }
+        .onChange(of: app.tab) { _, now in
+            if now == .agents { Task { await load() } }
+        }
+    }
+
+    private func line(_ kept: AgentsKeptReply) -> String {
+        var text = "Subspace keeps which screens and things you open and what you search for, so your agents can tell what is useful and suggest changes. Nothing you type is kept."
+        if kept.count > 0, let at = parseDate(kept.since) {
+            let day = at.formatted(.dateTime.month(.abbreviated).day())
+            text += " \(kept.count.formatted()) \(kept.count == 1 ? "look" : "looks") since \(day)."
+        }
+        return text
+    }
+
+    private func load() async {
+        if let reply: AgentsKeptReply = try? await app.api.get("seen") { kept = reply }
     }
 }
